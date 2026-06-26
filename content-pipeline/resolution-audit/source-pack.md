@@ -20,8 +20,9 @@ The current product story:
 - The system groups repeated questions from closed ticket history.
 - The Snapshot shows the top repeat question, estimated cost exposure, and one
   answer backed by agent resolution evidence when that evidence exists.
-- The Snapshot also surfaces at least one high-cost unresolved gap when the
-  tickets do not contain a proven answer.
+- When the export contains enough repeated-question signal, the Snapshot can
+  surface a high-cost unresolved gap where the tickets do not contain a proven
+  answer.
 - The full audit expands that pattern across the ranked backlog.
 - The report separates ready-to-review documentation drafts from product,
   policy, or process gaps.
@@ -88,8 +89,9 @@ Avoid:
 
 Use or adapt these:
 
-- "If customers keep asking the same question, that means the answer is not
-  where customers are looking."
+- "If customers keep asking the same question, that means the answer may be
+  missing, buried where customers are not looking, or blocked by a product,
+  policy, or process gap."
 - "Instead of guessing, we audit."
 - "The fix may already be sitting in your old tickets."
 - "The expensive repeat is not always a support problem. Sometimes it is a
