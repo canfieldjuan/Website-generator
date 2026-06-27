@@ -4,9 +4,10 @@ Use these in Open WebUI after pasting the current source files:
 
 1. `source-pack.md`
 2. `claims-guard.md`
-3. the relevant angle from `angles.md`
-4. the Shared Context Block from this file
-5. one channel contract from this file
+3. `plain-talk.md` when the draft should sound more human
+4. the relevant angle from `angles.md`
+5. the Shared Context Block from this file
+6. one channel contract from this file
 
 Do not ask the model to ignore the guard. If a draft conflicts with the guard,
 revise the draft or discard it.
@@ -32,6 +33,8 @@ The draft must:
 - treat product, policy, and process gaps as possible outcomes
 - avoid raw customer data, names, emails, phone numbers, screenshots, or ticket
   excerpts
+- use Plain Talk when `plain-talk.md` is pasted: short sentences, common words,
+  concrete people and actions, and no corporate filler
 
 The draft must not claim:
 - guaranteed savings, guaranteed rankings, ticket-volume reduction, or fixed
@@ -41,7 +44,8 @@ The draft must not claim:
 - that the audit replaces support agents
 
 Before drafting, restate the channel, audience, CTA posture, and the claim risk
-you need to watch.
+you need to watch. If Plain Talk is in scope, also name the reading target and
+the robotic language you need to avoid.
 ```
 
 ## Contract 1: LinkedIn POV Post
@@ -72,7 +76,9 @@ Requirements:
 Return:
 1. One primary post, 120-220 words.
 2. Three alternate hooks.
-3. A claim-risk checklist with pass/fail notes.
+3. A Plain Talk pass: estimated reading ease target, phrases you simplified,
+   and any long sentence you split.
+4. A claim-risk checklist with pass/fail notes.
 ```
 
 ## Contract 2: Reddit-Style Discussion Post
@@ -100,7 +106,9 @@ Return:
 1. One discussion post, 100-180 words.
 2. Two lower-pitch variants.
 3. One comment I can leave if someone asks what I am building.
-4. A claim-risk checklist with pass/fail notes.
+4. A Plain Talk pass: estimated reading ease target, phrases you simplified,
+   and any long sentence you split.
+5. A claim-risk checklist with pass/fail notes.
 ```
 
 ## Contract 3: Social Reply
@@ -131,7 +139,9 @@ Return:
 1. One public reply under 120 words.
 2. One warmer DM version under 160 words.
 3. One safer no-link version.
-4. A claim-risk checklist with pass/fail notes.
+4. A Plain Talk pass: phrases you simplified and any sentence that still sounds
+   corporate.
+5. A claim-risk checklist with pass/fail notes.
 ```
 
 ## Contract 4: Blog Outline
@@ -166,7 +176,9 @@ Return:
 2. A detailed outline with H2s and bullet points.
 3. Three concrete examples or analogies that are safe to use.
 4. A short intro draft under 180 words.
-5. A claim-risk checklist with pass/fail notes.
+5. A Plain Talk pass for the intro: estimated reading ease target, phrases you
+   simplified, and any long sentence you split.
+6. A claim-risk checklist with pass/fail notes.
 ```
 
 ## Contract 5: Feedback Ask
@@ -196,7 +208,9 @@ Return:
 1. One concise feedback post.
 2. Three sharper versions of the actual question.
 3. One follow-up reply for people who say "yes, send it."
-4. A claim-risk checklist with pass/fail notes.
+4. A Plain Talk pass: phrases you simplified and any sentence that still sounds
+   corporate.
+5. A claim-risk checklist with pass/fail notes.
 ```
 
 ## Contract 6: Draft Self-Check
@@ -221,4 +235,41 @@ Return:
 Be strict. A draft that implies guaranteed savings, fixed deflection,
 auto-publishing, automatic ticket answering, or certain ownership should not
 pass.
+```
+
+## Contract 7: Plain Talk Rewrite
+
+Run this when a draft is safe but sounds robotic, polished, or corporate.
+
+```text
+Rewrite the draft below in Plain Talk.
+
+Draft:
+[paste draft]
+
+Inputs:
+- Format: [LinkedIn / Reddit / reply / sales DM / blog intro / technical]
+- Target reader: [founder / support lead / CX lead / operator / product lead]
+- Reading target: [default / easier / more technical]
+- Words or phrases to preserve: [optional]
+
+Requirements:
+- Keep the source pack and claims guard intact.
+- Do not add savings, ticket-reduction, ownership, privacy, or automation
+  claims.
+- Use short sentences and common words.
+- Put people before systems when true.
+- Replace corporate nouns with actions.
+- Keep one idea per sentence.
+- Preserve uncertainty language: may, appears, estimated, probable, when
+  evidence exists.
+- Make the draft sound like something a person could say out loud.
+
+Return:
+1. The rewritten draft.
+2. A before/after list of up to five phrases you simplified.
+3. Any sentence you split because it was too long.
+4. Claim-risk notes for any qualifier you preserved.
+5. A one-line score estimate: likely Flesch range, likely human-interest risk,
+   and whether to run `score_plain_talk.py`.
 ```
