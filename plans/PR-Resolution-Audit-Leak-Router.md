@@ -63,6 +63,9 @@ plan, and usage inputs.
   explicit.
 - No savings or avoided-hire promises. The leak router supports estimated
   exposure and investigation language only.
+- Exact vendor prices remain source-date snapshots. The docs tell operators to
+  prefer billing-model language and re-check the live source page before citing a
+  specific dollar figure.
 
 ## Deferred
 
@@ -81,6 +84,9 @@ plan, and usage inputs.
 - `rg -n "guaranteed savings|guaranteed ticket|will save|will reduce|avoids? a support hire|proves? waste|deflects? [0-9]+%" content-pipeline/resolution-audit/leak-index.md content-pipeline/resolution-audit/frames.md content-pipeline/resolution-audit/evidence.jsonl`
   - Expected: no matches.
   - Result: no matches.
+- `rg -n 'source-date snapshots|re-open the `source_url`|re-check the live source' content-pipeline/resolution-audit/README.md content-pipeline/resolution-audit/leak-index.md`
+  - Expected: README and leak-index both instruct operators to verify stale
+    exact prices before publishing.
 - `git diff --check -- content-pipeline/resolution-audit/leak-index.md content-pipeline/resolution-audit/evidence.jsonl content-pipeline/resolution-audit/frames.md content-pipeline/resolution-audit/README.md plans/PR-Resolution-Audit-Leak-Router.md`
 - `bash scripts/local_pr_review.sh --allow-dirty`
 
@@ -94,5 +100,5 @@ untracked workspace files are cleaned or stashed.
 
 ## Estimated diff size
 
-Actual working diff size: 5 files, +541 / -16. This is over the soft cap for
+Actual working diff size: 5 files, +551 / -16. This is over the soft cap for
 the evidence-plus-frame safety reason named in **Why this slice exists**.

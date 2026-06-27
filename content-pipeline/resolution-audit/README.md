@@ -20,7 +20,9 @@ readability-score warnings before posting.
 Use `leak-index.md` when a draft needs a vendor-cost or billing-mechanic angle.
 It is a router, not evidence by itself. Pick one leak tag, retrieve matching
 rows from `evidence.jsonl`, then use the matching section in `frames.md` for
-safe labels, unsafe language, and fallback wording.
+safe labels, unsafe language, and fallback wording. Treat exact vendor prices as
+source-date snapshots: prefer the durable billing model in public copy and
+re-check the live source page before publishing a specific dollar figure.
 
 ## Operator Flow
 

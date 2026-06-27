@@ -38,6 +38,10 @@ Use vendor evidence for:
 - plan-limit or add-on mechanics
 - why a leak category is plausible
 
+Exact vendor prices are point-in-time facts from each card's `source_date`.
+Prefer billing-model language in published copy, and re-open the `source_url`
+before citing a specific dollar figure.
+
 Use customer audit evidence for:
 
 - actual repeated-question count
