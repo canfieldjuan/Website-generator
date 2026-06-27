@@ -37,6 +37,8 @@ parse time. When `--leak-tag` is present, the bundler:
 - extracts the matching `frames.md` section;
 - adds an operator instruction that vendor evidence describes billing mechanics,
   not customer waste or guaranteed savings.
+- emits an explicit `## Selected Leak Context` wrapper so the safety instruction
+  keys on a section that actually exists.
 
 The output remains plain Markdown so it stays pasteable into Open WebUI.
 
@@ -45,6 +47,8 @@ The output remains plain Markdown so it stays pasteable into Open WebUI.
 - No automatic live-price revalidation inside the bundler. Operators still run
   `validate_evidence.py` and re-open live pages before publishing exact prices.
 - No change to existing channel or angle behavior when `--leak-tag` is omitted.
+- The README's default bundle command remains leak-free; the leak-tag example
+  lives only in the conditional vendor-cost step.
 - Evidence rows stay JSONL-shaped so they can be copied back into tools or future
   verification packets without lossy rewriting.
 
@@ -60,11 +64,14 @@ The output remains plain Markdown so it stays pasteable into Open WebUI.
 - `python content-pipeline/resolution-audit/bundle_prompt.py --help`
   - Result: `--leak-tag` appears with the 10 router tags.
 - `python content-pipeline/resolution-audit/bundle_prompt.py --channel linkedin --angle diagnostic-not-dashboard --leak-tag repeat_resolution >/tmp/resolution-audit-leak-bundle.md`
-- `rg -n "Selected Leak Router|Selected Leak Evidence|Selected Leak Frame|intercom_fin_resolution_pricing_2026_06|Repeat Resolution Spend|Never turn a vendor evidence card" /tmp/resolution-audit-leak-bundle.md`
+- `rg -n "Selected Leak Context|Selected Leak Router|Selected Leak Evidence|Selected Leak Frame|intercom_fin_resolution_pricing_2026_06|Repeat Resolution Spend|Never turn a vendor evidence card" /tmp/resolution-audit-leak-bundle.md`
   - Result: matched the selected router, evidence, frame, Intercom evidence card,
     repeat-resolution label, and claim boundary.
 - `! rg -n '"tag":"ai_attempt_waste"' /tmp/resolution-audit-leak-bundle.md`
   - Result: no unrelated `ai_attempt_waste` evidence row was bundled.
+- `python content-pipeline/resolution-audit/bundle_prompt.py --channel linkedin --angle diagnostic-not-dashboard >/tmp/resolution-audit-default-bundle.md`
+- `! rg -n "Selected Leak Context|Selected Leak Evidence|intercom_fin_resolution_pricing_2026_06|vendor billing-mechanic evidence" /tmp/resolution-audit-default-bundle.md`
+  - Result: default bundle stayed leak-free.
 - `python -m py_compile content-pipeline/resolution-audit/bundle_prompt.py`
 - `git diff --check -- content-pipeline/resolution-audit/bundle_prompt.py content-pipeline/resolution-audit/README.md plans/PR-Resolution-Audit-Leak-Bundler.md`
 - `bash scripts/local_pr_review.sh --allow-dirty`
@@ -74,4 +81,4 @@ untracked workspace files are cleaned or stashed.
 
 ## Estimated diff size
 
-Actual working diff size: 3 files, +160 / -5.
+Actual working diff size: 3 files, +182 / -6.

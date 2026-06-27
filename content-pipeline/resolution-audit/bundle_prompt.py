@@ -99,6 +99,8 @@ def build_leak_context(tag: str) -> str:
     frame = extract_leak_frame(frames, tag)
     return "\n\n".join(
         [
+            "## Selected Leak Context",
+            "Use this section only for vendor billing-mechanic evidence. Do not turn it into customer waste, guaranteed savings, or blame language.",
             "## Selected Leak Router",
             f"Selected tag: `{tag}`",
             router_row,
@@ -143,6 +145,17 @@ def build_bundle(channel: str, angle: str | None, leak_tag: str | None) -> str:
     if leak_tag:
         sections.extend(["", build_leak_context(leak_tag)])
 
+    operator_instructions = [
+        "Fill in the Inputs list inside the selected channel contract above, then draft using that contract.",
+    ]
+    if leak_tag:
+        operator_instructions.append(
+            "Use Selected Leak Context only as vendor billing-mechanic evidence. Do not turn it into customer waste, guaranteed savings, or blame language."
+        )
+    operator_instructions.append(
+        "After drafting, run Contract 6: Draft Self-Check from `prompt-contracts.md` before posting."
+    )
+
     sections.extend(
         [
             "",
@@ -152,9 +165,7 @@ def build_bundle(channel: str, angle: str | None, leak_tag: str | None) -> str:
             "",
             "## Operator Instruction",
             "",
-            "Fill in the Inputs list inside the selected channel contract above, then draft using that contract.",
-            "If Selected Leak Context is present, use it only as vendor billing-mechanic evidence. Do not turn it into customer waste, guaranteed savings, or blame language.",
-            "After drafting, run Contract 6: Draft Self-Check from `prompt-contracts.md` before posting.",
+            *operator_instructions,
         ]
     )
 

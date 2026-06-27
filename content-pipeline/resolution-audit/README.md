@@ -39,8 +39,7 @@ stale.
    ```bash
    python content-pipeline/resolution-audit/bundle_prompt.py \
        --channel linkedin \
-       --angle diagnostic-not-dashboard \
-       --leak-tag repeat_resolution
+       --angle diagnostic-not-dashboard
    ```
 
 3. Paste the bundle into Open WebUI and fill in the Inputs list inside the
@@ -53,6 +52,10 @@ stale.
 
    ```bash
    python content-pipeline/resolution-audit/validate_evidence.py
+   python content-pipeline/resolution-audit/bundle_prompt.py \
+       --channel linkedin \
+       --angle diagnostic-not-dashboard \
+       --leak-tag repeat_resolution
    ```
 
 6. Generate the draft.
