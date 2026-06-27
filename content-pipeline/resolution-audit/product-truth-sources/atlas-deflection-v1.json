@@ -1,16 +1,21 @@
 {
-  "generated_at": "2026-06-27",
+  "source": {
+    "kind": "atlas_contract_snapshot",
+    "captured_at": "2026-06-27",
+    "atlas_commit": "45a1164462fce9c37557f29756a0c1ca006f53d3",
+    "atlas_paths": [
+      "extracted_content_pipeline/faq_deflection_report.py",
+      "extracted_content_pipeline/api/control_surfaces.py",
+      "atlas_brain/deflection_pdf_renderer.py",
+      "atlas_brain/mcp/content_ops_deflection_readonly_server.py"
+    ],
+    "atlas_functions": [
+      "deflection_report_model_contract_shape",
+      "scrub_deflection_report_payload",
+      "render_deflection_full_report_pdf"
+    ]
+  },
   "fields": {
-    "verifier_channels": {
-      "value": [
-        "blog",
-        "feedback",
-        "linkedin",
-        "reddit",
-        "reply"
-      ],
-      "source": "derived:bundle_prompt.CHANNEL_CONTRACTS"
-    },
     "shipped_report_fields": {
       "value": [
         "top_repeat",
@@ -40,10 +45,6 @@
       },
       "source": "atlas_contract_snapshot:deflection.v1",
       "verify_against": "ATLAS report model, storage scrub, hosted control surface, and PDF renderer"
-    },
-    "evidence_freshness_days": {
-      "value": 90,
-      "source": "policy"
     }
   }
 }

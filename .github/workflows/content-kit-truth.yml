@@ -15,5 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Check Resolution Audit product truth sync
+        run: python content-pipeline/resolution-audit/sync_product_truth.py --check
       - name: Audit Resolution Audit content kit truth
         run: python content-pipeline/resolution-audit/audit_content_kit_truth.py
