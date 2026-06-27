@@ -33,9 +33,9 @@ Flag:
 - raw customer data, names, emails, phone numbers, screenshots, or ticket
   excerpts
 - answer/draft claims without evidence language
-- report-shape explanations that present owner routing as shipped without
-  current product output or real audit data
-- target report-shape explanations that omit owner routing
+- report-shape explanations that present probable owner routing as certain
+  ownership
+- report-shape explanations that omit owner routing
 - certain ownership claims
 - privacy, retention, security, or compliance claims not supplied by the user
 

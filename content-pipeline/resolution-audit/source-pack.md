@@ -104,8 +104,8 @@ Use or adapt these:
 Safe public posture:
 
 - We do not need PII to find repeated questions.
-- Browser and backend controls reduce supported PII exposure before report
-  output.
+- ATLAS backend report-payload controls reduce supported PII exposure before
+  report output.
 - Do not include customer names, raw ticket text, emails, phone numbers, or
   screenshots in public examples.
 - Public examples should be anonymized and aggregate.

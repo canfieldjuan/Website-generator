@@ -41,7 +41,7 @@ Simplify the sentence around the term instead of replacing the term.
 - Replace corporate nouns with actions.
 - Preserve uncertainty language: may, appears, estimated, probable, when
   evidence exists.
-- Preserve owner-routing qualifiers if the draft explains the target report
+- Preserve owner-routing qualifiers if the draft explains the current report
   shape or a data-supported report output.
 
 ## Prefer

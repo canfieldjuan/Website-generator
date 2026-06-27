@@ -7,7 +7,7 @@ Use this skill to draft content for The Resolution Audit.
 The Resolution Audit turns repeated support questions into a source-backed
 action queue.
 
-The target report-shape pattern:
+The current report-shape pattern:
 
 - ranked repeated issues
 - estimated cost exposure
@@ -16,7 +16,7 @@ The target report-shape pattern:
 - content output when evidence supports a draft
 - no proven answer when evidence is missing
 - probable owner lane for the person or department that may need to review the
-  cause, when the current report output supports that field
+  cause
 - next review action
 
 ## Before/Now Frame
@@ -26,14 +26,14 @@ Use this when explaining the pivot:
 Before: ranked repeat list, cost exposure, drafted FAQs or answers, customer
 wording, and unresolved/no-proven-answer gaps.
 
-Target: all of that, plus probable owner routing for the person or department
-that may need to review the root cause when the report output supports it.
+Now: all of that, plus probable owner routing for the person or department
+that may need to review the root cause.
 
 ## Content Rules
 
 - open with a concrete support-queue observation
 - explain the mechanism before the opinion
-- preserve owner routing only as target-pattern or data-supported language
+- preserve owner routing as probable and review-oriented language
 - treat no proven answer as useful evidence
 - qualify cost as estimated exposure
 - qualify ownership as probable or investigatory

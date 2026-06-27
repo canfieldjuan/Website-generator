@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -12,8 +13,11 @@ import re
 import sys
 from typing import Any
 
+from sync_product_truth import load_product_source, sync_derived_fields
+
 
 KIT_DIR = Path(__file__).resolve().parent
+PRODUCT_SOURCE_RELATIVE = Path("product-truth-sources/atlas-deflection-v1.json")
 EXPLICIT_CHANNEL_LINE_RE = re.compile(r"\bchannel\b.*(?:`channel`|such as|linkedin|reddit|reply|blog|feedback)", re.I)
 TOKEN_RE = re.compile(r"\b[a-z][a-z0-9_-]*\b", re.I)
 CURRENT_RE = re.compile(r"\b(current|currently|shipped|live)\b", re.I)
@@ -203,6 +207,14 @@ def check_manifest(manifest: dict[str, Any], kit_dir: Path) -> list[str]:
     return findings
 
 
+def check_manifest_sources(manifest: dict[str, Any], kit_dir: Path) -> list[str]:
+    candidate = copy.deepcopy(manifest)
+    product_source = load_product_source(kit_dir / PRODUCT_SOURCE_RELATIVE)
+    if sync_derived_fields(candidate, product_source):
+        return [_blocking("product-truth.json is stale; run sync_product_truth.py")]
+    return []
+
+
 def _channel_candidates(line: str, allowed_channels: set[str]) -> set[str]:
     tokens = {token.lower() for token in TOKEN_RE.findall(line)}
     candidates = tokens - CHANNEL_LINE_STOPWORDS
@@ -345,6 +357,7 @@ def run_audit(kit_dir: Path, manifest_path: Path) -> tuple[list[str], list[str]]
     blocking: list[str] = []
     warnings: list[str] = []
     blocking.extend(check_manifest(manifest, kit_dir))
+    blocking.extend(check_manifest_sources(manifest, kit_dir))
     blocking.extend(check_channel_lines(kit_dir, allowed_channels))
     warnings.extend(check_target_fields_current(kit_dir, target_fields))
     blocking.extend(check_pass_semantics(kit_dir))

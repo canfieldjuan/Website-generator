@@ -26,18 +26,18 @@ re-check the live source page before publishing a specific dollar figure.
 Run `validate_evidence.py` before using those cards when the source dates may be
 stale.
 
-Use `report-shape-example.md` when the model needs a concrete target pattern
-for Snapshot or full-audit structure. It is a fictional example, not proof of a
-shipped field. It shows the fields models may use when real audit data supports
-them: ranked repeated issue, estimated cost exposure, resolution evidence,
-customer wording, content output, no-proven-answer gaps, probable owner lane,
-and next review action.
+Use `report-shape-example.md` when the model needs a concrete current pattern
+for Snapshot or full-audit structure. It is a fictional example, not
+customer-specific proof. It shows the fields models may use when real audit
+data supports them: ranked repeated issue, estimated cost exposure, resolution
+evidence, customer wording, content output, no-proven-answer gaps, probable
+owner lane, and next review action.
 
 Use `product-truth.json` when a draft or tool needs current product facts:
 accepted verifier channels, shipped report fields, target report fields, claim
 flags, and freshness policy. Same-repo facts are derived with
-`sync_product_truth.py`; curated product facts are provisional until slice 3
-sources them from content-ops or an ATLAS contract.
+`sync_product_truth.py`; ATLAS-backed product facts come from the committed
+`product-truth-sources/atlas-deflection-v1.json` contract snapshot.
 
 Use `open-webui-skills/` when you want reusable Open WebUI Skills instead of
 one-off prompts. The skills cover claim guarding, content writing, Plain Talk
@@ -145,7 +145,7 @@ Use this order when two files disagree:
 3. `source-pack.md`.
 4. `claims-guard.md`.
 5. `creative-manual.md` for creative range, examples, and channel patterns.
-6. `report-shape-example.md` for the target Snapshot/full-audit shape pattern.
+6. `report-shape-example.md` for the current Snapshot/full-audit shape pattern.
 7. `plain-talk.md` for voice and readability.
 8. `leak-index.md`, `evidence.jsonl`, and `frames.md` for vendor-cost leak
    routing.
@@ -168,7 +168,7 @@ help-center updates, or guaranteed savings, do not use that claim.
   platform.
 - Adds a creative manual for richer content primitives, channel patterns, and
   image prompt direction.
-- Adds a report-shape example for target Snapshot and owner-lane structure.
+- Adds a report-shape example for current Snapshot and owner-lane structure.
 - Adds a product-truth manifest for explicit product facts.
 - Adds a Plain Talk guide and readability checker for less robotic drafts.
 - Adds a leak router, evidence cards, and safe framing for vendor-cost angles.

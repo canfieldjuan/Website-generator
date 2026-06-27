@@ -17,8 +17,8 @@ claim boundaries.
   evidence.
 - It separates documentation drafts from product, billing, policy, process, or
   support-ops gaps.
-- When owner-lane data or a target report-shape prompt is supplied, it frames
-  repeated issues as probable owner lanes for review, not certain assignments.
+- Owner-lane routing is shipped as a report-model field, and it frames repeated
+  issues as probable owner lanes for review, not certain assignments.
 - The Snapshot helps decide whether the full audit is worth reviewing.
 
 ## Required Qualifiers
@@ -42,7 +42,6 @@ claim boundaries.
 - automatic ticket answering
 - that the audit replaces agents
 - that a specific team certainly owns an issue
-- that owner-lane routing has shipped unless current product output confirms it
 - that every repeated issue should become an FAQ
 - that customer data proves a benchmark unless a verified benchmark is supplied
 
