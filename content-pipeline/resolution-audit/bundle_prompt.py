@@ -90,6 +90,11 @@ def render_jsonl(rows: list[dict[str, object]]) -> str:
     return "\n".join(json.dumps(row, separators=(",", ":"), sort_keys=True) for row in rows)
 
 
+def render_product_truth() -> str:
+    manifest = json.loads((ROOT / "product-truth.json").read_text(encoding="utf-8"))
+    return json.dumps(manifest, indent=2, sort_keys=True)
+
+
 def build_leak_context(tag: str) -> str:
     leak_index = read_file("leak-index.md")
     frames = read_file("frames.md")
@@ -123,6 +128,7 @@ def build_bundle(
     channel: str,
     angle: str | None,
     leak_tag: str | None,
+    include_product_truth: bool,
     include_plain_talk: bool,
     include_report_shape: bool,
 ) -> str:
@@ -143,6 +149,9 @@ def build_bundle(
         render_file("Claims Guard", claims_guard),
     ]
 
+    if include_product_truth:
+        sections.extend(["", render_file("Product Truth Manifest", render_product_truth())])
+
     if include_plain_talk:
         sections.extend(["", render_file("Plain Talk Guide", read_file("plain-talk.md"))])
 
@@ -160,6 +169,10 @@ def build_bundle(
     operator_instructions = [
         "Fill in the Inputs list inside the selected channel contract above, then draft using that contract.",
     ]
+    if include_product_truth:
+        operator_instructions.append(
+            "The product truth manifest is authoritative. If a guide or example conflicts with it, the manifest wins."
+        )
     if include_plain_talk:
         operator_instructions.append(
             "Plain Talk is voice guidance. The claims guard still wins if readability, rhythm, or sharper phrasing would weaken a qualifier."
@@ -213,6 +226,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional leak-router tag to include with matching evidence and frame context.",
     )
     parser.add_argument(
+        "--include-product-truth",
+        action="store_true",
+        help="Include product-truth.json and an explicit source-precedence instruction.",
+    )
+    parser.add_argument(
         "--include-plain-talk",
         action="store_true",
         help="Include the Plain Talk voice and readability guide.",
@@ -236,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         args.channel,
         args.angle,
         args.leak_tag,
+        args.include_product_truth,
         args.include_plain_talk,
         args.include_report_shape,
     )
