@@ -75,6 +75,8 @@ It is an editorial check, not a formal test suite or SEO guarantee.
 - `printf 'Operational visibility enables cross-functional optimization of recurring support interactions.' >/tmp/plain-talk-corporate.txt`
 - `python content-pipeline/resolution-audit/score_plain_talk.py /tmp/plain-talk-corporate.txt`
 - `python content-pipeline/resolution-audit/score_plain_talk.py content-pipeline/resolution-audit/plain-talk.md --target blog`
+- `python - <<'PY'` scorer probe for soft-wrapped Markdown, consonant-le words, and pronoun contractions
+- `rg -n "Run the final draft through the .*self-check|Plain Talk rewrite contract" content-pipeline/resolution-audit/README.md`
 - `python -m py_compile content-pipeline/resolution-audit/score_plain_talk.py`
 - `git diff --check -- content-pipeline/resolution-audit/plain-talk.md content-pipeline/resolution-audit/score_plain_talk.py content-pipeline/resolution-audit/prompt-contracts.md content-pipeline/resolution-audit/README.md plans/PR-Resolution-Audit-Plain-Talk.md`
 - `bash scripts/local_pr_review.sh --allow-dirty`

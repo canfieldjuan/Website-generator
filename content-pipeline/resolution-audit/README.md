@@ -38,9 +38,10 @@ readability-score warnings before posting.
 4. If the draft needs sharper creative direction, paste the Compact Context
    Block or relevant channel section from `creative-manual.md`.
 5. Generate the draft.
-6. Run the draft through the self-check contract in `prompt-contracts.md`.
-7. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
+6. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
    `prompt-contracts.md`.
+7. Run the final draft through the Contract 6 self-check in
+   `prompt-contracts.md` after any Plain Talk rewrite.
 8. Save the draft and score it locally:
 
    ```bash
@@ -83,8 +84,9 @@ Manual fallback:
 4. Paste the Shared Context Block from `prompt-contracts.md`.
 5. Paste the matching channel contract from `prompt-contracts.md`.
 6. Generate the draft.
-7. Run the draft through the self-check contract in `prompt-contracts.md`.
-8. Run the Plain Talk rewrite contract if the draft still sounds corporate.
+7. Run the Plain Talk rewrite contract if the draft still sounds corporate.
+8. Run the final draft through the self-check contract in
+   `prompt-contracts.md` after any Plain Talk rewrite.
 9. Revise before posting if the draft promises savings, guaranteed rankings,
    ticket-volume reductions, live publishing, or certainty about ownership.
 

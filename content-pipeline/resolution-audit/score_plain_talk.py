@@ -98,6 +98,31 @@ PEOPLE_WORDS = {
     "users",
 }
 
+CONTRACTION_PEOPLE_WORDS = {
+    "i'd": "i",
+    "i'll": "i",
+    "i'm": "i",
+    "i've": "i",
+    "you're": "you",
+    "you've": "you",
+    "you'll": "you",
+    "you'd": "you",
+    "we're": "we",
+    "we've": "we",
+    "we'll": "we",
+    "we'd": "we",
+    "they're": "they",
+    "they've": "they",
+    "they'll": "they",
+    "they'd": "they",
+    "he's": "he",
+    "he'll": "he",
+    "he'd": "he",
+    "she's": "she",
+    "she'll": "she",
+    "she'd": "she",
+}
+
 CORPORATE_PHRASES = [
     "actionable insights",
     "best-in-class",
@@ -151,18 +176,33 @@ def strip_markdown(text: str) -> str:
     text = text.replace("**", "").replace("__", "")
 
     normalized = []
+    paragraph: list[str] = []
+
+    def flush_paragraph() -> None:
+        if not paragraph:
+            return
+        paragraph_text = " ".join(paragraph).strip()
+        if paragraph_text and paragraph_text[-1] not in ".!?":
+            paragraph_text = f"{paragraph_text}."
+        if paragraph_text:
+            normalized.append(paragraph_text)
+        paragraph.clear()
+
     for line in text.splitlines():
         line = line.strip()
         if not line:
+            flush_paragraph()
             continue
         if line.startswith("|") or re.fullmatch(r"[\-|: ]+", line):
+            flush_paragraph()
             continue
         line = re.sub(r"^#{1,6}\s*", "", line)
         line = re.sub(r"^>\s*", "", line)
         line = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", line)
-        if line and line[-1] not in ".!?":
-            line = f"{line}."
-        normalized.append(line)
+        if line:
+            paragraph.append(line)
+
+    flush_paragraph()
 
     return " ".join(normalized)
 
@@ -174,7 +214,8 @@ def split_sentences(text: str) -> list[str]:
 
 
 def words_in(text: str) -> list[str]:
-    return re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", text.lower())
+    tokens = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", text.lower())
+    return [CONTRACTION_PEOPLE_WORDS.get(token, token) for token in tokens]
 
 
 def count_syllables(word: str) -> int:
@@ -195,10 +236,12 @@ def count_syllables(word: str) -> int:
     if word in exceptions:
         return exceptions[word]
 
-    word = re.sub(r"e$", "", word)
+    consonant_le = word.endswith("le") and len(word) > 2 and word[-3] not in "aeiouy"
+    if word.endswith("e"):
+        word = word[:-1]
     groups = re.findall(r"[aeiouy]+", word)
     count = len(groups)
-    if word.endswith("le") and len(word) > 2 and word[-3] not in "aeiouy":
+    if consonant_le:
         count += 1
     return max(1, count)
 
