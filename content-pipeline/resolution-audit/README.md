@@ -47,11 +47,15 @@ stale.
 4. If the draft needs sharper creative direction, paste the Compact Context
    Block or relevant channel section from `creative-manual.md`.
 5. If the draft uses a vendor-cost or leak angle, choose one tag from
-   `leak-index.md`, validate the evidence file, paste only the matching
-   `evidence.jsonl` rows, and paste the matching `frames.md` section.
+   `leak-index.md`, validate the evidence file, and pass that tag to
+   `bundle_prompt.py` with `--leak-tag`.
 
    ```bash
    python content-pipeline/resolution-audit/validate_evidence.py
+   python content-pipeline/resolution-audit/bundle_prompt.py \
+       --channel linkedin \
+       --angle diagnostic-not-dashboard \
+       --leak-tag repeat_resolution
    ```
 
 6. Generate the draft.

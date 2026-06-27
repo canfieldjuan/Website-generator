@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
@@ -45,11 +46,80 @@ def extract_section(markdown: str, heading: str) -> str:
     return match.group(1).strip()
 
 
+def leak_tags() -> list[str]:
+    leak_index = read_file("leak-index.md")
+    return sorted(set(re.findall(r"^\| `([^`]+)` \|", leak_index, re.M)))
+
+
+def extract_leak_router_row(leak_index: str, tag: str) -> str:
+    header_match = re.search(r"^\| tag \|.*\n\|[-| ]+\|", leak_index, re.M)
+    row_match = re.search(rf"^\| `{re.escape(tag)}` \|.*$", leak_index, re.M)
+    if not header_match or not row_match:
+        raise SystemExit(f"Could not find leak router row: {tag}")
+    return f"{header_match.group(0)}\n{row_match.group(0)}"
+
+
+def extract_leak_frame(frames: str, tag: str) -> str:
+    pattern = re.compile(
+        rf"(^## `{re.escape(tag)}`.*?)(?=^## `|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    match = pattern.search(frames)
+    if not match:
+        raise SystemExit(f"Could not find leak frame: {tag}")
+    return match.group(1).strip()
+
+
+def evidence_rows_for_tag(tag: str) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for line_number, line in enumerate((ROOT / "evidence.jsonl").read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Invalid evidence.jsonl row {line_number}: {exc.msg}") from exc
+        if row.get("tag") == tag:
+            rows.append(row)
+    if not rows:
+        raise SystemExit(f"Could not find evidence rows for leak tag: {tag}")
+    return rows
+
+
+def render_jsonl(rows: list[dict[str, object]]) -> str:
+    return "\n".join(json.dumps(row, separators=(",", ":"), sort_keys=True) for row in rows)
+
+
+def build_leak_context(tag: str) -> str:
+    leak_index = read_file("leak-index.md")
+    frames = read_file("frames.md")
+    claim_boundary = extract_section(leak_index, "Claim Boundary")
+    router_row = extract_leak_router_row(leak_index, tag)
+    evidence_rows = render_jsonl(evidence_rows_for_tag(tag))
+    frame = extract_leak_frame(frames, tag)
+    return "\n\n".join(
+        [
+            "## Selected Leak Context",
+            "Use this section only for vendor billing-mechanic evidence. Do not turn it into customer waste, guaranteed savings, or blame language.",
+            "## Selected Leak Router",
+            f"Selected tag: `{tag}`",
+            router_row,
+            claim_boundary,
+            "## Selected Leak Evidence",
+            "```jsonl",
+            evidence_rows,
+            "```",
+            "## Selected Leak Frame",
+            frame,
+        ]
+    )
+
+
 def render_file(title: str, body: str) -> str:
     return f"## {title}\n\n{body.strip()}"
 
 
-def build_bundle(channel: str, angle: str | None) -> str:
+def build_bundle(channel: str, angle: str | None, leak_tag: str | None) -> str:
     source_pack = read_file("source-pack.md")
     claims_guard = read_file("claims-guard.md")
     prompt_contracts = read_file("prompt-contracts.md")
@@ -72,6 +142,20 @@ def build_bundle(channel: str, angle: str | None) -> str:
         angle_section = extract_section(angles, ANGLE_SECTIONS[angle])
         sections.extend(["", "## Selected Angle", "", angle_section])
 
+    if leak_tag:
+        sections.extend(["", build_leak_context(leak_tag)])
+
+    operator_instructions = [
+        "Fill in the Inputs list inside the selected channel contract above, then draft using that contract.",
+    ]
+    if leak_tag:
+        operator_instructions.append(
+            "Use Selected Leak Context only as vendor billing-mechanic evidence. Do not turn it into customer waste, guaranteed savings, or blame language."
+        )
+    operator_instructions.append(
+        "After drafting, run Contract 6: Draft Self-Check from `prompt-contracts.md` before posting."
+    )
+
     sections.extend(
         [
             "",
@@ -81,8 +165,7 @@ def build_bundle(channel: str, angle: str | None) -> str:
             "",
             "## Operator Instruction",
             "",
-            "Fill in the Inputs list inside the selected channel contract above, then draft using that contract.",
-            "After drafting, run Contract 6: Draft Self-Check from `prompt-contracts.md` before posting.",
+            *operator_instructions,
         ]
     )
 
@@ -105,6 +188,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional angle section to include.",
     )
     parser.add_argument(
+        "--leak-tag",
+        choices=leak_tags(),
+        help="Optional leak-router tag to include with matching evidence and frame context.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Write the bundle to this file instead of stdout.",
@@ -114,7 +202,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    bundle = build_bundle(args.channel, args.angle)
+    bundle = build_bundle(args.channel, args.angle, args.leak_tag)
 
     if args.output:
         args.output.write_text(bundle, encoding="utf-8")
