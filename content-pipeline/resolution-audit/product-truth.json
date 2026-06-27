@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-06-27",
+  "fields": {
+    "verifier_channels": {
+      "value": [
+        "blog",
+        "feedback",
+        "linkedin",
+        "reddit",
+        "reply"
+      ],
+      "source": "derived:bundle_prompt.CHANNEL_CONTRACTS"
+    },
+    "shipped_report_fields": {
+      "value": [
+        "top_repeat",
+        "cost_exposure",
+        "resolution_evidence",
+        "no_proven_answer",
+        "customer_wording"
+      ],
+      "source": "curated",
+      "verify_against": "content-ops server or ATLAS report schema"
+    },
+    "target_report_fields": {
+      "value": [
+        "probable_owner_lane"
+      ],
+      "source": "curated",
+      "verify_against": "content-ops server or ATLAS report schema"
+    },
+    "claims": {
+      "value": {
+        "owner_routing": "target_pattern",
+        "pii_scrubbing": "browser_and_backend_supported",
+        "auto_publish": false,
+        "hosted_report": "tbd",
+        "pdf_export": "tbd"
+      },
+      "source": "curated",
+      "verify_against": "content-ops server or ATLAS feature contract"
+    },
+    "evidence_freshness_days": {
+      "value": 90,
+      "source": "policy"
+    }
+  }
+}
