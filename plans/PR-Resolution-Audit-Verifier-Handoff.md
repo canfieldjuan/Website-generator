@@ -20,7 +20,7 @@ needs to be filled before calling ATLAS.
    the real ATLAS `verify_draft` argument names.
 2. Include deterministic local checks for forbidden outcome claims,
    auto-publishing/ticket-answering claims, replacing-agent claims, contact
-   identifiers, and weak answer-evidence qualifiers.
+   identifiers, ownership certainty, and weak answer-evidence qualifiers.
 3. Update the kit README with the verifier handoff command and make clear that
    the script prepares a packet; it does not call MCP.
 
@@ -38,10 +38,10 @@ these ATLAS `verify_draft` fields: `asset_id`, `rule_packet`, `coverage`,
 `adversarial_passes`, `calibration_library`, and `as_of`.
 
 The coverage rows are intentionally conservative. Clear forbidden phrases
-become `fail` rows and blocker quality findings. Evidence that needs human
-judgment stays `unresolved` instead of being guessed. The operator can then add
-extracted claims and evidence before submitting the packet to the ATLAS MCP
-when that server is available.
+become `fail` rows and blocker quality findings. Rows that a deterministic
+regex cannot prove stay `unresolved` instead of being marked green. The
+operator can then add extracted claims and evidence before submitting the
+packet to the ATLAS MCP when that server is available.
 
 ## Intentional
 
@@ -65,6 +65,12 @@ when that server is available.
 - `python content-pipeline/resolution-audit/prepare_verifier_packet.py --draft /tmp/resolution-audit-draft.txt --channel linkedin --asset-id smoke --as-of 2026-06-27 --output /tmp/resolution-audit-verify-packet.json`
 - `python -m json.tool /tmp/resolution-audit-verify-packet.json >/tmp/resolution-audit-verify-packet.pretty.json`
 - `rg -n '"asset_id": "smoke"|"rule_packet"|"coverage"|"quality_reports"|"extracted_claims"|"as_of": "2026-06-27"|"status": "fail"' /tmp/resolution-audit-verify-packet.pretty.json`
+- Boundary probes:
+  - required disclaimer: `does not promise savings, guaranteed rankings, or ticket-volume reduction` returns `RA-NO-GUARANTEED-OUTCOMES` as `unresolved`, not `fail`
+  - ownership certainty: `Engineering owns this repeated issue` returns `RA-OWNERSHIP-QUALIFIER` as `unresolved`
+  - volume and automation: `cut ticket volume by 30 percent and automatically update your help center` returns `fail`
+  - global answer qualifier miss: `writes answers for every repeated question` returns `RA-ANSWER-EVIDENCE-QUALIFIER` as `unresolved`
+  - unseparated phone number: `3125550142` returns `RA-NO-RAW-CONTACT-DATA` as `fail`
 - `python -m py_compile content-pipeline/resolution-audit/prepare_verifier_packet.py`
 - `rg -n "deflects? ~|~30%|25-35%|real deflection rate|auto-updated|launch a self-service center|keep it current automatically|support hire slides" content-pipeline/resolution-audit --glob '!claims-guard.md'`
   - Expected: no matches; unsupported older promises should only appear inside

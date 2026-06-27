@@ -22,6 +22,17 @@ OUTCOME_PATTERNS = [
         re.compile(r"\bguaranteed\s+ticket[- ]volume\s+reduction\b", re.I),
     ),
     ("fixed-deflection-percent", re.compile(r"\b\d{1,3}\s*%\s+deflection\b", re.I)),
+    (
+        "fixed-ticket-volume-reduction",
+        re.compile(
+            r"\b(?:cut|cuts|reduce|reduces|lower|lowers|drop|drops|shrink|shrinks)\s+ticket\s+volume\s+by\s+\d{1,3}\s*(?:%|percent)\b",
+            re.I,
+        ),
+    ),
+    (
+        "fixed-fewer-tickets",
+        re.compile(r"\b\d{1,3}\s*(?:%|percent)\s+(?:fewer|less)\s+tickets?\b", re.I),
+    ),
 ]
 
 AUTOMATION_PATTERNS = [
@@ -29,6 +40,14 @@ AUTOMATION_PATTERNS = [
     ("automatic-help-center-updates", re.compile(r"\bautomatic\s+help[- ]center\s+updates\b", re.I)),
     ("automatic-ticket-answering", re.compile(r"\bautomatic\s+ticket\s+answering\b", re.I)),
     ("auto-published", re.compile(r"\bauto[- ]published\b", re.I)),
+    (
+        "automatically-updates-help-center",
+        re.compile(r"\bautomatically\s+updates?\s+(?:your\s+)?help[- ]center\b", re.I),
+    ),
+    (
+        "answers-tickets-automatically",
+        re.compile(r"\banswers?\s+tickets?\s+automatically\b", re.I),
+    ),
 ]
 
 REPLACING_AGENT_PATTERNS = [
@@ -37,22 +56,60 @@ REPLACING_AGENT_PATTERNS = [
 ]
 
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
-PHONE_PATTERN = re.compile(r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}")
+PHONE_PATTERN = re.compile(r"\b(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b")
 ANSWER_WORD_PATTERN = re.compile(r"\b(answer|answers|resolution|resolutions|drafted answer)\b", re.I)
 ANSWER_QUALIFIER_PATTERN = re.compile(
     r"\b(agent resolution|scoped resolution|when (?:that )?evidence exists|if (?:the )?tickets contain|no proven answer)\b",
     re.I,
 )
+OWNERSHIP_WORD_PATTERN = re.compile(
+    r"\b(?:engineering|product|support|cx|policy|ops|operations|billing|success|content|docs|documentation|legal)\s+(?:owns?|is responsible for|are responsible for|should own|must own)\b|\b(?:owned by|responsible for)\b",
+    re.I,
+)
+OWNERSHIP_QUALIFIER_PATTERN = re.compile(
+    r"\b(probable|probably|may|might|could|likely|often|appears|seems|investigate|route|routing|signal)\b",
+    re.I,
+)
 
 
 def _is_negated_context(text: str, start: int) -> bool:
-    prefix = text[max(0, start - 48) : start].lower()
+    clause_start = max(text.rfind(mark, 0, start) for mark in ".!?;\n")
+    prefix = text[clause_start + 1 : start].lower()
+    if re.search(r"\b(?:but|however)\b", prefix):
+        prefix = re.split(r"\b(?:but|however)\b", prefix)[-1]
     return bool(
         re.search(
-            r"(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdo\s+not\s+promise\b|\bdoes\s+not\s+promise\b)\s*$",
+            r"(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdo\s+not\s+promise\b|\bdoes\s+not\s+promise\b|\bdoesn't\s+promise\b)",
             prefix,
         )
     )
+
+
+def _sentence_bounds(text: str, start: int) -> tuple[int, int]:
+    sentence_start = max(text.rfind(mark, 0, start) for mark in ".!?\n")
+    sentence_end_candidates = [idx for mark in ".!?\n" if (idx := text.find(mark, start)) != -1]
+    sentence_end = min(sentence_end_candidates) if sentence_end_candidates else len(text)
+    return sentence_start + 1, sentence_end
+
+
+def _sentence_for_match(text: str, start: int) -> str:
+    sentence_start, sentence_end = _sentence_bounds(text, start)
+    return text[sentence_start:sentence_end]
+
+
+def _unqualified_matches(
+    text: str,
+    word_pattern: re.Pattern[str],
+    qualifier_pattern: re.Pattern[str],
+    *,
+    code: str,
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    for match in word_pattern.finditer(text):
+        sentence = _sentence_for_match(text, match.start())
+        if not qualifier_pattern.search(sentence):
+            findings.append({"code": code, "evidence": sentence.strip() or match.group(0)})
+    return findings
 
 
 def _matches(
@@ -97,40 +154,53 @@ def build_packet(*, draft_text: str, draft_path: Path, channel: str, asset_id: s
     contact_hits.extend({"code": "phone", "evidence": item.group(0)} for item in PHONE_PATTERN.finditer(draft_text))
 
     answer_mentions = bool(ANSWER_WORD_PATTERN.search(draft_text))
-    answer_qualified = bool(ANSWER_QUALIFIER_PATTERN.search(draft_text))
+    unqualified_answer_hits = _unqualified_matches(
+        draft_text,
+        ANSWER_WORD_PATTERN,
+        ANSWER_QUALIFIER_PATTERN,
+        code="unqualified-answer-claim",
+    )
+    ownership_hits = _unqualified_matches(
+        draft_text,
+        OWNERSHIP_WORD_PATTERN,
+        OWNERSHIP_QUALIFIER_PATTERN,
+        code="unqualified-ownership-claim",
+    )
     answer_status = "not_applicable"
     answer_evidence = "Draft does not make answer or resolution claims."
-    if answer_mentions and answer_qualified:
-        answer_status = "pass"
-        answer_evidence = "Draft qualifies answer claims with agent/scoped resolution evidence or no-proven-answer language."
-    elif answer_mentions:
+    if unqualified_answer_hits:
         answer_status = "unresolved"
-        answer_evidence = "Draft mentions answers/resolutions, but no agent/scoped resolution evidence qualifier was detected."
+        answer_evidence = "; ".join(
+            f"{hit['code']}: {hit['evidence']}" for hit in unqualified_answer_hits
+        )
+    elif answer_mentions:
+        answer_status = "pass"
+        answer_evidence = "Each detected answer/resolution sentence includes agent/scoped resolution evidence or no-proven-answer language."
 
     coverage = [
         _coverage_row(
             "RA-NO-GUARANTEED-OUTCOMES",
             "Draft avoids guaranteed savings, guaranteed rankings, guaranteed ticket-volume reduction, and fixed deflection percentages.",
-            "fail" if outcome_hits else "pass",
+            "fail" if outcome_hits else "unresolved",
             "; ".join(f"{hit['code']}: {hit['evidence']}" for hit in outcome_hits)
             if outcome_hits
-            else "No forbidden outcome phrases detected.",
+            else "No exact forbidden outcome phrase detected; human review still required for paraphrased savings, ranking, or volume claims.",
         ),
         _coverage_row(
             "RA-NO-AUTO-PUBLISHING",
             "Draft avoids live publishing, automatic help-center updates, and automatic ticket answering claims.",
-            "fail" if automation_hits else "pass",
+            "fail" if automation_hits else "unresolved",
             "; ".join(f"{hit['code']}: {hit['evidence']}" for hit in automation_hits)
             if automation_hits
-            else "No forbidden automation phrases detected.",
+            else "No exact forbidden automation phrase detected; human review still required for automation paraphrases.",
         ),
         _coverage_row(
             "RA-NO-REPLACING-AGENTS",
             "Draft avoids replacing-agent and avoided-hire promises.",
-            "fail" if replacing_hits else "pass",
+            "fail" if replacing_hits else "unresolved",
             "; ".join(f"{hit['code']}: {hit['evidence']}" for hit in replacing_hits)
             if replacing_hits
-            else "No replacing-agent or avoided-hire phrases detected.",
+            else "No exact replacing-agent or avoided-hire phrase detected; human review still required for role-impact claims.",
         ),
         _coverage_row(
             "RA-NO-RAW-CONTACT-DATA",
@@ -145,6 +215,14 @@ def build_packet(*, draft_text: str, draft_path: Path, channel: str, asset_id: s
             "Draft qualifies answer claims with agent/scoped resolution evidence or no-proven-answer language.",
             answer_status,
             answer_evidence,
+        ),
+        _coverage_row(
+            "RA-OWNERSHIP-QUALIFIER",
+            "Draft avoids certainty that a specific team owns a repeated issue unless framed as probable or investigatory.",
+            "unresolved" if ownership_hits else "not_applicable",
+            "; ".join(f"{hit['code']}: {hit['evidence']}" for hit in ownership_hits)
+            if ownership_hits
+            else "No ownership-certainty sentence detected.",
         ),
         _coverage_row(
             "RA-HONEST-CTA",
@@ -188,7 +266,7 @@ def build_packet(*, draft_text: str, draft_path: Path, channel: str, asset_id: s
         "extracted_claims": [],
         "quality_reports": [
             {
-                "passed": not any(row["status"] == "fail" for row in coverage),
+                "passed": not any(row["status"] in {"fail", "unresolved"} for row in coverage),
                 "findings": findings,
             }
         ],
