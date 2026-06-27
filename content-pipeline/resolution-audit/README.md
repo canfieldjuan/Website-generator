@@ -23,6 +23,8 @@ rows from `evidence.jsonl`, then use the matching section in `frames.md` for
 safe labels, unsafe language, and fallback wording. Treat exact vendor prices as
 source-date snapshots: prefer the durable billing model in public copy and
 re-check the live source page before publishing a specific dollar figure.
+Run `validate_evidence.py` before using those cards when the source dates may be
+stale.
 
 ## Operator Flow
 
@@ -45,8 +47,13 @@ re-check the live source page before publishing a specific dollar figure.
 4. If the draft needs sharper creative direction, paste the Compact Context
    Block or relevant channel section from `creative-manual.md`.
 5. If the draft uses a vendor-cost or leak angle, choose one tag from
-   `leak-index.md`, paste only the matching `evidence.jsonl` rows, and paste the
-   matching `frames.md` section.
+   `leak-index.md`, validate the evidence file, paste only the matching
+   `evidence.jsonl` rows, and paste the matching `frames.md` section.
+
+   ```bash
+   python content-pipeline/resolution-audit/validate_evidence.py
+   ```
+
 6. Generate the draft.
 7. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
    `prompt-contracts.md`.
