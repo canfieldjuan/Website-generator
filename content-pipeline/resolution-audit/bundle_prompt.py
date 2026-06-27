@@ -17,7 +17,6 @@ CHANNEL_CONTRACTS = {
     "reply": "Contract 3: Social Reply",
     "blog": "Contract 4: Blog Outline",
     "feedback": "Contract 5: Feedback Ask",
-    "self-check": "Contract 6: Draft Self-Check",
 }
 
 ANGLE_SECTIONS = {
@@ -61,7 +60,7 @@ def build_bundle(channel: str, angle: str | None) -> str:
     sections = [
         "# Open WebUI Prompt Bundle: Resolution Audit",
         "",
-        "Paste this entire bundle into Open WebUI. Fill in the operator inputs at the end before asking for a draft.",
+        "Paste this entire bundle into Open WebUI. Fill in the Inputs list inside the selected channel contract before asking for a draft.",
         "",
         render_file("Source Pack", source_pack),
         "",
@@ -80,16 +79,10 @@ def build_bundle(channel: str, angle: str | None) -> str:
             "",
             channel_contract,
             "",
-            "## Operator Inputs",
+            "## Operator Instruction",
             "",
-            "- Channel: " + channel,
-            "- Angle: " + (angle or "none"),
-            "- Audience: [fill in]",
-            "- Primary point or prompt: [fill in]",
-            "- CTA posture: [fill in]",
-            "- Link or reply CTA: [fill in or none]",
-            "",
-            "Now draft using the channel contract above. After drafting, run Contract 6: Draft Self-Check before posting.",
+            "Fill in the Inputs list inside the selected channel contract above, then draft using that contract.",
+            "After drafting, run Contract 6: Draft Self-Check from `prompt-contracts.md` before posting.",
         ]
     )
 

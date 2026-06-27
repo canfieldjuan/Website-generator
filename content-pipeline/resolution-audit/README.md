@@ -21,7 +21,8 @@ current offer.
        --angle diagnostic-not-dashboard
    ```
 
-3. Paste the bundle into Open WebUI and fill in the operator inputs at the end.
+3. Paste the bundle into Open WebUI and fill in the Inputs list inside the
+   selected channel contract.
 4. Generate the draft.
 5. Run the draft through the self-check contract in `prompt-contracts.md`.
 6. Revise before posting if the draft promises savings, guaranteed rankings,

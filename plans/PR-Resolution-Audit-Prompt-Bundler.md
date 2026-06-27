@@ -36,9 +36,10 @@ operator chooses a channel with `--channel`; channels map to a prompt contract
 section in `prompt-contracts.md`. The operator may choose an angle with
 `--angle`; angles map to sections in `angles.md`.
 
-The output is plain Markdown with clear dividers and an operator input block at
-the end. It is intentionally copy/paste-first: no Open WebUI database writes,
-no API calls, and no MCP dependency.
+The output is plain Markdown with clear dividers and an operator instruction
+that points back to the selected contract's own Inputs list. It is
+intentionally copy/paste-first: no Open WebUI database writes, no API calls,
+and no MCP dependency.
 
 ## Intentional
 
@@ -56,8 +57,12 @@ no API calls, and no MCP dependency.
 ## Verification
 
 - `python content-pipeline/resolution-audit/bundle_prompt.py --help`
+- `python content-pipeline/resolution-audit/bundle_prompt.py --help | rg "self-check"; test $? -eq 1`
 - `python content-pipeline/resolution-audit/bundle_prompt.py --channel linkedin --angle diagnostic-not-dashboard --output /tmp/resolution-audit-linkedin-prompt.md`
-- `rg -n "Shared Context Block|Contract 1: LinkedIn POV Post|Angle 6: Diagnostic, Not Dashboard|Resolution Audit Source Pack|Resolution Audit Claims Guard" /tmp/resolution-audit-linkedin-prompt.md`
+- `rg -n "Shared Context Block|Contract 1: LinkedIn POV Post|Angle 6: Diagnostic, Not Dashboard|Resolution Audit Source Pack|Resolution Audit Claims Guard|Operator Instruction" /tmp/resolution-audit-linkedin-prompt.md`
+- `rg -n "Operator Inputs|Now draft using the channel contract" /tmp/resolution-audit-linkedin-prompt.md`
+  - Expected: no matches; the bundle should point to the selected contract's
+    own Inputs list instead of a generic LinkedIn-shaped input block.
 - `python -m py_compile content-pipeline/resolution-audit/bundle_prompt.py`
 - `rg -n "deflects? ~|~30%|25-35%|real deflection rate|auto-updated|launch a self-service center|keep it current automatically|support hire slides" content-pipeline/resolution-audit --glob '!claims-guard.md'`
   - Expected: no matches; unsupported older promises should only appear inside
