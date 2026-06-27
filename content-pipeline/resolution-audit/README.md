@@ -25,9 +25,18 @@ current offer.
    selected channel contract.
 4. Generate the draft.
 5. Run the draft through the self-check contract in `prompt-contracts.md`.
-6. Revise before posting if the draft promises savings, guaranteed rankings,
+6. Save the draft and prepare a verifier handoff packet:
+
+   ```bash
+   python content-pipeline/resolution-audit/prepare_verifier_packet.py \
+       --draft /tmp/resolution-audit-draft.md \
+       --channel linkedin \
+       --output /tmp/resolution-audit-verify-packet.json
+   ```
+
+7. Revise before posting if the draft promises savings, guaranteed rankings,
    ticket-volume reductions, live publishing, or certainty about ownership.
-7. Later slices will add an ATLAS `verify_draft` handoff.
+8. Later infrastructure work can submit the packet to ATLAS `verify_draft`.
 
 Manual fallback:
 
@@ -66,8 +75,8 @@ help-center updates, or guaranteed savings, do not use that claim.
   platform.
 - Adds paste-ready prompt contracts for the common Open WebUI drafting jobs.
 - Adds a local prompt bundler for one-command copy/paste context assembly.
+- Adds a local verifier handoff packet for the ATLAS `verify_draft` shape.
 
 ## What Comes Next
 
-- A structured handoff to the existing ATLAS `verify_draft` MCP verifier.
 - Sanitized sample outputs and an outcomes log.
