@@ -20,6 +20,9 @@ derived from code, and product facts now come from a committed ATLAS
    versus its code/source inputs.
 4. Run the sync check explicitly in the content-kit truth workflow.
 5. Update `product-truth.json` from the new source.
+6. Align bundled prompt/skill copy with the source-backed truth: owner-lane
+   routing is shipped but probable, and PII claims are limited to the
+   ATLAS-backed backend scrub source.
 
 Files touched:
 
@@ -27,6 +30,14 @@ Files touched:
 - `content-pipeline/resolution-audit/sync_product_truth.py`
 - `content-pipeline/resolution-audit/audit_content_kit_truth.py`
 - `content-pipeline/resolution-audit/product-truth.json`
+- `content-pipeline/resolution-audit/source-pack.md`
+- `content-pipeline/resolution-audit/report-shape-example.md`
+- `content-pipeline/resolution-audit/README.md`
+- `content-pipeline/resolution-audit/open-webui-skills/claim-guard.md`
+- `content-pipeline/resolution-audit/open-webui-skills/content-writer.md`
+- `content-pipeline/resolution-audit/open-webui-skills/plain-talk-rewriter.md`
+- `content-pipeline/resolution-audit/open-webui-skills/report-shape-router.md`
+- `content-pipeline/resolution-audit/open-webui-skills/verifier-reviewer.md`
 - `.github/workflows/content-kit-truth.yml`
 - `plans/PR-Resolution-Audit-Source-Manifest.md`
 
@@ -45,6 +56,10 @@ The truth audit deep-copies the manifest, runs the same sync logic in memory,
 and blocks if the copy would change. CI runs both `sync_product_truth.py
 --check` and the audit.
 
+The bundled prompt files now follow the same source-backed truth. They no
+longer describe owner-lane routing as target-only, and they do not claim
+browser-side PII controls from this ATLAS-only source.
+
 ## Intentional
 
 - The ATLAS contract is a committed snapshot, not a live MCP call. That keeps
@@ -55,6 +70,8 @@ and blocks if the copy would change. CI runs both `sync_product_truth.py
 - `owner_lane`, `routing_signals`, and `product_gap_summary` are now shipped
   fields because the current ATLAS `deflection.v1` report projection exposes
   them. Ownership wording still stays probable in copy.
+- Prompt-copy edits are limited to source alignment; this is not a broader
+  messaging rewrite.
 
 ## Deferred
 
@@ -77,7 +94,8 @@ Ran locally:
 - Negative fixture: copied the kit to `/tmp`, added a stale verifier channel
   in `product-truth.json`, and confirmed `sync_product_truth.py --check` exits
   non-zero.
-- `git diff --check -- .github/workflows/content-kit-truth.yml content-pipeline/resolution-audit/audit_content_kit_truth.py content-pipeline/resolution-audit/sync_product_truth.py content-pipeline/resolution-audit/product-truth.json content-pipeline/resolution-audit/product-truth-sources/atlas-deflection-v1.json plans/PR-Resolution-Audit-Source-Manifest.md`
+- Grep check: `rg -n "browser and backend|target report-shape|target.*owner|owner-lane routing has shipped unless|current product output confirms|target Snapshot|target-pattern|target pattern|not proof of a shipped field|curated product facts are provisional" content-pipeline/resolution-audit -g '*.md' -g '*.py'` returned no matches.
+- `git diff --check -- .github/workflows/content-kit-truth.yml content-pipeline/resolution-audit/audit_content_kit_truth.py content-pipeline/resolution-audit/sync_product_truth.py content-pipeline/resolution-audit/product-truth.json content-pipeline/resolution-audit/product-truth-sources/atlas-deflection-v1.json content-pipeline/resolution-audit/source-pack.md content-pipeline/resolution-audit/report-shape-example.md content-pipeline/resolution-audit/README.md content-pipeline/resolution-audit/open-webui-skills/claim-guard.md content-pipeline/resolution-audit/open-webui-skills/content-writer.md content-pipeline/resolution-audit/open-webui-skills/plain-talk-rewriter.md content-pipeline/resolution-audit/open-webui-skills/report-shape-router.md content-pipeline/resolution-audit/open-webui-skills/verifier-reviewer.md plans/PR-Resolution-Audit-Source-Manifest.md`
 
 ## Estimated diff size
 
@@ -87,8 +105,9 @@ Ran locally:
 | Sync script | ~45 |
 | Audit stale-source check | ~13 |
 | Manifest update | ~29 |
+| Prompt/source copy alignment | ~73 |
 | Workflow | ~2 |
-| Plan doc | ~94 |
-| Total | ~233 |
+| Plan doc | ~113 |
+| Total | ~325 |
 
 Under the 400 LOC soft cap.
