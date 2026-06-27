@@ -171,7 +171,7 @@ def build_bundle(
     ]
     if include_product_truth:
         operator_instructions.append(
-            "The product truth manifest is authoritative. If a guide or example conflicts with it, the manifest wins."
+            "The product truth manifest is authoritative on product facts, such as which fields exist and whether they are shipped. It does not override the claims guard's wording rules."
         )
     if include_plain_talk:
         operator_instructions.append(

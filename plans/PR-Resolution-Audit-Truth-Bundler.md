@@ -15,12 +15,15 @@ the manifest wins when examples or guides drift.
 1. Add an opt-in `--include-product-truth` flag to `bundle_prompt.py`.
 2. Render `product-truth.json` into the bundle only when the flag is present.
 3. Add an operator instruction saying the manifest is authoritative when it
-   conflicts with guides or examples.
-4. Keep default bundles unchanged.
+   conflicts with guides or examples on product facts, without overriding the
+   claims guard's wording rules.
+4. Document the optional flag in the README operator flow.
+5. Keep default bundles unchanged.
 
 Files touched:
 
 - `content-pipeline/resolution-audit/bundle_prompt.py`
+- `content-pipeline/resolution-audit/README.md`
 - `plans/PR-Resolution-Audit-Truth-Bundler.md`
 
 ## Mechanism
@@ -31,7 +34,8 @@ shape, angles, and leak evidence. This slice follows that pattern with a
 
 The manifest section is inserted after Claims Guard and before optional guides
 or examples. The operator instruction is emitted only when the flag is present
-and states the precedence rule directly.
+and states that the manifest is authoritative on product facts, not wording
+policy.
 
 ## Intentional
 
@@ -40,7 +44,10 @@ and states the precedence rule directly.
 - The manifest is rendered as JSON, not paraphrased, so downstream users see
   the exact fields and claim flags.
 - The precedence line does not weaken the claims guard; it clarifies that
-  source-backed product facts outrank older examples or guides.
+  source-backed product facts outrank older examples or guides, while wording
+  rules still come from the claims guard.
+- The README documents the flag as an optional step without adding it to the
+  default command.
 
 ## Deferred
 
@@ -54,18 +61,20 @@ Ran locally:
 
 - `python content-pipeline/resolution-audit/bundle_prompt.py --help`
 - `python content-pipeline/resolution-audit/bundle_prompt.py --channel linkedin --include-product-truth >/tmp/resolution-audit-product-truth-bundle.md`
-- `rg -n "Product Truth Manifest|owner_lane|target_report_fields|The product truth manifest is authoritative" /tmp/resolution-audit-product-truth-bundle.md`
+- `rg -n "Product Truth Manifest|owner_lane|target_report_fields|authoritative on product facts|does not override the claims guard" /tmp/resolution-audit-product-truth-bundle.md`
 - `python content-pipeline/resolution-audit/bundle_prompt.py --channel linkedin >/tmp/resolution-audit-default-bundle.md`
-- `! rg -n "Product Truth Manifest|The product truth manifest is authoritative" /tmp/resolution-audit-default-bundle.md`
+- `! rg -n "Product Truth Manifest|authoritative on product facts|does not override the claims guard" /tmp/resolution-audit-default-bundle.md`
+- `rg -n -- "--include-product-truth" content-pipeline/resolution-audit/README.md`
 - `python -m py_compile content-pipeline/resolution-audit/bundle_prompt.py`
-- `git diff --check -- content-pipeline/resolution-audit/bundle_prompt.py plans/PR-Resolution-Audit-Truth-Bundler.md`
+- `git diff --check -- content-pipeline/resolution-audit/bundle_prompt.py content-pipeline/resolution-audit/README.md plans/PR-Resolution-Audit-Truth-Bundler.md`
 
 ## Estimated diff size
 
 | Area | Estimated LOC |
 | --- | ---: |
 | Bundler flag and render path | ~25 |
-| Plan doc | ~75 |
-| Total | ~100 |
+| README operator-flow doc | ~8 |
+| Plan doc | ~85 |
+| Total | ~118 |
 
 Under the 400 LOC soft cap.
