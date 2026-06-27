@@ -17,6 +17,13 @@ rewrite pass. Use `score_plain_talk.py` on saved drafts to catch long
 sentences, complex words, weak people-language, corporate phrases, and
 readability-score warnings before posting.
 
+Use `leak-index.md` when a draft needs a vendor-cost or billing-mechanic angle.
+It is a router, not evidence by itself. Pick one leak tag, retrieve matching
+rows from `evidence.jsonl`, then use the matching section in `frames.md` for
+safe labels, unsafe language, and fallback wording. Treat exact vendor prices as
+source-date snapshots: prefer the durable billing model in public copy and
+re-check the live source page before publishing a specific dollar figure.
+
 ## Operator Flow
 
 1. Pick the CLI-backed channel and job:
@@ -37,12 +44,15 @@ readability-score warnings before posting.
    selected channel contract.
 4. If the draft needs sharper creative direction, paste the Compact Context
    Block or relevant channel section from `creative-manual.md`.
-5. Generate the draft.
-6. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
+5. If the draft uses a vendor-cost or leak angle, choose one tag from
+   `leak-index.md`, paste only the matching `evidence.jsonl` rows, and paste the
+   matching `frames.md` section.
+6. Generate the draft.
+7. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
    `prompt-contracts.md`.
-7. Run the final draft through the Contract 6 self-check in
+8. Run the final draft through the Contract 6 self-check in
    `prompt-contracts.md` after any Plain Talk rewrite.
-8. Save the draft and score it locally:
+9. Save the draft and score it locally:
 
    ```bash
    python content-pipeline/resolution-audit/score_plain_talk.py \
@@ -50,7 +60,7 @@ readability-score warnings before posting.
        --target linkedin
    ```
 
-9. Save the draft and prepare a verifier handoff packet:
+10. Save the draft and prepare a verifier handoff packet:
 
    ```bash
    python content-pipeline/resolution-audit/prepare_verifier_packet.py \
@@ -59,9 +69,9 @@ readability-score warnings before posting.
        --output /tmp/resolution-audit-verify-packet.json
    ```
 
-10. Revise before posting if the draft promises savings, guaranteed rankings,
+11. Revise before posting if the draft promises savings, guaranteed rankings,
    ticket-volume reductions, live publishing, or certainty about ownership.
-11. Later infrastructure work can submit the packet to ATLAS `verify_draft`.
+12. Later infrastructure work can submit the packet to ATLAS `verify_draft`.
 
 Manual-only creative and rewrite jobs:
 
@@ -80,14 +90,16 @@ Manual fallback:
    `angles.md` into Open WebUI.
 2. Paste either the Compact Context Block from `creative-manual.md` or the
    relevant channel section when the draft needs sharper creative direction.
-3. Paste `plain-talk.md` when the draft should sound more direct and human.
-4. Paste the Shared Context Block from `prompt-contracts.md`.
-5. Paste the matching channel contract from `prompt-contracts.md`.
-6. Generate the draft.
-7. Run the Plain Talk rewrite contract if the draft still sounds corporate.
-8. Run the final draft through the self-check contract in
+3. Paste the matching `leak-index.md`, `evidence.jsonl`, and `frames.md` slices
+   when the draft uses a vendor-cost or leak angle.
+4. Paste `plain-talk.md` when the draft should sound more direct and human.
+5. Paste the Shared Context Block from `prompt-contracts.md`.
+6. Paste the matching channel contract from `prompt-contracts.md`.
+7. Generate the draft.
+8. Run the Plain Talk rewrite contract if the draft still sounds corporate.
+9. Run the final draft through the self-check contract in
    `prompt-contracts.md` after any Plain Talk rewrite.
-9. Revise before posting if the draft promises savings, guaranteed rankings,
+10. Revise before posting if the draft promises savings, guaranteed rankings,
    ticket-volume reductions, live publishing, or certainty about ownership.
 
 ## Source Hierarchy
@@ -99,8 +111,10 @@ Use this order when two files disagree:
 3. `claims-guard.md`.
 4. `creative-manual.md` for creative range, examples, and channel patterns.
 5. `plain-talk.md` for voice and readability.
-6. `angles.md`.
-7. Older Desktop notes.
+6. `leak-index.md`, `evidence.jsonl`, and `frames.md` for vendor-cost leak
+   routing.
+7. `angles.md`.
+8. Older Desktop notes.
 
 Older notes are treated as raw material, not source of truth. If an older note
 claims a fixed deflection percentage, live self-service-center launch, automatic
@@ -119,6 +133,7 @@ help-center updates, or guaranteed savings, do not use that claim.
 - Adds a creative manual for richer content primitives, channel patterns, and
   image prompt direction.
 - Adds a Plain Talk guide and readability checker for less robotic drafts.
+- Adds a leak router, evidence cards, and safe framing for vendor-cost angles.
 - Adds paste-ready prompt contracts for the common Open WebUI drafting jobs.
 - Adds a local prompt bundler for one-command copy/paste context assembly.
 - Adds a local verifier handoff packet for the ATLAS `verify_draft` shape.
