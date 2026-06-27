@@ -18,6 +18,7 @@ RULES = {
         ("guaranteed-savings", r"\bguaranteed\s+savings\b"),
         ("guarantees-savings", r"\bguarantees?\s+savings\b"),
         ("guaranteed-rankings", r"\bguaranteed\s+rankings\b"),
+        ("guaranteed-ticket-volume-reduction", r"\bguaranteed\s+ticket[- ]volume\s+reduction\b"),
         ("fixed-deflection-percent", r"\b\d{1,3}\s*%\s+deflection\b"),
         (
             "fixed-ticket-volume-reduction",
@@ -35,13 +36,24 @@ RULES = {
     ],
     "replacing_agents": [
         ("replace-agents", r"\breplac(?:e|es|ing)\s+(support\s+)?agents?\b"),
-        ("avoid-support-hire", r"\bavoid\s+a\s+support\s+hire\b"),
+        ("avoid-support-hire", r"\bavoid(?:ing)?\s+(?:a|the|your\s+)?(?:next\s+)?support\s+hire\b"),
+        ("next-support-hire-slides-right", r"\byour\s+next\s+support\s+hire\s+slides?\s+right\b"),
+    ],
+    "privacy_churn": [
+        (
+            "exact-churn-reasons-from-support-tickets",
+            r"\bdiagnos(?:e|es|ing)\s+exact\s+churn\s+reasons?\s+from\s+support\s+tickets?\b",
+        ),
+        (
+            "customer-data-trains-shared-model",
+            r"\b(?:use|uses|using)\s+customer\s+data\s+to\s+train\s+(?:a\s+)?shared\s+model\b|\btrain(?:s|ing)?\s+(?:a\s+)?shared\s+model\s+(?:on|with)\s+customer\s+data\b",
+        ),
     ],
 }
 
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 PHONE_RE = re.compile(r"\b(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b")
-ANSWER_RE = re.compile(r"\b(answer|answers|resolution|resolutions|drafted answer)\b", re.I)
+ANSWER_RE = re.compile(r"\b(drafted answer|answer|answers)\b|\bresolutions?\b(?!\s+(?:audit|snapshot)\b)", re.I)
 ANSWER_QUALIFIER_RE = re.compile(
     r"\b(agent resolution|scoped resolution|when (?:that )?evidence exists|if (?:the )?tickets contain|no proven answer)\b",
     re.I,
@@ -51,7 +63,7 @@ REPORT_SHAPE_RE = re.compile(
     re.I,
 )
 OWNER_ROUTING_RE = re.compile(
-    r"\b(?:owner|owners|ownership|owner\s+lane|routing|route|routes|routed|department|team|product|billing|policy|process|documentation|docs|support\s+ops|operations|who\s+needs\s+to\s+(?:fix|review)|needs\s+to\s+(?:fix|review)|responsible)\b",
+    r"\b(?:owner|owners|ownership|owner\s+lane|routing|route|routes|routed|department|who\s+needs\s+to\s+(?:fix|review)|needs\s+to\s+(?:fix|review)|responsible|for\s+review)\b",
     re.I,
 )
 OWNERSHIP_RE = re.compile(
@@ -105,6 +117,7 @@ def _coverage(text: str) -> list[dict[str, str]]:
     outcome_hits = _pattern_hits(text, RULES["outcomes"])
     automation_hits = _pattern_hits(text, RULES["automation"])
     replacing_hits = _pattern_hits(text, RULES["replacing_agents"])
+    privacy_churn_hits = _pattern_hits(text, RULES["privacy_churn"])
     contact_hits = [{"code": "email", "evidence": m.group(0)} for m in EMAIL_RE.finditer(text)]
     contact_hits += [{"code": "phone", "evidence": m.group(0)} for m in PHONE_RE.finditer(text)]
     answer_hits = _unqualified(text, ANSWER_RE, ANSWER_QUALIFIER_RE, "unqualified-answer-claim")
@@ -131,6 +144,7 @@ def _coverage(text: str) -> list[dict[str, str]]:
         _row("RA-NO-GUARANTEED-OUTCOMES", "blocker" if outcome_hits else "warning", _format_hits(outcome_hits, "No exact forbidden outcome phrase detected.")),
         _row("RA-NO-AUTO-PUBLISHING", "blocker" if automation_hits else "warning", _format_hits(automation_hits, "No exact forbidden automation phrase detected.")),
         _row("RA-NO-REPLACING-AGENTS", "blocker" if replacing_hits else "warning", _format_hits(replacing_hits, "No replacing-agent or avoided-hire phrase detected.")),
+        _row("RA-NO-PRIVACY-CHURN-CLAIMS", "blocker" if privacy_churn_hits else "warning", _format_hits(privacy_churn_hits, "No exact forbidden privacy or churn phrase detected.")),
         _row("RA-NO-RAW-CONTACT-DATA", "blocker" if contact_hits else "pass", _format_hits(contact_hits, "No email addresses or phone-number-shaped strings detected.")),
         _row("RA-ANSWER-EVIDENCE-QUALIFIER", answer_status, answer_evidence),
         _row("RA-OWNER-ROUTING-COVERAGE", owner_status, owner_evidence),

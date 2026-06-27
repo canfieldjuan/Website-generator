@@ -44,9 +44,17 @@ Ran locally:
   `RA-OWNER-ROUTING-COVERAGE` with `Needs human review`.
 - Imported the tool by path and asserted a `guarantees savings` draft returns
   `RA-NO-GUARANTEED-OUTCOMES` with `Do not post yet`.
+- Imported the tool by path and asserted review boundary probes:
+  - `guaranteed ticket-volume reduction` blocks.
+  - `avoid your next support hire` and `your next support hire slides right`
+    block.
+  - exact churn and shared-model privacy claims block.
+  - generic product/policy/process gap wording does not pass owner routing.
+  - `The Resolution Audit...` does not trigger an answer-claim warning by
+    product-name match alone.
 - `! rg -n "sales" content-pipeline/resolution-audit/open-webui-verifier-tool.py`
 - `git diff --cached --check -- content-pipeline/resolution-audit/open-webui-verifier-tool.py plans/PR-Resolution-Audit-Open-WebUI-Verifier-Tool.md`
 
 ## Estimated diff size
 
-2 files, +268 / -0. Under the 400 LOC soft cap.
+2 files, +282 / -0. Under the 400 LOC soft cap.
