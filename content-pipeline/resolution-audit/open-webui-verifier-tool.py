@@ -126,8 +126,8 @@ def _coverage(text: str) -> list[dict[str, str]]:
     report_shape = bool(REPORT_SHAPE_RE.search(text))
     owner_routing = bool(OWNER_ROUTING_RE.search(text))
     if report_shape and owner_routing:
-        owner_status = "pass"
-        owner_evidence = "Draft mentions ownership, routing, departments, or who should review the fix."
+        owner_status = "warning"
+        owner_evidence = "Draft mentions ownership, routing, departments, or who should review the fix; confirm it stays probable."
     elif report_shape:
         owner_status = "warning"
         owner_evidence = "Draft explains the report shape but omits owner routing or who should review the fix."
