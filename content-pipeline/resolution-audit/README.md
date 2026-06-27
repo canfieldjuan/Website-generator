@@ -33,6 +33,10 @@ them: ranked repeated issue, estimated cost exposure, resolution evidence,
 customer wording, content output, no-proven-answer gaps, probable owner lane,
 and next review action.
 
+Use `open-webui-skills/` when you want reusable Open WebUI Skills instead of
+one-off prompts. The skills cover claim guarding, content writing, Plain Talk
+rewrites, report-shape routing, and verifier review.
+
 ## Operator Flow
 
 1. Pick the CLI-backed channel and job:
