@@ -124,6 +124,7 @@ def build_bundle(
     angle: str | None,
     leak_tag: str | None,
     include_plain_talk: bool,
+    include_report_shape: bool,
 ) -> str:
     source_pack = read_file("source-pack.md")
     claims_guard = read_file("claims-guard.md")
@@ -145,6 +146,9 @@ def build_bundle(
     if include_plain_talk:
         sections.extend(["", render_file("Plain Talk Guide", read_file("plain-talk.md"))])
 
+    if include_report_shape:
+        sections.extend(["", render_file("Report Shape Example", read_file("report-shape-example.md"))])
+
     if angle:
         angles = read_file("angles.md")
         angle_section = extract_section(angles, ANGLE_SECTIONS[angle])
@@ -159,6 +163,10 @@ def build_bundle(
     if include_plain_talk:
         operator_instructions.append(
             "Plain Talk is voice guidance. The claims guard still wins if readability, rhythm, or sharper phrasing would weaken a qualifier."
+        )
+    if include_report_shape:
+        operator_instructions.append(
+            "Use the Report Shape Example as a structure pattern only. Replace bracketed values with real audit data or omit them."
         )
     if leak_tag:
         operator_instructions.append(
@@ -210,6 +218,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Include the Plain Talk voice and readability guide.",
     )
     parser.add_argument(
+        "--include-report-shape",
+        action="store_true",
+        help="Include the fictional report-shape example for Snapshot, report-shape, or build-in-public drafts.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Write the bundle to this file instead of stdout.",
@@ -219,7 +232,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    bundle = build_bundle(args.channel, args.angle, args.leak_tag, args.include_plain_talk)
+    bundle = build_bundle(
+        args.channel,
+        args.angle,
+        args.leak_tag,
+        args.include_plain_talk,
+        args.include_report_shape,
+    )
 
     if args.output:
         args.output.write_text(bundle, encoding="utf-8")
