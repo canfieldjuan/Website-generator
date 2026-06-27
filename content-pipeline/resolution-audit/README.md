@@ -33,6 +33,12 @@ them: ranked repeated issue, estimated cost exposure, resolution evidence,
 customer wording, content output, no-proven-answer gaps, probable owner lane,
 and next review action.
 
+Use `product-truth.json` when a draft or tool needs current product facts:
+accepted verifier channels, shipped report fields, target report fields, claim
+flags, and freshness policy. Same-repo facts are derived with
+`sync_product_truth.py`; curated product facts are provisional until slice 3
+sources them from content-ops or an ATLAS contract.
+
 Use `open-webui-skills/` when you want reusable Open WebUI Skills instead of
 one-off prompts. The skills cover claim guarding, content writing, Plain Talk
 rewrites, report-shape routing, and verifier review.
@@ -135,15 +141,16 @@ Manual fallback:
 Use this order when two files disagree:
 
 1. Current product code and landing copy in the portfolio repo.
-2. `source-pack.md`.
-3. `claims-guard.md`.
-4. `creative-manual.md` for creative range, examples, and channel patterns.
-5. `report-shape-example.md` for the target Snapshot/full-audit shape pattern.
-6. `plain-talk.md` for voice and readability.
-7. `leak-index.md`, `evidence.jsonl`, and `frames.md` for vendor-cost leak
+2. `product-truth.json` for explicit product facts and target-vs-shipped status.
+3. `source-pack.md`.
+4. `claims-guard.md`.
+5. `creative-manual.md` for creative range, examples, and channel patterns.
+6. `report-shape-example.md` for the target Snapshot/full-audit shape pattern.
+7. `plain-talk.md` for voice and readability.
+8. `leak-index.md`, `evidence.jsonl`, and `frames.md` for vendor-cost leak
    routing.
-8. `angles.md`.
-9. Older Desktop notes.
+9. `angles.md`.
+10. Older Desktop notes.
 
 Older notes are treated as raw material, not source of truth. If an older note
 claims a fixed deflection percentage, live self-service-center launch, automatic
@@ -162,6 +169,7 @@ help-center updates, or guaranteed savings, do not use that claim.
 - Adds a creative manual for richer content primitives, channel patterns, and
   image prompt direction.
 - Adds a report-shape example for target Snapshot and owner-lane structure.
+- Adds a product-truth manifest for explicit product facts.
 - Adds a Plain Talk guide and readability checker for less robotic drafts.
 - Adds a leak router, evidence cards, and safe framing for vendor-cost angles.
 - Adds paste-ready prompt contracts for the common Open WebUI drafting jobs.
