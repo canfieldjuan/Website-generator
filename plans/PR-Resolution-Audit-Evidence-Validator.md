@@ -40,10 +40,15 @@ duplicate IDs, invalid dates, evidence tags absent from the router, router tags
 with no evidence, or router tags without frame sections.
 
 Freshness is softer by default. The script detects exact-price cards by looking
-for price/rate/overage-style keys inside `numbers`, compares `source_date` to an
-`--as-of` date, and prints `WARN` rows when exact prices are older than
-`--stale-after-days`. Passing `--fail-on-stale` promotes those warnings to a
-non-zero exit for future stricter workflows.
+for price/rate/overage-style keys and dollar-bearing values inside `numbers`,
+compares `source_date` to an `--as-of` date, and prints `WARN` rows when exact
+prices are older than `--stale-after-days`. Passing `--fail-on-stale` promotes
+those warnings to a non-zero exit for future stricter workflows.
+
+Required scalar fields must be non-empty strings, and `source_date` must match
+literal `YYYY-MM-DD` shape before parsing. That keeps present-but-empty claim
+boundaries, missing source URLs, compact dates, and ISO-week dates from passing
+as usable evidence.
 
 ## Intentional
 
@@ -70,6 +75,10 @@ non-zero exit for future stricter workflows.
   - Result: warned on 8 stale exact-price cards and exited 0.
 - `python content-pipeline/resolution-audit/validate_evidence.py --as-of 2026-10-01 --fail-on-stale >/tmp/evidence-validator-stale.txt; test $? -eq 2`
   - Result: warned on the same 8 cards and exited 2.
+- `python - <<'PY' ... PY`
+  - Result: boundary probes passed for stale `$49` under a neutral
+    `plan_examples` key, empty/null required scalar fields, and compact/ISO-week
+    source dates.
 - `python -m py_compile content-pipeline/resolution-audit/validate_evidence.py`
 - `git diff --check -- content-pipeline/resolution-audit/validate_evidence.py content-pipeline/resolution-audit/README.md plans/PR-Resolution-Audit-Evidence-Validator.md`
 - `bash scripts/local_pr_review.sh --allow-dirty`
@@ -79,4 +88,4 @@ untracked workspace files are cleaned or stashed.
 
 ## Estimated diff size
 
-Actual working diff size: 3 files, +327 / -2.
+Actual working diff size: 3 files, +366 / -2.

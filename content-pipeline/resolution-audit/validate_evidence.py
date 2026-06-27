@@ -25,7 +25,10 @@ REQUIRED_FIELDS = {
     "numbers",
     "claim_limit",
 }
+REQUIRED_SCALAR_FIELDS = REQUIRED_FIELDS - {"numbers"}
+ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PRICE_KEY_PATTERN = re.compile(r"(?:price|rate|overage|usd|cost|listed_|allowance)", re.I)
+PRICE_VALUE_PATTERN = re.compile(r"(?:\$\s*\d|\b\d+(?:\.\d+)?\s*(?:usd|dollars?)\b)", re.I)
 
 
 @dataclass
@@ -90,6 +93,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def parse_iso_date(value: str) -> date:
+    if not ISO_DATE_PATTERN.fullmatch(value):
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD date, got {value!r}")
     try:
         return date.fromisoformat(value)
     except ValueError as exc:
@@ -127,6 +132,17 @@ def parse_cards(path: Path) -> tuple[list[EvidenceCard], list[str]]:
             errors.append(f"{path}:{line_number}: missing required fields: {', '.join(sorted(missing))}")
             continue
 
+        empty_fields = [
+            field
+            for field in sorted(REQUIRED_SCALAR_FIELDS)
+            if not isinstance(row[field], str) or not row[field].strip()
+        ]
+        if empty_fields:
+            errors.append(
+                f"{path}:{line_number}: required fields must be non-empty strings: "
+                f"{', '.join(empty_fields)}"
+            )
+
         card_id = str(row["id"])
         if card_id in seen_ids:
             errors.append(f"{path}:{line_number}: duplicate id: {card_id}")
@@ -135,10 +151,14 @@ def parse_cards(path: Path) -> tuple[list[EvidenceCard], list[str]]:
         if not isinstance(row["numbers"], dict):
             errors.append(f"{path}:{line_number}: numbers must be a JSON object")
 
-        try:
-            parsed_source_date = date.fromisoformat(str(row["source_date"]))
-        except ValueError:
+        source_date_value = str(row["source_date"])
+        if not ISO_DATE_PATTERN.fullmatch(source_date_value):
             errors.append(f"{path}:{line_number}: source_date must be YYYY-MM-DD")
+            continue
+        try:
+            parsed_source_date = date.fromisoformat(source_date_value)
+        except ValueError:
+            errors.append(f"{path}:{line_number}: source_date must be a valid calendar date")
             continue
 
         cards.append(EvidenceCard(line_number=line_number, row=row, source_date=parsed_source_date))
@@ -146,11 +166,21 @@ def parse_cards(path: Path) -> tuple[list[EvidenceCard], list[str]]:
     return cards, errors
 
 
+def value_has_exact_price(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(PRICE_VALUE_PATTERN.search(value))
+    if isinstance(value, dict):
+        return any(value_has_exact_price(item) for item in value.values())
+    if isinstance(value, list):
+        return any(value_has_exact_price(item) for item in value)
+    return False
+
+
 def has_exact_price(card: EvidenceCard) -> bool:
     numbers = card.row.get("numbers", {})
     if not isinstance(numbers, dict):
         return False
-    return any(PRICE_KEY_PATTERN.search(str(key)) for key in numbers)
+    return any(PRICE_KEY_PATTERN.search(str(key)) for key in numbers) or value_has_exact_price(numbers)
 
 
 def validate(args: argparse.Namespace) -> tuple[list[str], list[str], dict[str, int]]:
