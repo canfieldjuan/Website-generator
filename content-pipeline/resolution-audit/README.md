@@ -15,12 +15,13 @@ current offer.
    - feedback ask
 2. Paste `source-pack.md`, `claims-guard.md`, and the relevant angle from
    `angles.md` into Open WebUI.
-3. Paste the matching contract from `prompt-contracts.md`.
-4. Generate the draft.
-5. Run the draft through the self-check contract in `prompt-contracts.md`.
-6. Revise before posting if the draft promises savings, rankings, ticket-volume
-   reductions, live publishing, or certainty about ownership.
-7. Later slices will add a prompt bundler and an ATLAS `verify_draft` handoff.
+3. Paste the Shared Context Block from `prompt-contracts.md`.
+4. Paste the matching channel contract from `prompt-contracts.md`.
+5. Generate the draft.
+6. Run the draft through the self-check contract in `prompt-contracts.md`.
+7. Revise before posting if the draft promises savings, guaranteed rankings,
+   ticket-volume reductions, live publishing, or certainty about ownership.
+8. Later slices will add a prompt bundler and an ATLAS `verify_draft` handoff.
 
 ## Source Hierarchy
 

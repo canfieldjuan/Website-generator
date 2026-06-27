@@ -5,7 +5,8 @@ Use these in Open WebUI after pasting the current source files:
 1. `source-pack.md`
 2. `claims-guard.md`
 3. the relevant angle from `angles.md`
-4. one prompt contract from this file
+4. the Shared Context Block from this file
+5. one channel contract from this file
 
 Do not ask the model to ignore the guard. If a draft conflicts with the guard,
 revise the draft or discard it.
@@ -24,7 +25,8 @@ The draft must:
 - frame cost as estimated cost exposure, not guaranteed savings
 - describe ownership as probable or investigatory when uncertain
 - say drafted answers are review-ready, not auto-published
-- say strong answers are backed by ticket evidence when evidence exists
+- say strong answers are backed by agent resolution or scoped resolution
+  evidence when that evidence exists
 - allow "no proven answer" when the ticket history lacks scoped resolution
   evidence
 - treat product, policy, and process gaps as possible outcomes
@@ -32,8 +34,8 @@ The draft must:
   excerpts
 
 The draft must not claim:
-- guaranteed savings, rankings, ticket-volume reduction, or fixed deflection
-  percentages
+- guaranteed savings, guaranteed rankings, ticket-volume reduction, or fixed
+  deflection percentages
 - automatic help-center updates, live publishing, or automatic ticket answering
 - certainty that a specific team owns an issue
 - that the audit replaces support agents
@@ -154,7 +156,7 @@ Requirements:
 - Include a section that explains "no proven answer" without making the report
   sound like it failed.
 - Include at least one disclaimer that the audit does not promise savings,
-  rankings, or ticket-volume reduction.
+  guaranteed rankings, or ticket-volume reduction.
 - Avoid keyword-stuffed SEO promises.
 - Avoid pretending the audit performs live help-center publishing or ticket
   automation.
