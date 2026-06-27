@@ -1,11 +1,12 @@
 # Report Shape Example
 
-Use this when a model needs to understand what the current Resolution Audit
-report looks like.
+Use this when a model needs to understand the target Resolution Audit
+report-shape pattern.
 
 This is a fictional example. Do not present the issue names, counts, costs, or
 owner lanes as customer proof. Replace bracketed values with real audit data or
-remove them.
+remove them. Do not claim this exact structure has shipped unless current
+product code or report output confirms it.
 
 ## The Before/Now Shape
 
@@ -17,7 +18,7 @@ The old report answered:
 - What customer wording or search language showed up?
 - Which unresolved gaps had no proven answer?
 
-The current report keeps that and adds:
+The target report shape keeps that and adds:
 
 - Who may need to review the fix?
 - Is this a documentation issue, a product issue, a billing issue, a policy
@@ -29,7 +30,7 @@ Short version:
 
 ```text
 The old report was a ranked repeat list with cost and content output.
-The new report is a ranked action queue with cost, evidence, content output,
+The target report is a ranked action queue with cost, evidence, content output,
 unresolved gaps, and probable owner routing.
 ```
 

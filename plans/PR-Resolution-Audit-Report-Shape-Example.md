@@ -2,18 +2,18 @@
 
 ## Why this slice exists
 
-The source pack now explains the new Resolution Audit shape, but models still
+The source pack now explains the Resolution Audit direction, but models still
 benefit from one concrete artifact to imitate. Without a sample structure, they
 can drift back to generic language about ranked questions, costs, and FAQ
 drafts while treating the owner lane as optional.
 
-This slice adds a sanitized report-shape example and a bundler flag so Open
-WebUI prompts can include the example when drafting report-shape, Snapshot,
-marketing, or build-in-public content.
+This slice adds a sanitized target report-shape example and a bundler flag so
+Open WebUI prompts can include the example when drafting report-shape,
+Snapshot, marketing, or build-in-public content.
 
 ## Scope (this PR)
 
-1. Add a `report-shape-example.md` file with a fictional, non-customer mock
+1. Add a `report-shape-example.md` file with a fictional, non-customer target
    Snapshot and full-audit section.
 2. Add `--include-report-shape` to `bundle_prompt.py`.
 3. Update the README with when to include the report-shape example.
@@ -30,7 +30,7 @@ Files touched:
 
 The new Markdown file acts as a safe pattern library. It uses fictional issue
 names and bracketed placeholders instead of real customer numbers. It shows the
-columns and language models should copy:
+columns and language models may copy when real audit data supports them:
 
 - repeated issue
 - estimated cost exposure
@@ -49,6 +49,8 @@ operator asks for the sample.
 
 - The sample uses placeholders and explicit "example only" language to avoid
   fake customer proof.
+- The sample is labeled as a target shape pattern, not proof that every field
+  has shipped in the current generator.
 - The owner lane remains probable and review-oriented, not a certain
   assignment.
 - No visual screenshot is added in this slice. The goal is prompt behavior, not
@@ -70,6 +72,7 @@ Ran locally:
 - `rg -n "Report Shape Example|Owner Routing Map|Probable owner lane|Example only" /tmp/resolution-audit-report-shape-bundle.md`
 - `python content-pipeline/resolution-audit/bundle_prompt.py --channel linkedin --angle build-in-public >/tmp/resolution-audit-default-report-shape-bundle.md`
 - `! rg -n "Report Shape Example|Owner Routing Map|Example only" /tmp/resolution-audit-default-report-shape-bundle.md`
+- `! rg -n "current deliverable|current Resolution Audit|current report|The current report|new report" content-pipeline/resolution-audit/README.md content-pipeline/resolution-audit/report-shape-example.md plans/PR-Resolution-Audit-Report-Shape-Example.md`
 - `python -m py_compile content-pipeline/resolution-audit/bundle_prompt.py`
 - `git diff --cached --check -- content-pipeline/resolution-audit/report-shape-example.md content-pipeline/resolution-audit/bundle_prompt.py content-pipeline/resolution-audit/README.md plans/PR-Resolution-Audit-Report-Shape-Example.md`
 

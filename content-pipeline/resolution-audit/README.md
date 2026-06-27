@@ -26,11 +26,12 @@ re-check the live source page before publishing a specific dollar figure.
 Run `validate_evidence.py` before using those cards when the source dates may be
 stale.
 
-Use `report-shape-example.md` when the model needs a concrete picture of the
-current deliverable. It is a fictional example, not proof. It shows the
-Snapshot/full-audit fields models should preserve: ranked repeated issue,
-estimated cost exposure, resolution evidence, customer wording, content output,
-no-proven-answer gaps, probable owner lane, and next review action.
+Use `report-shape-example.md` when the model needs a concrete target pattern
+for Snapshot or full-audit structure. It is a fictional example, not proof of a
+shipped field. It shows the fields models may use when real audit data supports
+them: ranked repeated issue, estimated cost exposure, resolution evidence,
+customer wording, content output, no-proven-answer gaps, probable owner lane,
+and next review action.
 
 ## Operator Flow
 
@@ -133,7 +134,7 @@ Use this order when two files disagree:
 2. `source-pack.md`.
 3. `claims-guard.md`.
 4. `creative-manual.md` for creative range, examples, and channel patterns.
-5. `report-shape-example.md` for the concrete Snapshot/full-audit shape.
+5. `report-shape-example.md` for the target Snapshot/full-audit shape pattern.
 6. `plain-talk.md` for voice and readability.
 7. `leak-index.md`, `evidence.jsonl`, and `frames.md` for vendor-cost leak
    routing.
@@ -156,7 +157,7 @@ help-center updates, or guaranteed savings, do not use that claim.
   platform.
 - Adds a creative manual for richer content primitives, channel patterns, and
   image prompt direction.
-- Adds a report-shape example for concrete Snapshot and owner-lane structure.
+- Adds a report-shape example for target Snapshot and owner-lane structure.
 - Adds a Plain Talk guide and readability checker for less robotic drafts.
 - Adds a leak router, evidence cards, and safe framing for vendor-cost angles.
 - Adds paste-ready prompt contracts for the common Open WebUI drafting jobs.
