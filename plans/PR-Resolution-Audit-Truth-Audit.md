@@ -77,6 +77,10 @@ Ran locally:
   status back to `pass`, and confirmed the audit exits non-zero.
 - Warning fixture: copied the kit to `/tmp`, added a current owner-lane claim,
   and confirmed the audit emits a warning while exiting zero.
+- Warning fixture: copied the kit to `/tmp`, added `The report currently
+  includes a probable owner lane.`, and confirmed the audit warns.
+- Warning fixture: copied the kit to `/tmp`, added support-team wording around
+  current report output, and confirmed the audit warns.
 - Negation fixture: copied the kit to `/tmp`, added `The probable owner lane is
   not shipped yet.`, and confirmed the audit does not warn.
 - `git diff --check -- content-pipeline/resolution-audit/audit_content_kit_truth.py content-pipeline/resolution-audit/open-webui-verifier-tool.py .github/workflows/content-kit-truth.yml plans/PR-Resolution-Audit-Truth-Audit.md`
@@ -88,8 +92,8 @@ Ran locally:
 | Audit script | ~378 |
 | Verifier status adjustment | ~4 |
 | CI workflow | ~19 |
-| Plan doc | ~95 |
-| Total | ~496 |
+| Plan doc | ~99 |
+| Total | ~500 |
 
 Over the 400 LOC soft cap because the review fix expands the audit from
 single-instance checks to class-level checks.

@@ -18,7 +18,7 @@ EXPLICIT_CHANNEL_LINE_RE = re.compile(r"\bchannel\b.*(?:`channel`|such as|linked
 TOKEN_RE = re.compile(r"\b[a-z][a-z0-9_-]*\b", re.I)
 CURRENT_RE = re.compile(r"\b(current|currently|shipped|live)\b", re.I)
 CURRENT_OUTPUT_SUPPORT_RE = re.compile(
-    r"\bcurrent\s+(?:product|report)\s+output\b.*\b(?:support|supports|confirm|confirms)\b|"
+    r"\bcurrent\s+(?:product|report)\s+output\b.*\b(?:supports|confirm|confirms)\b|"
     r"\b(?:support|supports|supported|confirm|confirms|confirmed)\b.*\bcurrent\s+(?:product|report)\s+output\b",
     re.I,
 )
