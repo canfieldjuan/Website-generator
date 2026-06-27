@@ -67,7 +67,9 @@ rewrites, report-shape routing, and verifier review.
    `--include-plain-talk` to the bundle command.
 6. If the draft explains the Snapshot, report shape, or before/now product
    change, add `--include-report-shape` to the bundle command.
-7. If the draft uses a vendor-cost or leak angle, choose one tag from
+7. If the draft depends on current shipped fields, target fields, or claim
+   flags, add `--include-product-truth` to the bundle command.
+8. If the draft uses a vendor-cost or leak angle, choose one tag from
    `leak-index.md`, validate the evidence file, and pass that tag to
    `bundle_prompt.py` with `--leak-tag`.
 
@@ -79,12 +81,12 @@ rewrites, report-shape routing, and verifier review.
        --leak-tag repeat_resolution
    ```
 
-8. Generate the draft.
-9. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
+9. Generate the draft.
+10. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
    `prompt-contracts.md`.
-10. Run the final draft through the Contract 6 self-check in
+11. Run the final draft through the Contract 6 self-check in
    `prompt-contracts.md` after any Plain Talk rewrite.
-11. Save the draft and score it locally:
+12. Save the draft and score it locally:
 
    ```bash
    python content-pipeline/resolution-audit/score_plain_talk.py \
@@ -92,7 +94,7 @@ rewrites, report-shape routing, and verifier review.
        --target linkedin
    ```
 
-12. Save the draft and prepare a verifier handoff packet:
+13. Save the draft and prepare a verifier handoff packet:
 
    ```bash
    python content-pipeline/resolution-audit/prepare_verifier_packet.py \
@@ -101,9 +103,9 @@ rewrites, report-shape routing, and verifier review.
        --output /tmp/resolution-audit-verify-packet.json
    ```
 
-13. Revise before posting if the draft promises savings, guaranteed rankings,
+14. Revise before posting if the draft promises savings, guaranteed rankings,
    ticket-volume reductions, live publishing, or certainty about ownership.
-14. Later infrastructure work can submit the packet to ATLAS `verify_draft`.
+15. Later infrastructure work can submit the packet to ATLAS `verify_draft`.
 
 Manual-only creative and rewrite jobs:
 
