@@ -6,7 +6,7 @@ If the `verify_resolution_audit_draft` tool is available, run it on the draft.
 
 Use:
 
-- `channel`: linkedin, reddit, reply, blog, feedback, or sales
+- `channel`: linkedin, reddit, reply, blog, or feedback
 - `asset_id`: a short label for the draft
 
 Return the tool output first, then explain the top revision priorities.

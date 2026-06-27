@@ -6,7 +6,8 @@ like a landing page.
 ## Goal
 
 Make the draft sound like a person talking to another person without losing the
-buyer language or claim safety.
+buyer language. The claims guard still wins if readability would weaken a
+qualifier.
 
 ## Protected Terms
 

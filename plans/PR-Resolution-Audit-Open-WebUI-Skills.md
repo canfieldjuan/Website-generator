@@ -62,9 +62,10 @@ Ran locally:
 - `rg -n "probable owner lane|no proven answer|estimated cost exposure|verify_resolution_audit_draft" content-pipeline/resolution-audit/open-webui-skills`
   - Result: required owner-lane, no-proven-answer, cost-exposure, and verifier
     tool language is present.
-- `! rg -n "current report shape|current deliverable|The current report|owner lane is the strategic upgrade|routes repeated issues to a probable owner lane" content-pipeline/resolution-audit/open-webui-skills content-pipeline/resolution-audit/README.md plans/PR-Resolution-Audit-Open-WebUI-Skills.md`
+- `! rg -n "sales" content-pipeline/resolution-audit/open-webui-skills/verifier-reviewer.md`
+- `! rg -n "current report shape|current deliverable|The current report|owner lane is the strategic upgrade|routes repeated issues to a probable owner lane" content-pipeline/resolution-audit/open-webui-skills content-pipeline/resolution-audit/README.md`
 - `git diff --check -- content-pipeline/resolution-audit/open-webui-skills content-pipeline/resolution-audit/README.md plans/PR-Resolution-Audit-Open-WebUI-Skills.md`
 
 ## Estimated diff size
 
-8 files, +387 / -0. Under the 400 LOC soft cap.
+8 files, +389 / -0. Under the 400 LOC soft cap.
