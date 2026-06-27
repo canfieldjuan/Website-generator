@@ -46,7 +46,9 @@ stale.
    selected channel contract.
 4. If the draft needs sharper creative direction, paste the Compact Context
    Block or relevant channel section from `creative-manual.md`.
-5. If the draft uses a vendor-cost or leak angle, choose one tag from
+5. If the draft should start with the Plain Talk voice guide already loaded, add
+   `--include-plain-talk` to the bundle command.
+6. If the draft uses a vendor-cost or leak angle, choose one tag from
    `leak-index.md`, validate the evidence file, and pass that tag to
    `bundle_prompt.py` with `--leak-tag`.
 
@@ -58,12 +60,12 @@ stale.
        --leak-tag repeat_resolution
    ```
 
-6. Generate the draft.
-7. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
+7. Generate the draft.
+8. If the draft sounds robotic, run Contract 7: Plain Talk Rewrite from
    `prompt-contracts.md`.
-8. Run the final draft through the Contract 6 self-check in
+9. Run the final draft through the Contract 6 self-check in
    `prompt-contracts.md` after any Plain Talk rewrite.
-9. Save the draft and score it locally:
+10. Save the draft and score it locally:
 
    ```bash
    python content-pipeline/resolution-audit/score_plain_talk.py \
@@ -71,7 +73,7 @@ stale.
        --target linkedin
    ```
 
-10. Save the draft and prepare a verifier handoff packet:
+11. Save the draft and prepare a verifier handoff packet:
 
    ```bash
    python content-pipeline/resolution-audit/prepare_verifier_packet.py \
@@ -80,9 +82,9 @@ stale.
        --output /tmp/resolution-audit-verify-packet.json
    ```
 
-11. Revise before posting if the draft promises savings, guaranteed rankings,
+12. Revise before posting if the draft promises savings, guaranteed rankings,
    ticket-volume reductions, live publishing, or certainty about ownership.
-12. Later infrastructure work can submit the packet to ATLAS `verify_draft`.
+13. Later infrastructure work can submit the packet to ATLAS `verify_draft`.
 
 Manual-only creative and rewrite jobs:
 

@@ -119,7 +119,12 @@ def render_file(title: str, body: str) -> str:
     return f"## {title}\n\n{body.strip()}"
 
 
-def build_bundle(channel: str, angle: str | None, leak_tag: str | None) -> str:
+def build_bundle(
+    channel: str,
+    angle: str | None,
+    leak_tag: str | None,
+    include_plain_talk: bool,
+) -> str:
     source_pack = read_file("source-pack.md")
     claims_guard = read_file("claims-guard.md")
     prompt_contracts = read_file("prompt-contracts.md")
@@ -137,6 +142,9 @@ def build_bundle(channel: str, angle: str | None, leak_tag: str | None) -> str:
         render_file("Claims Guard", claims_guard),
     ]
 
+    if include_plain_talk:
+        sections.extend(["", render_file("Plain Talk Guide", read_file("plain-talk.md"))])
+
     if angle:
         angles = read_file("angles.md")
         angle_section = extract_section(angles, ANGLE_SECTIONS[angle])
@@ -148,6 +156,10 @@ def build_bundle(channel: str, angle: str | None, leak_tag: str | None) -> str:
     operator_instructions = [
         "Fill in the Inputs list inside the selected channel contract above, then draft using that contract.",
     ]
+    if include_plain_talk:
+        operator_instructions.append(
+            "Plain Talk is voice guidance. The claims guard still wins if readability, rhythm, or sharper phrasing would weaken a qualifier."
+        )
     if leak_tag:
         operator_instructions.append(
             "Use Selected Leak Context only as vendor billing-mechanic evidence. Do not turn it into customer waste, guaranteed savings, or blame language."
@@ -193,6 +205,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional leak-router tag to include with matching evidence and frame context.",
     )
     parser.add_argument(
+        "--include-plain-talk",
+        action="store_true",
+        help="Include the Plain Talk voice and readability guide.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Write the bundle to this file instead of stdout.",
@@ -202,7 +219,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    bundle = build_bundle(args.channel, args.angle, args.leak_tag)
+    bundle = build_bundle(args.channel, args.angle, args.leak_tag, args.include_plain_talk)
 
     if args.output:
         args.output.write_text(bundle, encoding="utf-8")
