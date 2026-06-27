@@ -13,14 +13,12 @@ from `creative-manual.md` instead of the full manual.
 
 ## Operator Flow
 
-1. Pick the channel and job:
+1. Pick the CLI-backed channel and job:
    - LinkedIn post
    - Reddit post
-   - reply to a social comment
+   - reply to a social comment or sales note
    - blog outline
    - feedback ask
-   - image prompt
-   - marketing or sales copy
 2. Build one pasteable prompt bundle:
 
    ```bash
@@ -47,6 +45,15 @@ from `creative-manual.md` instead of the full manual.
 8. Revise before posting if the draft promises savings, guaranteed rankings,
    ticket-volume reductions, live publishing, or certainty about ownership.
 9. Later infrastructure work can submit the packet to ATLAS `verify_draft`.
+
+Manual-only creative jobs:
+
+- image prompts
+- marketing copy that does not fit a blog, LinkedIn, Reddit, feedback, or reply
+  contract
+
+For these, use the Manual fallback below. They are not `bundle_prompt.py`
+channels yet.
 
 Manual fallback:
 

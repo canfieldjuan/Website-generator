@@ -82,5 +82,5 @@ untracked workspace files are cleaned or stashed.
 
 ## Estimated diff size
 
-Actual working diff size: 3 files, +553 / -12. This is over the 400 LOC soft cap
+Actual working diff size: 3 files, +562 / -14. This is over the 400 LOC soft cap
 for the safety and standalone-context reason named in **Why this slice exists**.
