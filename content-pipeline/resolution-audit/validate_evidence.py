@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
@@ -21,6 +21,8 @@ REQUIRED_FIELDS = {
     "evidence_type",
     "source_url",
     "source_date",
+    "source_checked_at",
+    "expires_at",
     "summary",
     "numbers",
     "claim_limit",
@@ -36,6 +38,8 @@ class EvidenceCard:
     line_number: int
     row: dict[str, Any]
     source_date: date
+    source_checked_at: date
+    expires_at: date
 
     @property
     def card_id(self) -> str:
@@ -73,6 +77,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Leak frames Markdown file.",
     )
     parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=ROOT / "product-truth.json",
+        help="Product truth manifest containing fields.evidence_freshness_days.value.",
+    )
+    parser.add_argument(
         "--as-of",
         type=parse_iso_date,
         default=datetime.now(timezone.utc).date(),
@@ -81,13 +91,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--stale-after-days",
         type=int,
-        default=90,
-        help="Warn when exact-price cards are older than this many days.",
+        help="Override manifest freshness window in days.",
     )
     parser.add_argument(
         "--fail-on-stale",
         action="store_true",
-        help="Exit non-zero when exact-price cards are stale.",
+        help="Exit non-zero when evidence cards are expired.",
     )
     return parser.parse_args(argv)
 
@@ -99,6 +108,28 @@ def parse_iso_date(value: str) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD date, got {value!r}") from exc
+
+
+def load_freshness_days(path: Path) -> int:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"manifest not found: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid manifest JSON in {path}: {exc.msg}") from exc
+
+    if not isinstance(manifest, dict):
+        raise ValueError(f"manifest must be a JSON object: {path}")
+    fields = manifest.get("fields")
+    if not isinstance(fields, dict):
+        raise ValueError("manifest.fields must be an object")
+    freshness = fields.get("evidence_freshness_days")
+    if not isinstance(freshness, dict):
+        raise ValueError("manifest is missing fields.evidence_freshness_days")
+    value = freshness.get("value")
+    if not isinstance(value, int) or value <= 0:
+        raise ValueError("fields.evidence_freshness_days.value must be a positive integer")
+    return value
 
 
 def router_tags(markdown: str) -> set[str]:
@@ -151,17 +182,30 @@ def parse_cards(path: Path) -> tuple[list[EvidenceCard], list[str]]:
         if not isinstance(row["numbers"], dict):
             errors.append(f"{path}:{line_number}: numbers must be a JSON object")
 
-        source_date_value = str(row["source_date"])
-        if not ISO_DATE_PATTERN.fullmatch(source_date_value):
-            errors.append(f"{path}:{line_number}: source_date must be YYYY-MM-DD")
-            continue
-        try:
-            parsed_source_date = date.fromisoformat(source_date_value)
-        except ValueError:
-            errors.append(f"{path}:{line_number}: source_date must be a valid calendar date")
+        parsed_dates: dict[str, date] = {}
+        for field in ("source_date", "source_checked_at", "expires_at"):
+            value = row[field]
+            if not isinstance(value, str) or not ISO_DATE_PATTERN.fullmatch(value):
+                errors.append(f"{path}:{line_number}: {field} must be YYYY-MM-DD")
+                continue
+            try:
+                parsed_dates[field] = date.fromisoformat(value)
+            except ValueError:
+                errors.append(f"{path}:{line_number}: {field} must be a valid calendar date")
+                continue
+
+        if set(parsed_dates) != {"source_date", "source_checked_at", "expires_at"}:
             continue
 
-        cards.append(EvidenceCard(line_number=line_number, row=row, source_date=parsed_source_date))
+        cards.append(
+            EvidenceCard(
+                line_number=line_number,
+                row=row,
+                source_date=parsed_dates["source_date"],
+                source_checked_at=parsed_dates["source_checked_at"],
+                expires_at=parsed_dates["expires_at"],
+            )
+        )
 
     return cards, errors
 
@@ -186,6 +230,15 @@ def has_exact_price(card: EvidenceCard) -> bool:
 def validate(args: argparse.Namespace) -> tuple[list[str], list[str], dict[str, int]]:
     errors: list[str] = []
     warnings: list[str] = []
+    freshness_days = args.stale_after_days
+    if freshness_days is None:
+        try:
+            freshness_days = load_freshness_days(args.manifest)
+        except ValueError as exc:
+            errors.append(str(exc))
+            freshness_days = 0
+    elif freshness_days <= 0:
+        errors.append("--stale-after-days must be a positive integer")
 
     cards, card_errors = parse_cards(args.evidence)
     errors.extend(card_errors)
@@ -209,23 +262,38 @@ def validate(args: argparse.Namespace) -> tuple[list[str], list[str], dict[str, 
     future_cards = 0
     price_cards = 0
     for card in cards:
-        age_days = (args.as_of - card.source_date).days
-        if age_days < 0:
+        expected_expires_at = card.source_checked_at + timedelta(days=freshness_days)
+        if card.expires_at != expected_expires_at:
+            errors.append(
+                f"{args.evidence}:{card.line_number}: expires_at {card.expires_at.isoformat()} "
+                f"must equal source_checked_at + {freshness_days} days "
+                f"({expected_expires_at.isoformat()})"
+            )
+        if card.expires_at < card.source_checked_at:
+            errors.append(
+                f"{args.evidence}:{card.line_number}: expires_at {card.expires_at.isoformat()} "
+                f"is before source_checked_at {card.source_checked_at.isoformat()}"
+            )
+        if card.source_date > args.as_of:
             future_cards += 1
             errors.append(
                 f"{args.evidence}:{card.line_number}: source_date {card.source_date.isoformat()} "
                 f"is after as-of {args.as_of.isoformat()}"
             )
-            continue
-        if not has_exact_price(card):
-            continue
-        price_cards += 1
-        if age_days > args.stale_after_days:
+        if card.source_checked_at > args.as_of:
+            future_cards += 1
+            errors.append(
+                f"{args.evidence}:{card.line_number}: source_checked_at {card.source_checked_at.isoformat()} "
+                f"is after as-of {args.as_of.isoformat()}"
+            )
+        if args.as_of > card.expires_at:
             stale_cards += 1
             warnings.append(
-                f"{args.evidence}:{card.line_number}: WARN stale exact-price card "
-                f"{card.card_id} is {age_days} days old; re-open {card.source_url} before citing a dollar figure"
+                f"{args.evidence}:{card.line_number}: WARN expired evidence card "
+                f"{card.card_id} expired on {card.expires_at.isoformat()}; re-open {card.source_url} before citing it"
             )
+        if has_exact_price(card):
+            price_cards += 1
 
     stats = {
         "cards": len(cards),
@@ -234,6 +302,7 @@ def validate(args: argparse.Namespace) -> tuple[list[str], list[str], dict[str, 
         "price_cards": price_cards,
         "stale_cards": stale_cards,
         "future_cards": future_cards,
+        "freshness_days": freshness_days,
     }
     return errors, warnings, stats
 
@@ -252,7 +321,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{stats['cards']} evidence cards, "
         f"{stats['router_tags']} router tags, "
         f"{stats['frame_sections']} frame sections, "
-        f"{stats['price_cards']} exact-price cards"
+        f"{stats['price_cards']} exact-price cards, "
+        f"{stats['stale_cards']} expired cards, "
+        f"{stats['freshness_days']}-day freshness window"
     )
 
     if errors:

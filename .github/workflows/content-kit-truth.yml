@@ -17,5 +17,7 @@ jobs:
           python-version: "3.13"
       - name: Check Resolution Audit product truth sync
         run: python content-pipeline/resolution-audit/sync_product_truth.py --check
+      - name: Validate Resolution Audit evidence freshness
+        run: python content-pipeline/resolution-audit/validate_evidence.py --fail-on-stale
       - name: Audit Resolution Audit content kit truth
         run: python content-pipeline/resolution-audit/audit_content_kit_truth.py
