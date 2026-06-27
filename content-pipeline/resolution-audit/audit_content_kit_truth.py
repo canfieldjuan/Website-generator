@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import copy
+from datetime import datetime, timezone
 import importlib.util
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ import sys
 from typing import Any
 
 from sync_product_truth import load_product_source, sync_derived_fields
+from validate_evidence import validate as validate_evidence
 
 
 KIT_DIR = Path(__file__).resolve().parent
@@ -346,6 +348,20 @@ def check_pass_semantics(kit_dir: Path) -> list[str]:
     return findings
 
 
+def check_evidence_freshness(kit_dir: Path, manifest_path: Path) -> list[str]:
+    evidence_args = argparse.Namespace(
+        evidence=kit_dir / "evidence.jsonl",
+        leak_index=kit_dir / "leak-index.md",
+        frames=kit_dir / "frames.md",
+        manifest=manifest_path,
+        as_of=datetime.now(timezone.utc).date(),
+        stale_after_days=None,
+        fail_on_stale=True,
+    )
+    errors, warnings, _stats = validate_evidence(evidence_args)
+    return [_blocking(f"evidence validation: {finding}") for finding in [*errors, *warnings]]
+
+
 def run_audit(kit_dir: Path, manifest_path: Path) -> tuple[list[str], list[str]]:
     manifest = _load_json(manifest_path)
     fields = manifest.get("fields", {})
@@ -361,6 +377,7 @@ def run_audit(kit_dir: Path, manifest_path: Path) -> tuple[list[str], list[str]]
     blocking.extend(check_channel_lines(kit_dir, allowed_channels))
     warnings.extend(check_target_fields_current(kit_dir, target_fields))
     blocking.extend(check_pass_semantics(kit_dir))
+    blocking.extend(check_evidence_freshness(kit_dir, manifest_path))
 
     return blocking, warnings
 
