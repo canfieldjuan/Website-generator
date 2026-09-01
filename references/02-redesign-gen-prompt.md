@@ -134,7 +134,8 @@ Output rules:
   its exact colors, fonts, and root tokens.
 - IMAGE RULES: Prioritize using any images with context='hero' or 'logo' from the JSON. If the original images are poor but a generated hero image was provided in the JSON, you MUST use the generated hero image for the main hero section.
 - All links use real URLs from the JSON
-- onerror handlers on every img tag for graceful fallback
+- Image failure behavior is added by trusted code after admission. Do not emit
+  event-handler attributes.
 
 ---
 
@@ -358,7 +359,7 @@ them on the homepage as preview grids that link to the full interior page:
   (e.g. "See all practice areas"), not generic.
 - `type: "team"` with `source_url` -> render up to 4 items in
   `.team-grid` / `.team-card`. Use `title` as the name, `tag` as the
-  role, `image_url` as the headshot with onerror fallback, and `meta`
+  role, `image_url` as the headshot, and `meta`
   as the short bio. Add a "Meet the full team" link to `source_url`.
 - `type: "misc"` with `tag: "faq"` on items -> render up to 4 items as
   an FAQ preview. Add a "See all FAQs" link to `source_url`.
@@ -514,7 +515,8 @@ Use --accent as ticker background.
 Label pill on left uses a darkened version of --accent.
 
 ### Nav
-Logo image first with onerror text fallback.
+Logo image first with adjacent text fallback; trusted code hides an unavailable
+image.
 Links: condensed font, uppercase, 12-13px, spaced tracking.
 CTA button uses --accent, right-aligned.
 Sticky, z-index 100.
@@ -542,7 +544,8 @@ Category badge: small, uppercase, accent background.
 ### Images
 Always set explicit aspect-ratio on containers.
 Always object-fit: cover.
-Always include onerror="this.style.display='none'".
+Never emit event-handler attributes. Trusted code adds the fixed image-failure
+behavior after admission.
 Gradient overlays only when text is placed over images.
 
 ### Footer
@@ -565,7 +568,7 @@ generation.
 Before outputting, verify:
 - [ ] All nav link URLs are real (from JSON nav array)
 - [ ] All content headlines are verbatim from JSON
-- [ ] All image src values are real URLs from JSON with onerror handlers
+- [ ] All image src values are real URLs from JSON; trusted code owns failure behavior
 - [ ] No CSS, doctype, `<html>`, `<head>`, `<style>`, or `<script>` output
 - [ ] No lorem ipsum or placeholder text
 - [ ] Mobile collapses correctly at 768px

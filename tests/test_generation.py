@@ -1344,6 +1344,29 @@ class BodyAssemblyTests(unittest.TestCase):
         )
         self.assertEqual(validate_generated_body(body_result(valid_body)), valid_body)
 
+    def test_body_admission_rejects_code_owned_comment_markers(self):
+        deployment_comment = (
+            "<body><!-- WEBSITE REDESIGN MOCKUP\nClient: Test Business -->"
+            "<main>Ready</main></body>"
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "deployment metadata"):
+            validate_generated_body(
+                body_result(deployment_comment),
+                forbidden_comment_markers=("WEBSITE REDESIGN MOCKUP", "Client:"),
+            )
+
+        formspree_todo = (
+            "<body><!-- TODO: paste Formspree endpoint -->"
+            '<form action="#"></form></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(formspree_todo),
+                forbidden_comment_markers=("WEBSITE REDESIGN MOCKUP", "Client:"),
+            ),
+            formspree_todo,
+        )
+
     def test_prompt_defined_square_placeholders_fail_without_rejecting_other_brackets(self):
         prompt = "Use [PROSPECT.phone], [SITE_SLUG], and [N]-MILE RADIUS. - [ ] check"
         placeholders = extract_square_placeholder_tokens(
@@ -1462,6 +1485,24 @@ class BodyAssemblyTests(unittest.TestCase):
         self.assertIn("--font-display: 'Lexend', sans-serif;", document)
         self.assertIn('<body class="theme-light"><main>Ready</main></body>', document)
         self.assertEqual(document.count(trusted_comment), 1)
+
+    def test_assembly_adds_fixed_image_fallback_after_admission(self):
+        generated_body = (
+            '<body class="theme-light"><main><img src="/hero.jpg" alt="Team">'
+            "Ready</main></body>"
+        )
+        document = assemble_generated_html(
+            body_result(generated_body),
+            base_template=self.base_template,
+            theme_catalog=self.theme_catalog,
+            theme_name="warm",
+            colors=self.colors,
+            title="Test",
+            body_theme="theme-light",
+        )
+
+        self.assertIn("onerror=\"this.style.display='none'\"", document)
+        self.assertEqual(document.count("onerror="), 1)
 
     def test_assembly_rejects_unsafe_comment_invalid_color_and_unknown_theme(self):
         with self.assertRaisesRegex(GeneratedHtmlError, "exactly one HTML comment"):
@@ -1699,6 +1740,17 @@ class PromptContractTests(unittest.TestCase):
                     prompt,
                 )
                 self.assertNotIn("(or a leading comment)", prompt)
+
+    def test_image_fallback_is_code_owned_in_every_wired_html_prompt(self):
+        for prompt_path in (
+            Path("references/02-redesign-gen-prompt.md"),
+            Path("references/04-interior-page-prompt.md"),
+            Path("references/06-build-prompt.md"),
+        ):
+            with self.subTest(prompt=str(prompt_path)):
+                prompt = prompt_path.read_text(encoding="utf-8")
+                self.assertNotIn("onerror", prompt.casefold())
+                self.assertIn("trusted code", prompt.casefold())
 
     def test_deployment_comments_are_code_owned_and_absent_from_prompts(self):
         for prompt_path, markers in (
@@ -2120,6 +2172,33 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(event_handler_phone)),
             )
 
+        inline_fragment_phone = body_without_coverage.replace(
+            "</nav>",
+            '<div aria-label="Call us"><span>21</span>'
+            "<span>7-555-0199</span></div></nav>",
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "phone-like value with no verified phone",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(inline_fragment_phone)),
+            )
+
+        block_separated_numbers = body_without_coverage.replace(
+            "</nav>",
+            '<div aria-label="Route notes"><p>21</p>'
+            "<p>7-555-0199</p></div></nav>",
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(block_separated_numbers)),
+        )
+        self.assertIn("Route notes", html)
+
         non_exposed_attribute_phones = body_without_coverage.replace(
             "</nav>",
             '<span data-tracking-id="217-555-0199"></span>'
@@ -2410,6 +2489,49 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("WEBSITE REDESIGN MOCKUP", html)
         self.assertIn('class="site-footer"', html)
         self.assertIn('<body class="theme-dark">', html)
+
+    def test_generators_reject_model_authored_deployment_comments(self):
+        build_body = COMPLETE_BUILD_BODY.replace(
+            '<footer class="site-footer">',
+            '<!-- Prospect: Invented Business --><footer class="site-footer">',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "deployment metadata"):
+            build.generate_build_html(
+                {
+                    "business_name": "Test Business",
+                    "trade": "plumber",
+                    "city": "Effingham",
+                    "state": "IL",
+                    "phone": "217-555-0100",
+                },
+                config(),
+                FakeLocalClient(local_chat_payload(build_body)),
+            )
+
+        redesign_body = COMPLETE_PAGE_BODY.replace(
+            '<footer class="site-footer">',
+            '<!-- WEBSITE REDESIGN MOCKUP --><footer class="site-footer">',
+        )
+        for generator in (
+            lambda: pipeline.generate_redesign(
+                {"site": {"name": "Current Business"}},
+                theme="minimal",
+                generation_config=config(),
+                generation_client=FakeLocalClient(local_chat_payload(redesign_body)),
+            ),
+            lambda: pipeline.generate_interior_page(
+                {"site": {"name": "Current Business"}},
+                "contact",
+                theme="warm",
+                generation_config=config(),
+                generation_client=FakeLocalClient(local_chat_payload(redesign_body)),
+            ),
+        ):
+            with self.subTest(generator=generator), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "deployment metadata",
+            ):
+                generator()
 
     def test_interior_generator_assembles_body_without_deployment_comment(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_PAGE_BODY))

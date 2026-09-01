@@ -57,6 +57,51 @@ PHONE_LIKE_PATTERN = re.compile(
     r"(?<!\d)(?:\+?1[\s()./-]*)?\(?[2-9]\d{2}\)?[\s./-]*"
     r"[2-9]\d{2}[\s./-]*\d{4}(?!\d)"
 )
+PHONE_TEXT_BOUNDARY_TAGS = frozenset(
+    {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "dd",
+        "details",
+        "dialog",
+        "div",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hgroup",
+        "hr",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "summary",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    }
+)
 BIDI_PHONE_CONTROLS = frozenset(
     {
         "\u061c",
@@ -74,6 +119,7 @@ BIDI_PHONE_CONTROLS = frozenset(
     }
 )
 ACTIONABLE_URL_ATTRIBUTES = ("href", "action", "formaction", "xlink:href")
+TRUSTED_IMAGE_ERROR_HANDLER = "this.style.display='none'"
 _EXPECTED_PHONE_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
@@ -200,6 +246,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.has_content_outside_body = False
         self.visible_text_parts: list[str] = []
         self.decoded_attribute_values: list[str] = []
+        self.comment_values: list[str] = []
         self.executable_attributes: list[str] = []
         self.class_names: set[str] = set()
         self.class_name_counts: dict[str, int] = {}
@@ -313,6 +360,12 @@ class _GeneratedBodyParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self.body_depth:
             self.visible_text_parts.append(data)
+        elif data.strip():
+            self.has_content_outside_body = True
+
+    def handle_comment(self, data: str) -> None:
+        if self.body_depth:
+            self.comment_values.append(data)
         elif data.strip():
             self.has_content_outside_body = True
 
@@ -747,8 +800,9 @@ def _phone_like_digit_values(value: str) -> set[str]:
     return digits
 
 
-def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
+def _claim_exposure_texts(body_root: Tag) -> tuple[tuple[str, str], str]:
     visual_parts: list[str] = []
+    phone_visual_parts: list[str] = []
     id_targets: dict[str, list[Tag]] = {}
     for element in (body_root, *body_root.find_all(True)):
         identifier = element.get("id")
@@ -794,20 +848,28 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
         if isinstance(node, Comment):
             return
         if isinstance(node, NavigableString):
-            visual_parts.append(str(node))
+            text = str(node)
+            visual_parts.append(text)
+            phone_visual_parts.append(text)
             return
         if not isinstance(node, Tag):
             return
         if is_render_suppressed(node):
             return
+        has_phone_boundary = node.name.casefold() in PHONE_TEXT_BOUNDARY_TAGS
+        if has_phone_boundary:
+            phone_visual_parts.append("|")
         tooltip = tooltip_text(node)
         if tooltip:
             visual_parts.append(tooltip)
         replacement = replacement_text(node)
         if replacement:
             visual_parts.append(replacement)
+            phone_visual_parts.append(replacement)
         for child in node.children:
             visit_visual(child)
+        if has_phone_boundary:
+            phone_visual_parts.append("|")
 
     def resolve_references(
         node: Tag,
@@ -899,7 +961,10 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
 
     visit_visual(body_root)
     visit_accessible(body_root)
-    return " ".join(visual_parts), " ".join(accessible_parts)
+    return (
+        (" ".join(visual_parts), " ".join(accessible_parts)),
+        "".join(phone_visual_parts),
+    )
 
 
 def _exact_class_names(element: Tag) -> set[str]:
@@ -951,6 +1016,7 @@ def validate_generated_body(
     max_bytes: int = MAX_GENERATED_BODY_BYTES,
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
+    forbidden_comment_markers: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
     allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
@@ -1003,6 +1069,37 @@ def validate_generated_body(
         names = ", ".join(sorted(set(parser.executable_attributes)))
         raise GeneratedBodyError(
             f"Generated body contains an executable attribute: {names}."
+        )
+    normalized_comments = tuple(
+        _normalize_claim_match_text(comment) for comment in parser.comment_values
+    )
+    compact_comments = tuple(
+        _compact_claim_match_text(comment) for comment in parser.comment_values
+    )
+    leaked_comment_markers = sorted(
+        {
+            marker
+            for marker in forbidden_comment_markers
+            if isinstance(marker, str)
+            and marker
+            and (
+                any(
+                    _normalize_claim_match_text(marker) in comment
+                    for comment in normalized_comments
+                )
+                or any(
+                    _compact_claim_match_text(marker) in comment
+                    for comment in compact_comments
+                )
+            )
+        },
+        key=str.casefold,
+    )
+    if leaked_comment_markers:
+        leaked = ", ".join(leaked_comment_markers[:3])
+        raise GeneratedBodyError(
+            "Generated body contains code-owned deployment metadata in a "
+            f"comment: {leaked}."
         )
     if parser.has_content_outside_body:
         raise GeneratedBodyError(
@@ -1080,7 +1177,7 @@ def validate_generated_body(
             + "; ".join(child_sequence_mismatches[:3])
         )
 
-    exposure_surfaces = _claim_exposure_texts(body_root)
+    exposure_surfaces, dom_adjacent_phone_surface = _claim_exposure_texts(body_root)
     claim_surfaces = (
         *exposure_surfaces,
         *parser.decoded_attribute_values,
@@ -1118,7 +1215,7 @@ def validate_generated_body(
 
     if expected_phone is not _EXPECTED_PHONE_UNSET:
         exposed_phone_digits: set[str] = set()
-        for surface in exposure_surfaces:
+        for surface in (*exposure_surfaces, dom_adjacent_phone_surface):
             exposed_phone_digits.update(_phone_like_digit_values(surface))
         actionable_phone_digits: set[str] = set()
         tel_targets = []
@@ -1350,6 +1447,19 @@ def parse_theme_definition(catalog: str, theme_name: str) -> ThemeDefinition:
     )
 
 
+def _add_trusted_image_fallbacks(body: str) -> str:
+    parsed_body = BeautifulSoup(body, "html.parser")
+    body_root = parsed_body.find("body")
+    if not isinstance(body_root, Tag):
+        raise GeneratedHtmlError("Generated body root could not be parsed for assembly.")
+    images = body_root.find_all("img")
+    if not images:
+        return body
+    for image in images:
+        image["onerror"] = TRUSTED_IMAGE_ERROR_HANDLER
+    return str(body_root)
+
+
 def assemble_generated_html(
     result: GenerationResult,
     *,
@@ -1362,6 +1472,7 @@ def assemble_generated_html(
     trusted_head_comment: str | None = None,
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
+    forbidden_comment_markers: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
     allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
@@ -1385,6 +1496,7 @@ def assemble_generated_html(
         result,
         forbidden_square_placeholders=forbidden_square_placeholders,
         forbidden_visible_phrases=forbidden_visible_phrases,
+        forbidden_comment_markers=forbidden_comment_markers,
         forbidden_class_names=forbidden_class_names,
         allowed_class_names=allowed_class_names,
         required_exposed_values=required_exposed_values,
@@ -1392,6 +1504,7 @@ def assemble_generated_html(
         required_class_counts=required_class_counts,
         required_child_class_sequences=required_child_class_sequences,
     )
+    body = _add_trusted_image_fallbacks(body)
     body = re.sub(
         r"^<body(?:\s[^>]*)?>",
         f'<body class="{body_theme}">',

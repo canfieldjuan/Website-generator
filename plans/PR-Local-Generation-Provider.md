@@ -275,6 +275,17 @@ Generated body fragments must not carry an alternate executable action plane:
 model-authored event-handler attributes, `srcdoc`, and executable script URI
 payloads must fail admission before trusted assembly. This restriction applies
 only to the model-produced body and must not rewrite the trusted template.
+Image fallback behavior is code-owned: the prompts must not request event
+handlers, admission must reject any handler supplied by the model, and trusted
+assembly must add only the fixed hide-on-error handler to admitted `img`
+elements. Neither prospect data nor model output may influence that handler.
+Phone admission must additionally scan browser-visible DOM adjacency before an
+accessibility-name override can replace ancestor text. Inline text fragments
+must remain adjacent for this scan, while semantic block and line boundaries
+must terminate a candidate phone value. Caller-declared deployment metadata
+markers must also be rejected inside model-authored comments; the explicit
+Formspree setup TODO remains allowed, and trusted head comments remain
+code-owned.
 The shared parser must also reject unclosed, unexpectedly closed, or misnested
 non-void descendants before BeautifulSoup repair, while accepting standard void
 elements and valid self-closing SVG content. Finally, each generator must pass
@@ -369,6 +380,12 @@ behavior, or any image, email, deployment, and Connect job contract.
     `formaction`, and SVG `xlink:href` phone-shaped destinations.
 36. Reject model-authored event handlers, `srcdoc`, and executable script URI
     attribute payloads before assembly.
+37. Remove model-authored image-handler requirements and add the fixed image
+    fallback only after body admission in trusted assembly.
+38. Scan a DOM-adjacent visual phone surface that preserves inline adjacency
+    and terminates at semantic block or line boundaries.
+39. Reject caller-declared deployment metadata markers inside model-authored
+    comments while preserving the explicit Formspree setup TODO.
 
 ### Files touched
 
@@ -527,9 +544,13 @@ claim remains admissible.
   search returned `0`, and the required fabricated-claim search returned `0`.
   It contains one services grid, six service cards, six service names, six
   service descriptions, and every other mandatory class at its exact count.
-- The saved GPU artifact was re-admitted through the final exposed-phone and
-  allowed-class gates in this PR; the current build caller returned
-  `saved-gpu-artifact-final-admission: PASS` without another model request.
+- The saved GPU artifact was re-admitted through the final executable-attribute,
+  deployment-comment, DOM-adjacent phone, exposed-phone, and allowed-class
+  gates in this PR; the current build caller returned
+  `saved-gpu-artifact-final-admission: PASS` without another model request. The
+  fixture contains no `img` element, so the fixed post-admission image handler
+  is proven separately by the focused trusted-assembly regression rather than
+  overstated as fixture evidence.
 - System Chrome screenshots at 1440x900, 1440x3000, 390x844, and 390x5000
   confirmed the services grid renders as two rows of three on desktop and six
   stacked cards on mobile without horizontal clipping.

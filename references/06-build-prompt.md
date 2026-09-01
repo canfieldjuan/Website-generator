@@ -112,7 +112,8 @@ Output rules:
   Google Fonts import and root typography tokens.
 - All links use real URLs from PROSPECT_JSON. The form action MUST be
   the prospect.formspree_endpoint value verbatim.
-- onerror handlers on every img tag for graceful fallback.
+- Image failure behavior is added by trusted code after admission. Do not emit
+  event-handler attributes.
 
 ---
 

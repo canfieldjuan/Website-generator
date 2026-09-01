@@ -174,7 +174,8 @@ SECTION 1 -- Story/Mission:
 - Key stat callouts inline: years in business, customers served, etc. as large numbers
 
 SECTION 2 -- Team grid (if team info present):
-- Card per team member: photo (with onerror fallback), name, title, short bio
+- Card per team member: photo, name, title, short bio; trusted code owns image
+  failure behavior
 - Grid: 3-col on desktop, 1-col on mobile
 - If no team info: skip this section
 
@@ -307,5 +308,6 @@ Root tokens and fonts are applied by trusted code from the homepage settings;
 do not emit them in the body.
 Trust strip: same as homepage. Present on every page.
 Mobile breakpoint: 768px, same rules as homepage.
-Image error handling: onerror="this.style.display='none'" on every img tag.
+Image failure behavior is added by trusted code after admission. Do not emit
+event-handler attributes.
 No placeholder text anywhere. If content does not exist on the fetched page, omit the section.
