@@ -27,13 +27,16 @@ from datetime import date
 from lib.images import fetch_unsplash_hero, generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.generation import (
+    DocumentColors,
     PromptPart,
+    assemble_generated_html,
     atomic_write_text,
+    body_generation_config,
+    extract_template_body_scaffold,
     generate_text,
     preflight_generation_provider,
     require_complete_text,
     resolve_generation_config,
-    validate_generated_html,
 )
 # lib.email.send_pitch_email is intentionally NOT imported here. The
 # from-scratch build flow uses the manual email_draft.md workflow
@@ -351,6 +354,82 @@ def _extract_trade_palette_variants(trade):
     return variants or None
 
 
+def _extract_trade_secondary(trade):
+    try:
+        with open(INDUSTRY_DEFAULTS_PATH, "r") as f:
+            content = f.read()
+    except OSError:
+        return None
+
+    section_match = re.search(
+        r"^## TRADE:\s*" + re.escape(trade) + r"\s*$(.*?)(?=^## TRADE:|\Z)",
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not section_match:
+        return None
+    color_block = re.search(
+        r"^### Color defaults\b(.*?)(?=^### |\Z)",
+        section_match.group(1),
+        re.MULTILINE | re.DOTALL,
+    )
+    if not color_block:
+        return None
+    secondary_match = re.search(
+        r"Secondary:.*?`(#[0-9A-Fa-f]{6})`",
+        color_block.group(1),
+        re.DOTALL,
+    )
+    return secondary_match.group(1) if secondary_match else None
+
+
+def _darken_hex_color(value):
+    if not isinstance(value, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+        raise ValueError("Primary brand color must be a six-digit hex value.")
+    channels = [int(value[index : index + 2], 16) for index in (1, 3, 5)]
+    return "#" + "".join(f"{round(channel * 0.75):02X}" for channel in channels)
+
+
+def _resolve_build_document_colors(prospect):
+    brand_colors = prospect.get("brand_colors")
+    trade_secondary = _extract_trade_secondary(prospect.get("trade", ""))
+    if brand_colors:
+        if isinstance(brand_colors, str):
+            accent = brand_colors
+            accent_dark = None
+            secondary = None
+        elif isinstance(brand_colors, (list, tuple)):
+            accent = brand_colors[0] if brand_colors else None
+            accent_dark = None
+            secondary = brand_colors[1] if len(brand_colors) > 1 else None
+        elif isinstance(brand_colors, dict):
+            accent = brand_colors.get("accent") or brand_colors.get("primary")
+            accent_dark = brand_colors.get("accent_dark") or brand_colors.get("dark")
+            secondary = brand_colors.get("secondary")
+        else:
+            raise ValueError(
+                "brand_colors must be a hex string, a color list, or a palette object."
+            )
+        if not accent:
+            raise ValueError("brand_colors does not contain a primary color.")
+        return DocumentColors(
+            accent=accent,
+            accent_dark=accent_dark or _darken_hex_color(accent),
+            secondary=secondary or trade_secondary or "#1F3A5F",
+        )
+
+    palette = prospect.get("_computed_palette") or select_palette(prospect)
+    if not isinstance(palette, dict):
+        raise ValueError(
+            "No document palette is available; supply brand_colors or a supported trade."
+        )
+    return DocumentColors(
+        accent=palette.get("accent"),
+        accent_dark=palette.get("accent_dark"),
+        secondary=palette.get("secondary") or trade_secondary or "#1F3A5F",
+    )
+
+
 def select_palette(prospect):
     # Deterministic per-prospect palette selection. Same prospect JSON
     # always yields the same palette. Returns a dict with 'accent' and
@@ -489,6 +568,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         section_orders = f.read()
     with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
+    base_body = extract_template_body_scaffold(base_template)
 
     # Static block -- same bytes for every plumber/HVAC/electrician build.
     # Cache marker on the end of this lets consecutive builds within the
@@ -510,14 +590,14 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"INDUSTRY DEFAULTS:\n{industry_defaults}\n\n"
         f"THEMES:\n{themes_catalog}\n\n"
         f"SECTION ORDERS:\n{section_orders}\n\n"
-        f"BASE TEMPLATE:\n{base_template}"
+        f"BASE BODY TEMPLATE:\n{base_body}"
     )
     prospect_block = format_prospect_prompt_block(prospect)
     if len(prospect_block) > BUILD_USER_TRUNCATE:
         prospect_block = prospect_block[:BUILD_USER_TRUNCATE]
 
     result = generate_text(
-        config,
+        body_generation_config(config),
         system_prompt=system_prompt,
         user_parts=(
             PromptPart(static_block, cacheable=True),
@@ -541,7 +621,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         or 0
     )
     cache_write = usage.get("cache_creation_input_tokens", 0)
-    prompt_total = usage.get("prompt_tokens", 0)
+    prompt_total = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
     uncached = max(prompt_total - cache_read - cache_write, 0)
     if cache_read or cache_write:
         print(
@@ -551,7 +631,16 @@ def generate_build_html(prospect, generation_config=None, client=None):
     else:
         print(f"[*] Cache: no hits (cold or invalidated). total_prompt={prompt_total} tokens")
 
-    return validate_generated_html(result)
+    return assemble_generated_html(
+        result,
+        base_template=base_template,
+        theme_catalog=themes_catalog,
+        theme_name=prospect.get("_computed_theme") or DEFAULT_THEME,
+        colors=_resolve_build_document_colors(prospect),
+        title=prospect.get("display_name") or prospect["business_name"],
+        body_theme="theme-light",
+        relocate_leading_comment=True,
+    )
 
 
 def generate_email_draft(prospect, generation_config=None, client=None):

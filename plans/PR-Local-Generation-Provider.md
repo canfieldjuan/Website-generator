@@ -27,8 +27,12 @@ unproved admission rule.
    provider/model flags without changing their existing skip/deploy behavior.
 4. Require normal completion and a complete standalone HTML document before
    atomically writing or deploying generated output.
-5. Keep every wired HTML-generation prompt aligned with doctype-first admission.
-6. Add focused unit tests, CI enrollment, and operator documentation.
+5. Keep the immutable template head/CSS code-owned. The model generates only a
+   body fragment using existing template classes; the caller composes and
+   validates the complete document.
+6. Keep every wired HTML-generation prompt aligned with body-only admission and
+   deterministic document composition.
+7. Add focused unit tests, CI enrollment, and operator documentation.
 
 ### Files touched
 
@@ -45,9 +49,11 @@ unproved admission rule.
 
 The CLI resolves a `GenerationConfig` from explicit arguments and environment
 configuration. Local is the default and preflights LM Studio's loaded-model
-list; OpenRouter requires the operator to select it and provide a model. The
-shared request adapter sends plain content to local OpenAI-compatible servers
-and adds cache metadata only for OpenRouter.
+list; OpenRouter requires the operator to select it and provide a model. Local
+generation uses LM Studio's native `/api/v1/chat` contract so the request can
+explicitly disable Qwen reasoning and server-side response storage. OpenRouter
+keeps the OpenAI-compatible request path and receives cache metadata only when
+it was requested by the caller.
 
 Local generation uses a two-hour default request deadline because the exact Qwen
 fixture exceeds the former cloud-oriented ten-minute deadline on supported local
@@ -57,18 +63,43 @@ restarting an expensive completion after a read timeout. An explicit
 `GENERATION_TIMEOUT_SECONDS` value still overrides either provider default;
 OpenRouter keeps the existing ten-minute default.
 
-The shared output budget is 65,536 tokens so the model can reproduce and
-populate the mandatory 84+ KiB base template before byte-level HTML admission.
-Every wired HTML prompt requires the doctype as the first response content, and
-CI watches `references/**` so a prompt-only contract change runs these tests.
+LM Studio's native response does not expose an OpenAI-style finish reason. The
+adapter therefore requires its token statistics, treats an output count at the
+configured ceiling as `length`, and admits only one text-message output. Any
+reasoning, tool, malformed, or multi-message output fails closed. The existing
+complete-document gate remains the final truncation check for HTML.
 
-Each response records provider, model, finish reason, content, and usage. HTML
-admission accepts only a normal `stop` response containing one ordered doctype,
-`html`, `head`, and `body` structure within the byte limit. Writes use a
-same-directory temporary file plus `os.replace`. Non-whitespace text and HTML
-elements outside `head` or `body` are rejected rather than silently admitted.
-Both generation prompts place their required deployment metadata comment inside
-`head`, preserving that metadata without contradicting the doctype-first gate.
+### Full-template timeout correction
+
+The real exact-Qwen fixture proved that reasoning control alone is insufficient:
+the local 27B model did not return the full generated document before the
+two-hour read deadline, and no HTML was written. The root cause is the output
+contract, not the deadline: the model is asked to reproduce the large immutable
+template head and CSS on every build even though only the body varies.
+
+The corrected contract keeps `references/03-base-template.html` authoritative.
+Trusted code extracts its head and body scaffold, applies the already selected
+theme and palette from the existing catalogs/JSON, and inserts a generated body
+fragment only after it passes a body-root/content boundary. The assembled page
+then passes the existing complete-document and byte gates. This preserves the
+model's content, conditional-section, and layout decisions while bounding model
+output to the actual variable page surface.
+
+This correction must cover both HTML entry points (`build.py` and `pipeline.py`)
+and therefore the Connect caller that reuses them. It must not change extraction,
+enrichment, image generation, email generation/sending, deployment behavior,
+claim/fabrication rules, or explicit OpenRouter selection.
+
+Each response records provider, model, finish reason, content, and usage. Body
+admission accepts only a normal `stop` response containing exactly one body root
+and no head, style, script, doctype, or html wrapper. Trusted code combines that
+fragment with the immutable template head. Full-document admission then requires
+one ordered doctype, `html`, `head`, and `body` structure within the byte limit.
+Writes use a same-directory temporary file plus `os.replace`. Non-whitespace text
+and HTML elements outside `head` or `body` are rejected rather than silently
+admitted. Required deployment-metadata placement remains code-owned: the model
+supplies the existing comment as the body's first child, admission verifies that
+boundary, and the assembler moves it into the trusted head exactly once.
 
 ## Intentional
 
@@ -78,45 +109,49 @@ Both generation prompts place their required deployment metadata comment inside
   locality.
 - Provider requests are not retried implicitly. A caller or durable job owner must
   observe the failure before deciding whether to submit new work.
+- Local Qwen reasoning is disabled at the provider contract, not with a prompt
+  phrase the model could ignore or echo.
 - Existing outer Markdown fences remain tolerated, but embedded fences,
-  provider chatter, partial markup, and length-limited completions fail closed.
+  provider chatter, partial body markup, forbidden head/style/script content,
+  and length-limited completions fail closed.
 - Resend's informational domain check still occurs when email is actually sent,
   not when unrelated modules import.
 
 ## Deferred
 
 - Local Connect v2 registration, authenticated routes, durable jobs, and
-  conformance tests land in the dependent Connect-provider slice.
-- A controlled real-Qwen fixture generation runs after the Connect provider can
-  prove the same HTML through both CLI and Connect surfaces.
+  conformance tests remain isolated in the dependent Connect-provider slice.
+- The controlled real-Qwen fixture must run again at the dependent Connect PR's
+  exact head before that slice can merge.
 - Desktop/web UI, model catalogs, automatic model loading, and cloud fallback
   remain outside this milestone.
 
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 42 tests passed after review reconciliation.
-- `python3 -m compileall -q build.py pipeline.py lib tests` — passed.
-- `python3 build.py --help` — passed; provider/model and existing skip flags shown.
-- `python3 pipeline.py --help` — passed; provider/model and existing skip flags shown.
+  — 58 tests passed after body-only generation and both HTML entry points gained
+  shared-assembly coverage.
+- `/tmp/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
+  — passed.
+- `/tmp/website-redesign-connect-venv/bin/python build.py --help` — passed;
+  provider/model and existing skip flags shown.
+- `/tmp/website-redesign-connect-venv/bin/python pipeline.py --help` — passed;
+  provider/model and existing skip flags shown.
 - `git diff --check` — passed.
-- The required real fixture build is not complete. An authenticated replacement
-  server on loopback port 1235 loaded exact model `qwen/qwen3.8-27b` on the CPU
-  runtime with a 131,072-token context, and the build passed exact-model
-  preflight and began generation. During prompt ingestion, LM Studio attempted
-  to restore its server setting to port 1234; a stale LM Studio listener already
-  owned that port, so the restart failed, disconnected the request, and produced
-  no admitted HTML. The proof model was unloaded and the original NVIDIA runtime
-  restored. The stale server conflict and viable inference performance remain
-  acceptance blockers, not passing proof.
-- A subsequent controlled run proved the former 600-second client setting was not
-  an end-to-end bound: the server disconnected at that deadline after processing
-  78.8% of the prompt, and the OpenAI client immediately started a second model
-  request. No HTML was written. The implementation now disables SDK retries and
-  gives local generation a two-hour default while leaving the explicit override
-  and OpenRouter default intact. The real fixture must still pass after this fix.
+- An authenticated native LM Studio probe against exact model
+  `qwen/qwen3.8-27b` returned one text message with
+  `reasoning_output_tokens: 0`, proving that `reasoning: "off"` reaches the
+  loaded model without prompt-only control.
+- The required fixture command completed against exact model
+  `qwen/qwen3.8-27b` through the native LM Studio path and wrote
+  `outputs/builds/drees-plumbing-inc/index.html`; the cold request reported
+  31,031 prompt tokens.
+- Both required artifact searches returned `0`: no unresolved trust/template
+  tokens and no unsupported `Upfront Flat-Rate`, `Surprise Fees`,
+  `Free Estimates`, or `Owner Answers` claims were emitted.
 
 ## Estimated diff size
 
-Approximately 11 files and 1,100 added/changed lines. The slice exceeds the
+The provider seam, both callers, lazy clients, body/document guards, prompts,
+workflow, plan, and their boundary tests form one vertical slice. It exceeds the
 soft target for the indivisibility and boundary-test reasons stated above.

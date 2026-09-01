@@ -2,7 +2,8 @@
 
 Run this once per interior page you want to redesign.
 Requires the homepage JSON from step 01 to stay design-consistent.
-Produces a complete HTML page that shares the same design system as the homepage.
+Produces the variable body for a complete HTML page that shares the same design
+system as the homepage. Trusted code supplies the shared document head and CSS.
 
 ---
 
@@ -63,12 +64,15 @@ For `fetchable: false` items: use Mode B with the matching single_page_sections 
 
 You are a senior frontend developer specializing in multi-page website redesigns.
 You are given either a fetched interior page OR a section extracted from the homepage,
-plus the homepage design JSON. Your job is to produce a complete HTML redesign of
-an interior page.
+plus the homepage design JSON. Your job is to produce the complete
+`<body>...</body>` redesign of an interior page.
 
-CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the provided `03-base-template.html` as your framework. You will output the entire contents of `03-base-template.html`, only injecting the structured JSON content into the pre-defined HTML classes.
+CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the provided
+`03-base-template.html` body scaffold as your framework. Output only one
+populated `<body>...</body>` fragment using its pre-defined HTML classes.
+Trusted code owns the doctype, `<html>`, `<head>`, CSS, fonts, and `:root` tokens.
 - Do NOT invent new classes or layout structures.
-- Do NOT write new CSS rules (other than populating the :root block).
+- Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype.
 - You are an injection engine: map the content to the existing template blocks.
 - Uses only real content from the provided source.
 
@@ -82,16 +86,14 @@ Use the full fetched page content. Extract all headings, body text, lists,
 form fields, images, and contact information present.
 
 In both modes:
-- Output ONLY raw HTML. No markdown code fences (no ```html, no ```), no
-  preamble like "Here is the interior page", no trailing commentary. The
-  first characters of your response must be `<!DOCTYPE html>`. Do not place a
-  comment or any other content before the doctype. The last characters must be
-  `</html>`. Anything else causes a parse failure downstream.
+- Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
+  preamble, trailing commentary, doctype, `<html>`, `<head>`, `<style>`, or
+  `<script>`. The first characters must be `<body` and the last characters
+  must be `</body>`.
 - The nav and footer must match the homepage exactly (same links, same brand treatment)
 - Only the main content area changes per page type
-- Populate the :root token block verbatim from the homepage generation output
 - Apply the same `class="theme-light"` or `class="theme-dark"` to the `<body>` as the homepage
-- Same Google Fonts import as the homepage
+- Trusted code applies the same root tokens and Google Fonts as the homepage
 
 ---
 
@@ -105,8 +107,8 @@ NOTES: [any client-specific instructions or "none"]
 HOMEPAGE DESIGN JSON:
 [PASTE FULL JSON FROM STEP 01 HERE]
 
-BASE TEMPLATE:
-[PASTE 03-BASE-TEMPLATE.HTML HERE]
+BASE BODY TEMPLATE:
+[PASTE THE BODY SCAFFOLD FROM 03-BASE-TEMPLATE.HTML HERE]
 
 ---
 SOURCE CONTENT:
@@ -298,7 +300,8 @@ CTA at bottom:
 
 Nav: exact same HTML and CSS as the homepage. Same links, same logo, same CTA.
 Footer: exact same HTML and CSS as the homepage.
-:root block: copy verbatim from homepage generation output.
+Root tokens and fonts are applied by trusted code from the homepage settings;
+do not emit them in the body.
 Trust strip: same as homepage. Present on every page.
 Mobile breakpoint: 768px, same rules as homepage.
 Image error handling: onerror="this.style.display='none'" on every img tag.

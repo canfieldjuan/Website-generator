@@ -66,6 +66,12 @@ worker transitions accepted → processing → completed/failed and stores the
 validated HTML artifact. GET routes project stored state into the canonical v2
 manifest and job-status shapes.
 
+The reused generator now asks Qwen for only the variable body. Trusted code owns
+the base template head/CSS, selected palette and theme, deployment-comment
+placement, and final standalone-document admission. Connect therefore persists
+and returns the same validated assembled HTML as the CLI without maintaining a
+second template or output path.
+
 Before generation, the shared prospect preparer requires each required field to
 be a non-empty string. The Connect adapter also changes a photo-dependent hero
 selection to the existing gradient shape when the one accepted input artifact
@@ -126,7 +132,7 @@ builds with no official keyring fail closed as authority-unavailable.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 89 tests in 3.348 seconds on the updated combined head.
+  passed: 105 tests in 3.205 seconds on the updated combined tree.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema
@@ -136,15 +142,10 @@ builds with no official keyring fail closed as authority-unavailable.
   failure, and interrupted-job restart reconciliation.
 - `bash scripts/local_pr_review.sh` passed, including `git diff --check` and both
   required plan documents.
-- The controlled real-Qwen proof is not complete. An authenticated replacement
-  server on loopback port 1235 loaded exact model `qwen/qwen3.8-27b` on the CPU
-  runtime with a 131,072-token context. The fixture passed exact-model preflight
-  and began generation, but LM Studio then attempted to restore its server
-  setting to port 1234. A stale LM Studio listener already owned that port, so
-  the restart failed, disconnected the request, and produced no admitted HTML.
-  The proof model was unloaded and the original NVIDIA runtime restored. The
-  stale server conflict and viable inference performance remain local acceptance
-  blockers, not passing proof.
+- The core CLI fixture completed against exact model `qwen/qwen3.8-27b`, and its
+  assembled artifact passed both required claim-leak searches. The same
+  controlled fixture remains pending on this combined Connect tree before this
+  dependent slice may merge.
 
 ## Estimated diff size
 

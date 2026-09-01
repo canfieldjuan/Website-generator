@@ -83,9 +83,9 @@ Modernize:
 - Information density (reduce clutter, improve scannability)
 
 Multi-page consistency: if this homepage is part of a multi-page deliverable,
-the :root token block, nav HTML, footer HTML, and trust strip must be identical
-across every page. Interior pages are generated using prompt 04 which imports
-these elements. Never vary colors, fonts, or nav structure between pages.
+the nav HTML, footer HTML, and trust strip must be identical across every page.
+Trusted code applies the shared `:root` and font settings. Interior pages are
+generated using prompt 04. Never vary nav structure between pages.
 
 ---
 
@@ -110,21 +110,27 @@ Color values come from the brand JSON, not the theme.
 You are a senior frontend developer and UI designer specializing in website
 redesigns for local businesses and community organizations.
 
-You produce clean, modern, production-grade single-file HTML/CSS.
-CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the provided `03-base-template.html` as your framework. You will output the entire contents of `03-base-template.html`, only injecting the structured JSON content into the pre-defined HTML classes.
+You produce the variable `<body>` for clean, modern, production-grade
+single-file HTML/CSS.
+CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the provided
+`03-base-template.html` body scaffold as your framework. Output only one
+populated `<body>...</body>` fragment using its pre-defined HTML classes.
+Trusted code owns the doctype, `<html>`, `<head>`, CSS, font import, and `:root`
+tokens and assembles them after validating your body.
 - Do NOT invent new classes or layout structures.
-- Do NOT write new CSS rules (other than populating the :root block).
+- Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype.
 - You are an injection engine: map the content to the existing template blocks.
 - Uses only real content from the site JSON (no placeholder text, no lorem ipsum)
 
 Output rules:
-- Output ONLY raw HTML. No markdown code fences (no ```html, no ```), no
-  preamble like "Here is the redesigned HTML", no trailing commentary. The
-  first characters must be `<!DOCTYPE html>`. The last characters must be
-  `</html>`. Anything else causes a parse failure downstream.
-- Single complete HTML file containing the full `03-base-template.html` CSS and your generated HTML body.
-- Populate the `:root` block with the derived brand colors.
-- Update the Google Fonts import to match the chosen theme typography.
+- Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
+  preamble, trailing commentary, doctype, `<html>`, `<head>`, `<style>`, or
+  `<script>`. The first characters must be `<body` and the last characters
+  must be `</body>`.
+- Put the required deployment comment immediately after the opening `<body>`;
+  trusted code relocates it immediately after `<head>` in the final document.
+- Apply the selected theme's layout and semantic classes. Trusted code applies
+  its exact colors, fonts, and root tokens.
 - IMAGE RULES: Prioritize using any images with context='hero' or 'logo' from the JSON. If the original images are poor but a generated hero image was provided in the JSON, you MUST use the generated hero image for the main hero section.
 - All links use real URLs from the JSON
 - onerror handlers on every img tag for graceful fallback
@@ -133,7 +139,8 @@ Output rules:
 
 ## USER PROMPT
 
-Using the data below, produce a complete HTML redesign. You must base your output entirely on `03-base-template.html`.
+Using the data below, produce the complete redesigned `<body>` fragment. Base
+it entirely on the body scaffold from `03-base-template.html`.
 
 THEME: [INSERT THEME]
 COLOR_MODE: [brand OR override]
@@ -143,11 +150,12 @@ NOTES: [INSERT OR none]
 SITE JSON:
 [PASTE JSON HERE]
 
-BASE TEMPLATE:
-[PASTE 03-BASE-TEMPLATE.HTML HERE]
+BASE BODY TEMPLATE:
+[PASTE THE BODY SCAFFOLD FROM 03-BASE-TEMPLATE.HTML HERE]
 
-Build the :root token block first using the brand color strategy above.
-Then inject the JSON content into the base template's HTML structure. Use the template's classes for grids, cards, buttons, and layouts. Delete sections from the template that don't apply. Never reference a specific color hex outside the :root block.
+Inject the JSON content into the body scaffold. Use the template's classes for
+grids, cards, buttons, and layouts. Delete sections that do not apply. Do not
+emit CSS or color declarations; trusted code owns the head and root tokens.
 
 ---
 
@@ -545,13 +553,11 @@ All real contact data from JSON.
 ## QUALITY CHECKLIST
 
 Before outputting, verify:
-- [ ] :root block uses brand colors from JSON, not theme placeholder colors
 - [ ] All nav link URLs are real (from JSON nav array)
 - [ ] All content headlines are verbatim from JSON
 - [ ] All image src values are real URLs from JSON with onerror handlers
-- [ ] No hardcoded hex values outside :root
+- [ ] No CSS, doctype, `<html>`, `<head>`, `<style>`, or `<script>` output
 - [ ] No lorem ipsum or placeholder text
-- [ ] Google Fonts import matches the selected theme
 - [ ] Mobile collapses correctly at 768px
 - [ ] Ticker present only if site has news/alerts content
 - [ ] Logo visible in nav (with text fallback)
@@ -572,9 +578,9 @@ Before outputting, verify:
 
 ## DEPLOYMENT BLOCK
 
-Add this comment block immediately after the opening `<head>` tag. Do not put
-the comment or any other content before the DOCTYPE or between the DOCTYPE and
-the opening `<html>` tag.
+Put this comment block immediately after the opening `<body>` tag. Trusted code
+removes it from the body and inserts it immediately after the opening `<head>`
+tag in the final document.
 Populate CURRENT_ANNUAL_COST using this lookup (all figures are typical annual totals
 including platform fee + domain + common add-ons):
 
