@@ -2020,6 +2020,50 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 ),
             )
 
+        nested_accessible_description_phone = body_without_coverage.replace(
+            '<nav class="site-nav">',
+            '<nav class="site-nav" aria-label="Main navigation">',
+        ).replace(
+            "</nav>",
+            '<button aria-description="Call 217-555-0199">'
+            "Request service</button></nav>",
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "phone-like value with no verified phone",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(
+                    local_chat_payload(nested_accessible_description_phone)
+                ),
+            )
+
+        unicode_phone_variants = (
+            "217\u2011555\u20110199",
+            "217\u2013555\u20130199",
+            "217\u200b555\u200b0199",
+            "\u0662\u0661\u0667-\u0665\u0665\u0665-\u0660\u0661\u0669\u0669",
+        )
+        for phone_variant in unicode_phone_variants:
+            with self.subTest(phone_variant=phone_variant), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "phone-like value with no verified phone",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(
+                        local_chat_payload(
+                            body_without_coverage.replace(
+                                "</nav>",
+                                f"<span>Call {phone_variant}</span></nav>",
+                            )
+                        )
+                    ),
+                )
+
         non_exposed_attribute_phones = body_without_coverage.replace(
             "</nav>",
             '<span data-tracking-id="217-555-0199"></span>'
@@ -2143,6 +2187,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 ),
                 "unexpected exposed phone",
             ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    "</nav>",
+                    "<span>Alternate 217\u2011555\u20110199</span></nav>",
+                ),
+                "unexpected exposed phone",
+            ),
         )
         for adverse_body, message in adverse_bodies:
             with self.subTest(message=message), self.assertRaisesRegex(
@@ -2154,6 +2205,17 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     config(),
                     FakeLocalClient(local_chat_payload(adverse_body)),
                 )
+
+        unicode_formatted_verified_phone = COMPLETE_BUILD_BODY.replace(
+            ">217-555-0100</a>",
+            ">217\u2011555\u20110100</a>",
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(unicode_formatted_verified_phone)),
+        )
+        self.assertIn("217\u2011555\u20110100", html)
 
     def test_generators_reject_classes_outside_provided_catalog(self):
         prospect = {

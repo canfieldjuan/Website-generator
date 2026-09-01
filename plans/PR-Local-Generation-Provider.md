@@ -261,7 +261,11 @@ must not satisfy required visual or accessibility exposure.
 User-exposed attributes such as `title` and direct accessibility descriptions
 must participate in that exposure check, while hidden elements and internal
 `data-*` metadata must not. Suppression on the generated body root must apply
-to its descendants just as suppression on any nested element does.
+to its descendants just as suppression on any nested element does. Each
+unsuppressed accessibility node must be evaluated independently even when an
+ancestor supplies its own ARIA name. Phone-shape matching must canonicalize
+Unicode decimal digits, dash punctuation, and invisible format separators that
+do not change what the user perceives as the number.
 The shared parser must also reject unclosed, unexpectedly closed, or misnested
 non-void descendants before BeautifulSoup repair, while accepting standard void
 elements and valid self-closing SVG content. Finally, each generator must pass
@@ -346,6 +350,10 @@ behavior, or any image, email, deployment, and Connect job contract.
 31. Include user-exposed tooltip and accessibility-description attributes in
     output truth admission, honor body-root suppression, and avoid treating
     hidden or internal metadata as copy.
+32. Traverse exposed accessibility descendants independently of an ancestor's
+    own accessible name while preserving hidden ID-reference resolution.
+33. Canonicalize Unicode digit, dash, and invisible-format variants before
+    applying phone-shape admission.
 
 ### Files touched
 

@@ -672,11 +672,23 @@ def _compact_claim_match_text(value: str) -> str:
     return "".join(character for character in normalized if character.isalnum())
 
 
+def _normalize_phone_scan_text(value: str) -> str:
+    characters: list[str] = []
+    for character in unicodedata.normalize("NFKC", value):
+        if character.isdecimal():
+            characters.append(str(unicodedata.decimal(character)))
+        elif unicodedata.category(character) == "Pd":
+            characters.append("-")
+        elif unicodedata.category(character) != "Cf":
+            characters.append(character)
+    return "".join(characters)
+
+
 def _canonical_phone_digits(value: str) -> str:
     digits = "".join(
         character
-        for character in unicodedata.normalize("NFKC", value)
-        if character.isdecimal()
+        for character in _normalize_phone_scan_text(value)
+        if character.isascii() and character.isdecimal()
     )
     if len(digits) == 11 and digits.startswith("1"):
         return digits[1:]
@@ -813,9 +825,29 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
         )
         return " ".join((primary_text, *descriptions))
 
+    accessible_parts: list[str] = []
+
+    def visit_accessible(node: Any) -> None:
+        if isinstance(node, Comment):
+            return
+        if isinstance(node, NavigableString):
+            accessible_parts.append(str(node))
+            return
+        if not isinstance(node, Tag) or is_hidden_input(node):
+            return
+        aria_hidden = node.get("aria-hidden")
+        if is_render_suppressed(node) or (
+            isinstance(aria_hidden, str)
+            and aria_hidden.strip().casefold() == "true"
+        ):
+            return
+        accessible_parts.append(accessible_text(node, frozenset()))
+        for child in node.children:
+            visit_accessible(child)
+
     visit_visual(body_root)
-    accessible = accessible_text(body_root, frozenset())
-    return " ".join(visual_parts), accessible
+    visit_accessible(body_root)
+    return " ".join(visual_parts), " ".join(accessible_parts)
 
 
 def _exact_class_names(element: Tag) -> set[str]:
@@ -1032,7 +1064,7 @@ def validate_generated_body(
             _canonical_phone_digits(match.group(0))
             for surface in exposure_surfaces
             for match in PHONE_LIKE_PATTERN.finditer(
-                unicodedata.normalize("NFKC", surface)
+                _normalize_phone_scan_text(surface)
             )
         }
         tel_targets = []
