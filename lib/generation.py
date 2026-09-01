@@ -555,7 +555,13 @@ def validate_generated_body(
         raise GeneratedBodyError(
             "Generated body must end with its closing body tag."
         )
-    if len(body.encode("utf-8")) > max_bytes:
+    try:
+        encoded_body = body.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise GeneratedBodyError(
+            "Generated body contains text that cannot be encoded as UTF-8."
+        ) from exc
+    if len(encoded_body) > max_bytes:
         raise GeneratedBodyError(
             f"Generated body exceeds the {max_bytes}-byte limit."
         )

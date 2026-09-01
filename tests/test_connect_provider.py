@@ -53,9 +53,11 @@ from lib.generation import (
     GeneratedBodyError,
     GenerationConfigurationError,
     GenerationProviderUnavailable,
+    GenerationResult,
     GenerationResponseError,
     create_local_generation_client,
     preflight_generation_provider,
+    validate_generated_body,
 )
 
 
@@ -522,6 +524,18 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
                 runtime.close()
 
     def test_invalid_input_and_model_unavailability_have_distinct_failures(self):
+        def unencodable_model_body(_input):
+            validate_generated_body(
+                GenerationResult(
+                    provider="local",
+                    model=DEFAULT_LOCAL_MODEL,
+                    content="<body>\ud800</body>",
+                    finish_reason="stop",
+                    usage={},
+                )
+            )
+            raise AssertionError("Unencodable model output was admitted.")
+
         failures = (
             (
                 lambda _input: (_ for _ in ()).throw(ValueError("bad input")),
@@ -549,6 +563,12 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
                 lambda _input: (_ for _ in ()).throw(
                     GeneratedBodyError("unresolved placeholder")
                 ),
+                "MODEL_RESPONSE_INVALID",
+                True,
+                None,
+            ),
+            (
+                unencodable_model_body,
                 "MODEL_RESPONSE_INVALID",
                 True,
                 None,

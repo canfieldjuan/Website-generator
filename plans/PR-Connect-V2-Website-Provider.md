@@ -79,6 +79,24 @@ supplied colors still reach it. This must not change deterministic palette
 selection, default colors, rendered CSS values, model/provider selection, job
 or error schemas, or any capability contract.
 
+### Generated-Unicode classification contract
+
+Exact-head review exposed a classification leak at the shared generated-body
+boundary. A syntactically valid model response can decode to text containing an
+unpaired Unicode surrogate; the body byte-limit check then raises a raw
+`UnicodeEncodeError`. Because that exception is also a `ValueError`, the
+Connect worker currently labels model-owned output as non-retryable invalid
+prospect input.
+
+The correct fix must make shared generated-body admission translate an
+unencodable model body into `GeneratedBodyError`, which the existing Connect
+worker classifies as retryable `MODEL_RESPONSE_INVALID`. It must preserve the
+strict input decoder's existing non-retryable rejection of unpaired surrogates
+in prospect and request JSON, and it must not broadly reclassify arbitrary
+worker `ValueError` or `UnicodeEncodeError` exceptions. Tests must drive the
+real generated-body validator through the worker and prove both ownership
+directions.
+
 ## Scope (this PR)
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
@@ -102,6 +120,8 @@ or error schemas, or any capability contract.
 9. Validate the resolved document palette before generation and classify
    malformed prospect colors as non-retryable input without duplicating color
    rules.
+10. Classify unencodable model body text as retryable invalid model response
+    while preserving strict non-retryable Unicode rejection on input.
 
 ### Files touched
 
