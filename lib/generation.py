@@ -33,6 +33,11 @@ MAX_HTML_BYTES = 2 * 1024 * 1024
 MAX_GENERATED_BODY_BYTES = 512 * 1024
 SUPPORTED_PROVIDERS = frozenset(("local", "openrouter"))
 HOMEPAGE_SHARED_PAGE_CLASSES = frozenset(("page-wrap",))
+REQUIRED_FOOTER_CLASS_COUNTS = (
+    ("site-footer", 1),
+    ("footer-grid", 1),
+    ("footer-bottom", 1),
+)
 DEFAULT_DOCUMENT_ACCENT = "#1D4ED8"
 DEFAULT_DOCUMENT_SECONDARY = "#1F3A5F"
 
@@ -151,6 +156,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.visible_text_parts: list[str] = []
         self.decoded_attribute_values: list[str] = []
         self.class_names: set[str] = set()
+        self.class_name_counts: dict[str, int] = {}
         self.svg_depth = 0
 
     def handle_decl(self, decl: str) -> None:
@@ -160,12 +166,15 @@ class _GeneratedBodyParser(HTMLParser):
         self.decoded_attribute_values.extend(
             value for _name, value in attrs if value is not None
         )
-        self.class_names.update(
-            class_name
-            for name, value in attrs
-            if name.casefold() == "class" and value
-            for class_name in value.split()
-        )
+        for name, value in attrs:
+            if name.casefold() != "class" or not value:
+                continue
+            for class_name in value.split():
+                self.class_names.add(class_name)
+                folded_class = class_name.casefold()
+                self.class_name_counts[folded_class] = (
+                    self.class_name_counts.get(folded_class, 0) + 1
+                )
         tag_name = tag.lower()
         if tag_name == "body":
             self.body_events.append("start")
@@ -585,6 +594,7 @@ def validate_generated_body(
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
+    required_class_counts: Iterable[tuple[str, int]] = (),
 ) -> str:
     body = _strip_outer_code_fence(require_complete_text(result))
     if "```" in body:
@@ -637,6 +647,18 @@ def validate_generated_body(
         leaked = ", ".join(leaked_class_names[:3])
         raise GeneratedBodyError(
             f"Generated body contains classes unavailable to this page type: {leaked}."
+        )
+    class_count_mismatches = []
+    for class_name, expected_count in required_class_counts:
+        actual_count = parser.class_name_counts.get(class_name.casefold(), 0)
+        if actual_count != expected_count:
+            class_count_mismatches.append(
+                f"{class_name} expected {expected_count}, got {actual_count}"
+            )
+    if class_count_mismatches:
+        raise GeneratedBodyError(
+            "Generated body has invalid required class counts: "
+            + "; ".join(class_count_mismatches[:3])
         )
 
     claim_surfaces = (
@@ -824,6 +846,7 @@ def assemble_generated_html(
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
+    required_class_counts: Iterable[tuple[str, int]] = (),
 ) -> str:
     if body_theme not in {"theme-light", "theme-dark"}:
         raise GeneratedHtmlError(
@@ -840,6 +863,7 @@ def assemble_generated_html(
         forbidden_square_placeholders=forbidden_square_placeholders,
         forbidden_visible_phrases=forbidden_visible_phrases,
         forbidden_class_names=forbidden_class_names,
+        required_class_counts=required_class_counts,
     )
     body = re.sub(
         r"^<body(?:\s[^>]*)?>",

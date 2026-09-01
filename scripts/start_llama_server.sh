@@ -13,7 +13,7 @@ Optional:
   LLAMA_CPP_HOST            Loopback bind host (default: 127.0.0.1)
   LLAMA_CPP_PORT            Port (default: 8080)
   LLAMA_CPP_CONTEXT_SIZE    Context tokens (default: 49152)
-  LLAMA_CPP_GPU_LAYERS      GPU layers: auto, all, or a non-negative integer (default: auto)
+  LLAMA_CPP_GPU_LAYERS      GPU layers: auto, all, or a non-negative integer (default: all)
   LLAMA_CPP_CACHE_TYPE_K    Key-cache type (default: q8_0)
   LLAMA_CPP_CACHE_TYPE_V    Value-cache type (default: q8_0)
   LLAMA_CPP_SERVER_TIMEOUT  Server timeout seconds (default: 7200)
@@ -40,7 +40,7 @@ model_path="${LLAMA_CPP_MODEL_PATH:-}"
 host="${LLAMA_CPP_HOST:-127.0.0.1}"
 port="${LLAMA_CPP_PORT:-8080}"
 context_size="${LLAMA_CPP_CONTEXT_SIZE:-49152}"
-gpu_layers="${LLAMA_CPP_GPU_LAYERS:-auto}"
+gpu_layers="${LLAMA_CPP_GPU_LAYERS:-all}"
 cache_type_k="${LLAMA_CPP_CACHE_TYPE_K:-q8_0}"
 cache_type_v="${LLAMA_CPP_CACHE_TYPE_V:-q8_0}"
 server_timeout="${LLAMA_CPP_SERVER_TIMEOUT:-7200}"

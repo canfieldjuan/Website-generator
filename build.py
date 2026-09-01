@@ -28,6 +28,7 @@ from lib.deploy import deploy_to_vercel
 from lib.generation import (
     DEFAULT_DOCUMENT_ACCENT,
     DEFAULT_DOCUMENT_SECONDARY,
+    REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
     PromptPart,
     assemble_generated_html,
@@ -90,6 +91,37 @@ GATED_SERVICE_CLAIMS = {
     "Free Estimates": ("free estimates",),
     "Owner Answers": ("owner answers",),
 }
+
+BUILD_REQUIRED_CLASS_COUNTS = (
+    ("site-nav", 1),
+    ("dual-cta-hero", 1),
+    ("coverage-band", 1),
+    ("services-grid", 1),
+    ("service-card", 6),
+    ("service-card-name", 6),
+    ("service-card-desc", 6),
+    ("benefits-grid", 1),
+    ("benefit-card", 3),
+    ("contact-form-wrap", 1),
+    *REQUIRED_FOOTER_CLASS_COUNTS,
+)
+
+BUILD_SERVICES_RESPONSE_SCAFFOLD = (
+    '<div class="page-wrap section-gap">\n'
+    '  <div class="sec-hd">\n'
+    '    <span class="sec-title"><span class="sec-dot"></span>Services</span>\n'
+    '  </div>\n'
+    '  <div class="services-grid">\n'
+    + "\n".join(
+        '    <div class="service-card">\n'
+        f'      <div class="service-card-name">[SERVICE_{index}_NAME]</div>\n'
+        f'      <p class="service-card-desc">[SERVICE_{index}_DESCRIPTION]</p>\n'
+        '    </div>'
+        for index in range(1, 7)
+    )
+    + '\n  </div>\n'
+    '</div>'
+)
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
 
@@ -719,6 +751,13 @@ def generate_build_html(prospect, generation_config=None, client=None):
         )
     response_boundary = (
         f"{BUILD_RESPONSE_BOUNDARY_REMINDER}\n"
+        "MANDATORY CLASS COUNTS: "
+        f"{json.dumps(dict(BUILD_REQUIRED_CLASS_COUNTS), ensure_ascii=False)}\n"
+        "MANDATORY SERVICES: At the position required by "
+        "prospect._computed_section_order, reproduce the exact scaffold below. "
+        "Replace every square-bracket token with the selected prospect or "
+        "canonical-trade service content; do not emit the tokens themselves.\n"
+        f"{BUILD_SERVICES_RESPONSE_SCAFFOLD}\n"
         "MANDATORY EXACT SUBSTITUTIONS: "
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
         f"{logo_instruction}"
@@ -772,9 +811,11 @@ def generate_build_html(prospect, generation_config=None, client=None):
         forbidden_square_placeholders=extract_square_placeholder_tokens(
             system_prompt,
             static_block,
+            response_boundary,
         ),
         forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
         forbidden_class_names=interior_only_classes,
+        required_class_counts=BUILD_REQUIRED_CLASS_COUNTS,
     )
 
 

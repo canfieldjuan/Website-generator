@@ -21,6 +21,7 @@ from lib.generation import (
     MAX_GENERATED_BODY_TOKENS,
     DEFAULT_TIMEOUT_SECONDS,
     MAX_HTML_BYTES,
+    REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
     GeneratedBodyError,
     GeneratedHtmlError,
@@ -53,6 +54,36 @@ COMPLETE_HTML = """<!DOCTYPE html>
 <html lang="en"><head><title>Test</title></head>
 <body><main>Ready</main></body></html>"""
 COMPLETE_BODY = '<body class="theme-light"><main>Ready</main></body>'
+COMPLETE_PAGE_BODY = (
+    '<body class="theme-light"><main>Ready</main>'
+    '<footer class="site-footer"><div class="footer-grid"></div>'
+    '<div class="footer-bottom"><p>Copyright</p></div></footer></body>'
+)
+COMPLETE_SERVICES_GRID = (
+    '<div class="services-grid">'
+    + "".join(
+        '<div class="service-card">'
+        f'<div class="service-card-name">Service {index}</div>'
+        f'<p class="service-card-desc">Description {index}</p>'
+        '</div>'
+        for index in range(1, 7)
+    )
+    + "</div>"
+)
+COMPLETE_BENEFITS_GRID = (
+    '<div class="benefits-grid">'
+    + '<div class="benefit-card"></div>' * 3
+    + "</div>"
+)
+COMPLETE_BUILD_BODY = (
+    '<body class="theme-light"><nav class="site-nav"></nav>'
+    '<section class="dual-cta-hero"></section><div class="coverage-band"></div>'
+    + COMPLETE_SERVICES_GRID
+    + COMPLETE_BENEFITS_GRID
+    + '<form class="contact-form-wrap"></form>'
+    '<footer class="site-footer"><div class="footer-grid"></div>'
+    '<div class="footer-bottom"><p>Copyright</p></div></footer></body>'
+)
 class FakeModels:
     def __init__(self, model_ids=None, error=None):
         self.model_ids = model_ids or []
@@ -379,6 +410,40 @@ class LlamaCppStartupScriptTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 2)
         self.assertIn("LLAMA_CPP_MODEL_PATH", completed.stderr)
+
+    def test_launcher_defaults_to_all_gpu_layers(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fake_server = root / "fake-llama-server"
+            fake_server.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n',
+                encoding="utf-8",
+            )
+            fake_server.chmod(0o755)
+            model = root / "qwen.gguf"
+            model.write_bytes(b"")
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if key != "LLAMA_CPP_GPU_LAYERS"
+            }
+            environment.update(
+                {
+                    "LLAMA_CPP_SERVER_BIN": str(fake_server),
+                    "LLAMA_CPP_MODEL_PATH": str(model),
+                }
+            )
+            completed = subprocess.run(
+                [str(self.script)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        arguments = completed.stdout.splitlines()
+        self.assertEqual(arguments[arguments.index("--n-gpu-layers") + 1], "all")
 
     def test_numeric_boundaries_reject_values_outside_the_contract(self):
         invalid_values = {
@@ -924,6 +989,45 @@ class BodyAssemblyTests(unittest.TestCase):
             body,
         )
 
+    def test_body_admission_requires_exact_footer_class_counts(self):
+        partial_body = (
+            '<body><div class="footer-grid"></div>'
+            '<div class="footer-bottom"></div></body>'
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "site-footer expected 1, got 0",
+        ):
+            validate_generated_body(
+                body_result(partial_body),
+                required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+            )
+
+        complete_body = (
+            '<body><footer class="site-footer"><div class="footer-grid"></div>'
+            '<div class="footer-bottom"></div></footer></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(complete_body),
+                required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+            ),
+            complete_body,
+        )
+
+        duplicated_body = complete_body.replace(
+            "</footer>",
+            '<div class="footer-bottom"></div></footer>',
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "footer-bottom expected 1, got 2",
+        ):
+            validate_generated_body(
+                body_result(duplicated_body),
+                required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+            )
+
     def test_body_admission_accepts_one_plain_body(self):
         self.assertEqual(validate_generated_body(body_result()), COMPLETE_BODY)
 
@@ -1452,7 +1556,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIsNone(args.generation_model)
 
     def test_build_generator_uses_shared_admission_gate(self):
-        client = FakeLocalClient(local_chat_payload(COMPLETE_BODY))
+        client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         prospect = {
             "business_name": "Test Business",
             "trade": "plumber",
@@ -1465,7 +1569,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
         self.assertTrue(html.startswith("<!DOCTYPE html>"))
         self.assertIn("NEW WEBSITE BUILD - - FROM SCRATCH", html)
-        self.assertIn('<body class="theme-light"><main>Ready</main></body>', html)
+        self.assertIn(COMPLETE_BUILD_BODY, html)
         request = next(call for call in client.calls if call[0] == "POST")
         user_content = request[2]["json"]["messages"][1]["content"]
         self.assertIn(build.BUILD_RESPONSE_BOUNDARY_REMINDER, user_content)
@@ -1473,6 +1577,14 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             '"business_name": "Test Business"',
             user_content,
         )
+        self.assertIn('"service-card": 6', user_content)
+        self.assertIn("MANDATORY SERVICES: At the position required by", user_content)
+        self.assertIn('<div class="services-grid">', user_content)
+        self.assertEqual(user_content.count('<div class="service-card">'), 6)
+        self.assertEqual(user_content.count('<div class="service-card-name">'), 6)
+        self.assertEqual(user_content.count('<p class="service-card-desc">'), 6)
+        self.assertIn("[SERVICE_1_NAME]", user_content)
+        self.assertIn("[SERVICE_6_DESCRIPTION]", user_content)
         self.assertNotIn("BASE BODY TEMPLATE", user_content)
         self.assertNotIn("{{SITE_NAME}}", user_content)
         self.assertTrue(
@@ -1483,7 +1595,10 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
 
     def test_build_generator_rejects_placeholder_from_static_industry_defaults(self):
-        leaked_body = COMPLETE_BODY.replace("Ready", "Serving Effingham since [YEAR]")
+        leaked_body = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">Serving Effingham since [YEAR]</section>',
+        )
         client = FakeLocalClient(local_chat_payload(leaked_body))
         prospect = {
             "business_name": "Test Business",
@@ -1496,9 +1611,50 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         with self.assertRaisesRegex(GeneratedBodyError, r"\[YEAR\]"):
             build.generate_build_html(prospect, config(), client)
 
+    def test_build_generator_rejects_unresolved_services_scaffold_token(self):
+        leaked_body = COMPLETE_BUILD_BODY.replace(
+            "Service 1",
+            "[SERVICE_1_NAME]",
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+
+        with self.assertRaisesRegex(GeneratedBodyError, r"\[SERVICE_1_NAME\]"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(leaked_body)),
+            )
+
+    def test_build_generator_rejects_missing_mandatory_services(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+        missing_services = COMPLETE_BUILD_BODY.replace(COMPLETE_SERVICES_GRID, "")
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "services-grid expected 1, got 0",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(missing_services)),
+            )
+
     def test_build_generator_rejects_claim_without_matching_promise(self):
-        unsupported = COMPLETE_BODY.replace(
-            "Ready", "Upfront <strong>Flat-Rate</strong> pricing"
+        unsupported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">Upfront <strong>Flat-Rate</strong> pricing</section>',
         )
         prospect = {
             "business_name": "Test Business",
@@ -1525,7 +1681,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("Upfront <strong>Flat-Rate</strong> pricing", html)
 
     def test_redesign_generator_assembles_body_with_site_brand_contract(self):
-        client = FakeLocalClient(local_chat_payload(COMPLETE_BODY))
+        client = FakeLocalClient(local_chat_payload(COMPLETE_PAGE_BODY))
         site_json = {
             "site": {"name": "Current Business"},
             "brand": {
@@ -1548,10 +1704,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("--accent: #123456;", html)
         self.assertIn("--secondary: #ABCDEF;", html)
         self.assertIn("WEBSITE REDESIGN MOCKUP", html)
-        self.assertIn('<body class="theme-dark"><main>Ready</main></body>', html)
+        self.assertIn('class="site-footer"', html)
+        self.assertIn('<body class="theme-dark">', html)
 
     def test_interior_generator_assembles_body_without_deployment_comment(self):
-        client = FakeLocalClient(local_chat_payload(COMPLETE_BODY))
+        client = FakeLocalClient(local_chat_payload(COMPLETE_PAGE_BODY))
         site_json = {"site": {"name": "Current Business"}}
 
         html = pipeline.generate_interior_page(
@@ -1563,7 +1720,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
 
         self.assertIn("<title>Contact | Current Business</title>", html)
-        self.assertIn('<body class="theme-light"><main>Ready</main></body>', html)
+        self.assertIn(COMPLETE_PAGE_BODY, html)
         self.assertNotIn("<!-- deployment metadata -->", html)
 
 

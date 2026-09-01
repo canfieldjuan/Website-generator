@@ -112,6 +112,59 @@ trade-specific palette is available. Explicit brand colors, supported-trade
 palette selection, theme selection, and the accepted prospect schema must not
 change.
 
+### GPU-runtime revision
+
+The controlled fixture used `LLAMA_CPP_GPU_LAYERS=all`, but the launcher still
+defaults that setting to `auto`. On the supported workstation the 27B Qwen GGUF
+fits the RTX 3090, and normal app use must request full CUDA layer offload rather
+than leave CPU/GPU placement implicit. The launcher must therefore default to
+`all` while preserving an explicit `auto` or numeric override for other
+installations. This must not auto-start a model during application preflight,
+select a cloud provider, hide launch failure, or remove the operator's explicit
+runtime override.
+
+### Required-page-structure revision
+
+The GPU-default fixture produced valid balanced HTML but omitted the
+`<footer class="site-footer">` wrapper around `.footer-grid` and
+`.footer-bottom`. The class catalog exposes available components but does not
+state which structural components are mandatory, so prompt-only footer guidance
+cannot guarantee that the trusted `.site-footer` border/background rules apply.
+After that prompt correction, the next fixture emitted the footer but omitted
+the entire services grid even though the prospect supplied eight services and
+the build contract requires six cards. The root cause is that all mandatory
+page structure is still advisory model prose.
+
+The correct fix must encode the from-scratch build's unconditional skeleton as
+exact class counts at shared admission: one nav, hero, coverage band, services
+grid, benefits grid, contact form, and footer structure; six service cards; and
+three benefit cards. The response-boundary reminder must repeat those counts so
+the one allowed generation attempt can satisfy them. Redesign and interior pages
+must enforce only the common footer structure because their other sections are
+data-dependent. Any missing, partial, or duplicated mandatory structure must
+fail before assembly and file write. This must not change the base CSS, visible
+copy, generated page ordering, conditional reviews/trust behavior, or introduce
+a second component implementation.
+
+### Services-component contract revision
+
+The exact GPU fixture still omitted the required services section after the
+response boundary repeated its exact class counts. A reduced, selected-trade
+defaults context produced the same failure: the model ended normally after
+2,460 generated tokens with no truncation, but returned zero `.services-grid`
+and `.service-card` elements. Prompt size and output length are therefore not
+the cause. Comparing the emitted page with the build prompt shows that every
+rendered structured section has a concrete HTML markup contract, while services
+is the only unconditional component described solely in prose.
+
+The correct fix must provide one exact allowed-class services scaffold at the
+services rule and repeat that compact scaffold at the final response boundary.
+The existing exact-count admission remains the fail-closed enforcement before
+write. The unsuccessful selected-trade filtering experiment must not remain in
+the diff. This must not move service choice or copy into code, change prospect
+service precedence or selection, alter visible design, add retries, change
+provider behavior, or affect deployment/email/image or Connect job contracts.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -143,6 +196,12 @@ change.
     visible text.
 13. Preserve uncatalogued-trade builds with the existing generic document-color
     fallback while retaining explicit-brand and supported-trade precedence.
+14. Default the standalone llama.cpp launcher to all GPU layers, with explicit
+    overrides preserved and no CPU or cloud fallback.
+15. Enforce exact class counts for the unconditional from-scratch page skeleton
+    and the shared footer structure so prompt omissions cannot ship.
+16. Give the mandatory services component an exact markup contract while
+    preserving model-owned service selection and code-owned count admission.
 
 ### Files touched
 
@@ -262,13 +321,14 @@ claim remains admissible.
 ## Verification
 
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 85 tests passed, including the `llama.cpp` health/model/chat contract,
+  — 89 tests passed, including the `llama.cpp` health/model/chat contract,
   browser- and URL-decoded placeholder admission, startup-script boundaries, and both
   HTML entry points' shared assembly. The suite also proves this slice cannot
   reconfigure the pre-existing extraction or image model roles through new
   environment variables, keeps interior-page components out of homepage
-  generation, checks claim-bearing attributes, and preserves a deterministic
-  document palette for uncatalogued trades.
+  generation, checks claim-bearing attributes, preserves a deterministic
+  document palette for uncatalogued trades, and rejects missing, duplicated, or
+  unresolved mandatory page structure.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
 - `bash -n scripts/start_llama_server.sh` — passed.
@@ -286,19 +346,21 @@ claim remains admissible.
   --skip-deploy` completed successfully against `llama.cpp` v0.3.0 at commit
   `c1d0e7a004015f23bc0233470b747b596f29b264`, serving the exact
   `qwen/qwen3.8-27b` alias. The command produced no deployment, email, or image
-  side effect. `CUDA_VISIBLE_DEVICES=0` and `LLAMA_CPP_GPU_LAYERS=all` confined
-  inference to the RTX 3090; the live server process held 19,898 MiB there.
+  side effect. `CUDA_VISIBLE_DEVICES=0` and the launcher's default
+  `LLAMA_CPP_GPU_LAYERS=all` confined inference to the RTX 3090; the live server
+  process held 19,922 MiB there.
 - The admitted artifact was
-  `outputs/builds/drees-plumbing-inc/index.html` (71,864 bytes, SHA-256
-  `8a275a80208b1542272846096bfcc954e8396b04ff0d4261ef03ed5e8c488690`).
+  `outputs/builds/drees-plumbing-inc/index.html` (71,766 bytes, SHA-256
+  `11193b14e62bb5c5bb86fa762d7a1c5894eeba49f4f403ab89580842647e0b4f`).
   The shared HTML validator accepted it; the required unresolved-placeholder
   search returned `0`, and the required fabricated-claim search returned `0`.
-- System Chrome screenshots at 1440x900 and 390x844 confirmed the generated
-  desktop layout remains coherent and the mobile footer now stacks normally
-  with a readable one-line copyright row. The artifact contains no interior
-  `.page-body` or `.page-cta-*` class in generated markup.
+  It contains one services grid, six service cards, six service names, six
+  service descriptions, and every other mandatory class at its exact count.
+- System Chrome screenshots at 1440x900, 1440x3000, 390x844, and 390x5000
+  confirmed the services grid renders as two rows of three on desktop and six
+  stacked cards on mobile without horizontal clipping.
 - The standalone runtime was stopped after validation. The GPU compute-process
-  query was empty and RTX 3090 usage returned to 15 MiB.
+  query was empty.
 - Mocked local transport tests prove the configured request reaches the
   `llama.cpp` chat route once, disables thinking, preserves finish status, and
   fails closed on malformed, reasoning, tool, and multi-choice responses.

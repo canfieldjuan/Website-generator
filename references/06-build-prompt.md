@@ -280,6 +280,41 @@ The per-section rules:
    6 with highest commercial value per INDUSTRY_DEFAULTS guidance. If
    fewer than 6, augment from the canonical service catalog. Each
    card: service name, one-line description.
+
+   Markup (replace every square-bracket token; render all 6 cards):
+   ```html
+   <div class="page-wrap section-gap">
+     <div class="sec-hd">
+       <span class="sec-title"><span class="sec-dot"></span>Services</span>
+     </div>
+     <div class="services-grid">
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_1_NAME]</div>
+         <p class="service-card-desc">[SERVICE_1_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_2_NAME]</div>
+         <p class="service-card-desc">[SERVICE_2_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_3_NAME]</div>
+         <p class="service-card-desc">[SERVICE_3_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_4_NAME]</div>
+         <p class="service-card-desc">[SERVICE_4_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_5_NAME]</div>
+         <p class="service-card-desc">[SERVICE_5_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_6_NAME]</div>
+         <p class="service-card-desc">[SERVICE_6_DESCRIPTION]</p>
+       </div>
+     </div>
+   </div>
+   ```
 6. Why choose us -- EXACTLY 3 differentiators (the `.benefits-grid` is
    a 3-column desktop grid; 4 cards leaves an orphan trailing cell).
    Wrap the whole section in `<section class="section-band">` instead
@@ -603,6 +638,10 @@ looks surprising, but the harness is authoritative.
 ---
 
 ## FOOTER ARCHITECTURE
+
+Wrap the entire footer in exactly one `<footer class="site-footer">`. Place the
+`.footer-grid` first and `.footer-bottom` second inside that wrapper, then close
+the footer before `</body>`.
 
 Three-column grid (`.footer-grid` with `grid-template-columns: 1.5fr 1fr 1fr`).
 The brand column on the left gets a structured vertical stack -- do NOT

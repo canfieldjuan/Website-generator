@@ -92,6 +92,8 @@ In both modes:
   must be `</body>`. No HTML comment may precede the opening `<body>` tag.
 - Do not emit any unresolved template token.
 - The nav and footer must match the homepage exactly (same links, same brand treatment)
+- The footer must be one `<footer class="site-footer">` containing
+  `.footer-grid` followed by `.footer-bottom`, closed before `</body>`.
 - Only the main content area changes per page type
 - Apply the same `class="theme-light"` or `class="theme-dark"` to the `<body>` as the homepage
 - Trusted code applies the same root tokens and Google Fonts as the homepage

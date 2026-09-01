@@ -546,6 +546,9 @@ Always include onerror="this.style.display='none'".
 Gradient overlays only when text is placed over images.
 
 ### Footer
+Wrap the entire footer in exactly one `<footer class="site-footer">`. Place the
+`.footer-grid` first and `.footer-bottom` second inside that wrapper, then close
+the footer before `</body>`.
 3-col: brand+contact | nav links | secondary/misc links.
 Brand name in --font-display at large size (36-42px).
 All real contact data from JSON.
