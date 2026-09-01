@@ -164,6 +164,13 @@ class RequestBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "strict UTF-8 JSON"):
             decode_job_request(b'{"protocol_version":2,"protocol_version":2}')
 
+    def test_lone_surrogate_is_rejected_before_request_hashing(self):
+        document = job_request(artifact_bytes())
+        document["inputs"][0]["display_name"] = "\ud800"
+
+        with self.assertRaisesRegex(ValueError, "strict UTF-8 JSON"):
+            decode_job_request(json.dumps(document).encode("utf-8"))
+
 
 class StoreTests(unittest.TestCase):
     def setUp(self):
@@ -389,6 +396,33 @@ class ProviderApiTests(unittest.TestCase):
         self.assertEqual(rejected.status_code, 413)
         self.assertEqual(rejected.json()["error"]["code"], "INPUT_TOO_LARGE")
 
+    def test_excessive_json_nesting_is_a_shaped_request_error(self):
+        data = artifact_bytes()
+        nested_request = ("[" * 2000) + "0" + ("]" * 2000)
+        files = [
+            ("request", (None, nested_request, "application/json")),
+            ("artifact", ("prospect.json", data, "application/json")),
+        ]
+
+        response = self.submit({}, data, files=files)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "JOB_REQUEST_INVALID")
+
+    def test_lone_surrogate_is_a_shaped_request_error(self):
+        data = artifact_bytes()
+        document = job_request(data)
+        document["inputs"][0]["display_name"] = "\ud800"
+        files = [
+            ("request", (None, json.dumps(document), "application/json")),
+            ("artifact", ("prospect.json", data, "application/json")),
+        ]
+
+        response = self.submit(document, data, files=files)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "JOB_REQUEST_INVALID")
+
     def test_invalid_job_path_is_distinct_from_missing_job(self):
         invalid = self.client.get("/v2/jobs/not-a-uuid", headers=self.headers)
         missing = self.client.get(f"/v2/jobs/{uuid.uuid4()}", headers=self.headers)
@@ -515,24 +549,35 @@ class GenerationSeamTests(unittest.TestCase):
             if photos is not None:
                 source["photos"] = photos
             missing_assets.append(source)
-        supplied_asset = dict(PROSPECT)
-        supplied_asset["photos"] = [
-            {
-                "context": "background",
-                "url": "https://images.example.test/hero.jpg",
-            }
-        ]
+        for url in (
+            "images/hero.jpg",
+            "/images/hero.jpg",
+            "file:///tmp/hero.jpg",
+            "data:text/html,not-an-image",
+        ):
+            source = dict(PROSPECT)
+            source["photos"] = [{"context": "hero", "url": url}]
+            missing_assets.append(source)
+        supplied_assets = []
+        for url in (
+            "https://images.example.test/hero.jpg",
+            "data:image/png;base64,AA==",
+        ):
+            source = dict(PROSPECT)
+            source["photos"] = [{"context": "background", "url": url}]
+            supplied_assets.append(source)
         with patch.object(
             build, "apply_design_selections", side_effect=select_split
         ), patch.object(
             build, "generate_build_html", side_effect=generated
         ):
-            for source in (*missing_assets, supplied_asset):
+            for source in (*missing_assets, *supplied_assets):
                 generate_website_artifact(json.dumps(source).encode("utf-8"))
 
-        for prospect in generated_prospects[:-1]:
+        for prospect in generated_prospects[: len(missing_assets)]:
             self.assertEqual(prospect["_computed_hero_shape"], "gradient")
-        self.assertEqual(generated_prospects[-1]["_computed_hero_shape"], "split")
+        for prospect in generated_prospects[len(missing_assets) :]:
+            self.assertEqual(prospect["_computed_hero_shape"], "split")
 
     def test_required_prospect_fields_must_be_nonempty_strings(self):
         for invalid in (123, True, [], "   "):
@@ -558,6 +603,27 @@ class GenerationSeamTests(unittest.TestCase):
                 runtime.accept(document, data)
                 failed = runtime.wait_for_terminal(document["job_id"])
                 self.assertEqual(failed.status, "failed")
+                self.assertEqual(failed.error_code, "INPUT_INVALID")
+                self.assertFalse(failed.error_retryable)
+                generated.assert_not_called()
+            finally:
+                runtime.close()
+
+    def test_lone_surrogate_in_artifact_is_nonretryable_input_failure(self):
+        data = json.dumps(
+            {**PROSPECT, "business_name": "\ud800"}
+        ).encode("utf-8")
+        document = job_request(data)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            build, "generate_build_html"
+        ) as generated:
+            runtime = ProviderRuntime(
+                ConnectStore(Path(directory) / "connect.sqlite3"),
+                generate_website_artifact,
+            )
+            try:
+                runtime.accept(document, data)
+                failed = runtime.wait_for_terminal(document["job_id"])
                 self.assertEqual(failed.error_code, "INPUT_INVALID")
                 self.assertFalse(failed.error_retryable)
                 generated.assert_not_called()

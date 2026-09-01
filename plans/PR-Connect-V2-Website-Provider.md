@@ -40,6 +40,7 @@ that cannot satisfy the job contract.
 
 ### Files touched
 
+- `build.py`, `lib/generation.py`
 - `connect_provider.py`
 - `lib/connect_v2.py`, `lib/connect_store.py`, `lib/connect_entitlement.py`
 - `tests/test_connect_provider.py`
@@ -73,6 +74,11 @@ single HTML output self-contained without invoking image acquisition.
 The same adapter measures the exact pretty-serialized prospect prompt block and
 rejects the input when it would cross the generator's limit, so Connect never
 marks a job complete after silently truncating accepted prospect fields.
+Request and prospect JSON share one strict decoder that rejects duplicate keys,
+non-finite constants, excessive parser depth, and unpaired Unicode surrogates
+before hashing or generation. Photo-dependent hero shapes survive only when the
+input supplies an absolute HTTP(S) image URL or an embedded `data:image/` URL;
+relative and local paths fall back to the existing gradient layout.
 
 The HTTP layer checks bearer authentication first and the independently signed
 local entitlement second on every request. Entitlement verification uses an
@@ -118,7 +124,7 @@ builds with no official keyring fail closed as authority-unavailable.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 80 tests in 2.679 seconds on the updated combined head.
+  passed: 86 tests in 2.955 seconds on the updated combined head.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema

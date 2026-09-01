@@ -420,13 +420,8 @@ def validate_artifact_identity(document: dict[str, Any], artifact_bytes: bytes) 
 
 def decode_job_request(request_bytes: bytes) -> dict[str, Any]:
     try:
-        text = request_bytes.decode("utf-8")
-        document = json.loads(
-            text,
-            object_pairs_hook=_reject_duplicate_json_keys,
-            parse_constant=_reject_json_constant,
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        document = _decode_strict_json(request_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise _invalid_request("The request field must contain strict UTF-8 JSON.") from exc
     if not isinstance(document, dict):
         raise _invalid_request("The request JSON must be an object.")
@@ -646,10 +641,25 @@ def _has_usable_hero_photo(prospect: dict[str, Any]) -> bool:
     return any(
         isinstance(photo, dict)
         and photo.get("context") in {"hero", "background"}
-        and isinstance(photo.get("url"), str)
-        and bool(photo["url"].strip())
+        and _is_connect_accessible_image_url(photo.get("url"))
         for photo in photos
     )
+
+
+def _is_connect_accessible_image_url(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    candidate = value.strip()
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return False
+    if parsed.scheme.lower() in {"http", "https"}:
+        return bool(parsed.netloc)
+    if parsed.scheme.lower() == "data":
+        header, separator, _payload = candidate.partition(",")
+        return bool(separator) and header.lower().startswith("data:image/")
+    return False
 
 
 def _select_connect_hero_shape(prospect: dict[str, Any]) -> None:
@@ -663,18 +673,20 @@ def _select_connect_hero_shape(prospect: dict[str, Any]) -> None:
 
 def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
     try:
-        prospect_document = json.loads(
-            input_bytes.decode("utf-8"),
-            object_pairs_hook=_reject_duplicate_json_keys,
-            parse_constant=_reject_json_constant,
-        )
+        prospect_document = _decode_strict_json(input_bytes)
         prospect = build.prepare_prospect(prospect_document)
         build.apply_design_selections(prospect, announce=False)
         _select_connect_hero_shape(prospect)
         if len(build.format_prospect_prompt_block(prospect)) > build.BUILD_USER_TRUNCATE:
             raise ValueError("The prospect document exceeds the generation prompt limit.")
         display_name = f"{build.slugify(prospect['business_name'])}-homepage.html"
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        RecursionError,
+        TypeError,
+        ValueError,
+    ) as exc:
         raise ValueError("The input artifact is not a valid prospect document.") from exc
     config = resolve_connect_generation_config()
     html = build.generate_build_html(prospect, config)
@@ -877,6 +889,30 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Unsupported JSON constant: {value}")
+
+
+def _decode_strict_json(payload: bytes) -> Any:
+    document = json.loads(
+        payload.decode("utf-8"),
+        object_pairs_hook=_reject_duplicate_json_keys,
+        parse_constant=_reject_json_constant,
+    )
+    _reject_unicode_surrogates(document)
+    return document
+
+
+def _reject_unicode_surrogates(value: Any) -> None:
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str):
+            if any(0xD800 <= ord(character) <= 0xDFFF for character in current):
+                raise ValueError("JSON strings must contain Unicode scalar values.")
+        elif isinstance(current, dict):
+            pending.extend(current.keys())
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
 
 
 def _new_output_artifact_id(input_artifact_id: str) -> str:
