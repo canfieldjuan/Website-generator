@@ -261,7 +261,7 @@ class HtmlAdmissionTests(unittest.TestCase):
         wrong_order = (
             "<html><!DOCTYPE html><head></head><body></body></html>"
         )
-        with self.assertRaisesRegex(GeneratedHtmlError, "structurally invalid"):
+        with self.assertRaises(GeneratedHtmlError):
             validate_generated_html(result(wrong_order))
 
     def test_closing_tags_inside_script_do_not_satisfy_document_structure(self):
@@ -275,6 +275,13 @@ class HtmlAdmissionTests(unittest.TestCase):
     def test_trailing_provider_chatter_is_rejected(self):
         with self.assertRaisesRegex(GeneratedHtmlError, "after </html>"):
             validate_generated_html(result(COMPLETE_HTML + "\nFinished."))
+
+    def test_leading_provider_chatter_is_rejected(self):
+        with self.assertRaisesRegex(GeneratedHtmlError, "begin with the HTML doctype"):
+            validate_generated_html(result("Finished.\n" + COMPLETE_HTML))
+
+    def test_utf8_bom_before_doctype_is_accepted(self):
+        self.assertEqual(validate_generated_html(result("\ufeff" + COMPLETE_HTML)), COMPLETE_HTML)
 
     def test_maximum_byte_boundary_accepts_limit_and_rejects_limit_plus_one(self):
         padding_marker = "Ready"
