@@ -19,6 +19,7 @@ DEFAULT_LOCAL_MODEL = "qwen/qwen3.8-27b"
 DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:1234/v1"
 DEFAULT_LOCAL_API_KEY = "lm-studio"
 DEFAULT_TIMEOUT_SECONDS = 600.0
+DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
 DEFAULT_MAX_OUTPUT_TOKENS = 16384
 MAX_HTML_BYTES = 2 * 1024 * 1024
 SUPPORTED_PROVIDERS = frozenset(("local", "openrouter"))
@@ -119,9 +120,12 @@ def resolve_generation_config(
             f"Unsupported generation provider {provider!r}; choose one of: {allowed}."
         )
 
-    timeout_seconds = _positive_float_env(
-        "GENERATION_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS
+    default_timeout = (
+        DEFAULT_LOCAL_TIMEOUT_SECONDS
+        if provider_name == "local"
+        else DEFAULT_TIMEOUT_SECONDS
     )
+    timeout_seconds = _positive_float_env("GENERATION_TIMEOUT_SECONDS", default_timeout)
     max_output_tokens = _positive_int_env(
         "GENERATION_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS
     )
@@ -178,6 +182,7 @@ def create_generation_client(config: GenerationConfig) -> OpenAI:
         base_url=config.base_url,
         api_key=config.api_key,
         timeout=config.timeout_seconds,
+        max_retries=0,
         **client_options,
     )
 

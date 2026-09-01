@@ -12,6 +12,8 @@ import lib.clients
 from lib.generation import (
     DEFAULT_LOCAL_BASE_URL,
     DEFAULT_LOCAL_MODEL,
+    DEFAULT_LOCAL_TIMEOUT_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS,
     MAX_HTML_BYTES,
     GeneratedHtmlError,
     GenerationConfig,
@@ -21,6 +23,7 @@ from lib.generation import (
     GenerationResult,
     PromptPart,
     atomic_write_text,
+    create_generation_client,
     generate_text,
     preflight_generation_provider,
     resolve_generation_config,
@@ -108,6 +111,31 @@ class GenerationConfigTests(unittest.TestCase):
         self.assertEqual(selected.provider, "local")
         self.assertEqual(selected.model, DEFAULT_LOCAL_MODEL)
         self.assertEqual(selected.base_url, DEFAULT_LOCAL_BASE_URL)
+        self.assertEqual(selected.timeout_seconds, DEFAULT_LOCAL_TIMEOUT_SECONDS)
+
+    def test_openrouter_keeps_remote_timeout_default(self):
+        with patch("lib.generation.OPENROUTER_API_KEY", "configured"):
+            with patch.dict(os.environ, {}, clear=True):
+                selected = resolve_generation_config("openrouter", "anthropic/example")
+
+        self.assertEqual(selected.timeout_seconds, DEFAULT_TIMEOUT_SECONDS)
+
+    def test_explicit_timeout_override_wins_for_local_generation(self):
+        with patch.dict(
+            os.environ, {"GENERATION_TIMEOUT_SECONDS": "123.5"}, clear=True
+        ):
+            selected = resolve_generation_config()
+
+        self.assertEqual(selected.timeout_seconds, 123.5)
+
+    def test_zero_timeout_override_is_rejected(self):
+        with patch.dict(
+            os.environ, {"GENERATION_TIMEOUT_SECONDS": "0"}, clear=True
+        ):
+            with self.assertRaisesRegex(
+                GenerationConfigurationError, "greater than zero"
+            ):
+                resolve_generation_config()
 
     def test_local_explicit_model_wins_over_environment(self):
         with patch.dict(os.environ, {"LOCAL_GENERATION_MODEL": "local/from-env"}, clear=True):
@@ -155,6 +183,19 @@ class GenerationConfigTests(unittest.TestCase):
 
 
 class ProviderBoundaryTests(unittest.TestCase):
+    def test_generation_client_disables_automatic_provider_retries(self):
+        selected = config()
+
+        with patch("lib.generation.OpenAI") as openai:
+            create_generation_client(selected)
+
+        openai.assert_called_once_with(
+            base_url=selected.base_url,
+            api_key=selected.api_key,
+            timeout=selected.timeout_seconds,
+            max_retries=0,
+        )
+
     def test_client_configuration_import_has_no_network_or_client_side_effect(self):
         with patch("requests.get") as http_get, patch("openai.OpenAI") as openai:
             importlib.reload(lib.clients)

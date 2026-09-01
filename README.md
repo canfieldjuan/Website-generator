@@ -76,8 +76,8 @@ The pitch email is generated as a Markdown draft with `[VERCEL_URL_PLACEHOLDER]`
 # Python deps
 pip install -r requirements.txt
 
-# Local HTML generation (load manually; the scripts never consume GPU automatically)
-lms load qwen/qwen3.8-27b
+# Local HTML generation (load manually; choose an offload ratio that fits your GPU)
+lms load qwen/qwen3.8-27b --context-length 131072
 
 # Headless browser (only needed for JS-rendered sites in pipeline.py)
 playwright install chromium
@@ -96,6 +96,8 @@ UNSPLASH_ACCESS_KEY=...  # Optional — free hero photos; falls back to Flux gen
 # Optional local overrides; these defaults already target LM Studio + Qwen.
 LOCAL_GENERATION_BASE_URL=http://127.0.0.1:1234/v1
 LOCAL_GENERATION_MODEL=qwen/qwen3.8-27b
+# Local generation defaults to a two-hour request deadline. Override only when needed.
+GENERATION_TIMEOUT_SECONDS=7200
 
 # Optional default after --generation-provider openrouter is explicitly selected.
 OPENROUTER_GENERATION_MODEL=anthropic/claude-sonnet-4.5

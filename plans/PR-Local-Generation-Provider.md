@@ -47,6 +47,14 @@ list; OpenRouter requires the operator to select it and provide a model. The
 shared request adapter sends plain content to local OpenAI-compatible servers
 and adds cache metadata only for OpenRouter.
 
+Local generation uses a two-hour default request deadline because the exact Qwen
+fixture exceeds the former cloud-oriented ten-minute deadline on supported local
+hardware. The OpenAI-compatible client disables automatic retries, so one CLI or
+Connect generation attempt produces exactly one model request instead of silently
+restarting an expensive completion after a read timeout. An explicit
+`GENERATION_TIMEOUT_SECONDS` value still overrides either provider default;
+OpenRouter keeps the existing ten-minute default.
+
 Each response records provider, model, finish reason, content, and usage. HTML
 admission accepts only a normal `stop` response containing one ordered doctype,
 `html`, `head`, and `body` structure within the byte limit. Writes use a
@@ -61,6 +69,8 @@ Both generation prompts place their required deployment metadata comment inside
   `lms load` instruction.
 - OpenRouter is never an automatic fallback because it changes cost and data
   locality.
+- Provider requests are not retried implicitly. A caller or durable job owner must
+  observe the failure before deciding whether to submit new work.
 - Existing outer Markdown fences remain tolerated, but embedded fences,
   provider chatter, partial markup, and length-limited completions fail closed.
 - Resend's informational domain check still occurs when email is actually sent,
@@ -78,7 +88,7 @@ Both generation prompts place their required deployment metadata comment inside
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 36 tests passed.
+  — 40 tests passed.
 - `python3 -m compileall -q build.py pipeline.py lib tests` — passed.
 - `python3 build.py --help` — passed; provider/model and existing skip flags shown.
 - `python3 pipeline.py --help` — passed; provider/model and existing skip flags shown.
@@ -92,6 +102,12 @@ Both generation prompts place their required deployment metadata comment inside
   no admitted HTML. The proof model was unloaded and the original NVIDIA runtime
   restored. The stale server conflict and viable inference performance remain
   acceptance blockers, not passing proof.
+- A subsequent controlled run proved the former 600-second client setting was not
+  an end-to-end bound: the server disconnected at that deadline after processing
+  78.8% of the prompt, and the OpenAI client immediately started a second model
+  request. No HTML was written. The implementation now disables SDK retries and
+  gives local generation a two-hour default while leaving the explicit override
+  and OpenRouter default intact. The real fixture must still pass after this fix.
 
 ## Estimated diff size
 
