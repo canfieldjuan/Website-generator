@@ -295,6 +295,13 @@ Required identity substitutions may match punctuation or markup variants only
 as a complete normalized alphanumeric token sequence. A short compact name must
 never pass because it appears inside an unrelated longer word elsewhere in the
 page.
+Conditional claim denials must cover the entire canonical family seeded by the
+prompt catalogs, not only one rendered label; an unsupported same-day field,
+for example, must reject every `Same Day ...` variant. The build caller must
+also declare the exact code-owned contact-form action: the verified
+`formspree_endpoint` verbatim when present, otherwise `#`. Admission must bind
+that value to the single actual `form.contact-form-wrap`; a matching value on
+another element or a different well-formed endpoint cannot satisfy it.
 The shared parser must also reject unclosed, unexpectedly closed, or misnested
 non-void descendants before BeautifulSoup repair, while accepting standard void
 elements and valid self-closing SVG content. Finally, each generator must pass
@@ -399,6 +406,10 @@ behavior, or any image, email, deployment, and Connect job contract.
     availability, scheduling, and trade-credential claim family.
 41. Replace page-wide compact substring identity admission with complete
     normalized token-sequence matching.
+42. Cover every prompt-seeded same-day wording through one semantic claim
+    family rather than one label-specific phrase.
+43. Require the exact verified Formspree action, or the explicit `#` fallback,
+    on the generated contact form before assembly.
 
 ### Files touched
 

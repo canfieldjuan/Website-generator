@@ -81,7 +81,7 @@ COMPLETE_BUILD_BODY = (
     '<section class="dual-cta-hero"></section><div class="coverage-band"></div>'
     + COMPLETE_SERVICES_GRID
     + COMPLETE_BENEFITS_GRID
-    + '<form class="contact-form-wrap"></form>'
+    + '<form class="contact-form-wrap" action="#"></form>'
     '<footer class="site-footer"><div class="footer-grid"></div>'
     '<div class="footer-bottom"><p>Copyright</p></div></footer></body>'
 )
@@ -1817,6 +1817,8 @@ class PromptContractTests(unittest.TestCase):
         for claim in build.GATED_SERVICE_CLAIMS:
             with self.subTest(claim=claim):
                 self.assertNotIn(claim.casefold(), prompt)
+        self.assertNotIn("same-day replacement available", prompt)
+        self.assertNotIn("same-day repair, multi-day install", prompt)
 
 
 class AtomicWriteAndCliTests(unittest.TestCase):
@@ -2412,8 +2414,9 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "phone": "217-555-0100",
         }
         invalid_build = COMPLETE_BUILD_BODY.replace(
-            '<form class="contact-form-wrap">',
-            '<div class="invented-layout"></div><form class="contact-form-wrap">',
+            '<form class="contact-form-wrap" action="#">',
+            '<div class="invented-layout"></div>'
+            '<form class="contact-form-wrap" action="#">',
         )
         with self.assertRaisesRegex(
             GeneratedBodyError,
@@ -2488,6 +2491,8 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             ("locally_owned", True, "Locally Owned, Not a Franchise"),
             ("has_24_7", True, "24/7 Service"),
             ("same_day_service", True, "Same-Day Service"),
+            ("same_day_service", True, "Same-day replacement available"),
+            ("same_day_service", True, "Same-day repair"),
             ("epa_certified", True, "EPA-Certified Technicians"),
             ("master_electrician_license", "IL-123", "Master Electrician"),
             ("ibew_local_number", "176", "IBEW Local 176 Member"),
@@ -2523,6 +2528,55 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(claim_body)),
             )
             self.assertIn(claim, html)
+
+    def test_build_generator_requires_exact_contact_form_action(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "formspree_endpoint": "https://formspree.io/f/verified",
+        }
+        wrong_endpoint_body = COMPLETE_BUILD_BODY.replace(
+            '<form class="contact-form-wrap" action="#">',
+            '<form class="contact-form-wrap" action="https://formspree.io/f/wrong">',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "contact form action"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_endpoint_body)),
+            )
+
+        verified_body = COMPLETE_BUILD_BODY.replace(
+            '<form class="contact-form-wrap" action="#">',
+            '<form class="contact-form-wrap" '
+            'action="https://formspree.io/f/verified">',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(verified_body)),
+        )
+        self.assertIn('action="https://formspree.io/f/verified"', html)
+
+        no_endpoint_prospect = dict(prospect)
+        no_endpoint_prospect.pop("formspree_endpoint")
+        missing_action_body = COMPLETE_BUILD_BODY.replace(' action="#"', "")
+        with self.assertRaisesRegex(GeneratedBodyError, "contact form action"):
+            build.generate_build_html(
+                no_endpoint_prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(missing_action_body)),
+            )
+
+        html = build.generate_build_html(
+            no_endpoint_prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY)),
+        )
+        self.assertIn('action="#"', html)
 
     def test_redesign_generator_assembles_body_with_site_brand_contract(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_PAGE_BODY))

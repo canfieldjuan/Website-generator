@@ -98,7 +98,7 @@ FIELD_GATED_CLAIMS = {
     "family_owned": ("Family Owned",),
     "locally_owned": ("Locally Owned", "Not a Franchise"),
     "has_24_7": ("24/7", "24 Hour Service", "Around the Clock"),
-    "same_day_service": ("Same Day Service",),
+    "same_day_service": ("Same Day",),
     "epa_certified": ("EPA Certified", "EPA Section 608"),
     "master_electrician_license": ("Master Electrician", "Master Licensed"),
     "ibew_local_number": ("IBEW",),
@@ -149,6 +149,14 @@ def required_build_class_counts(prospect):
         (class_name, 0 if class_name == "coverage-band" else expected_count)
         for class_name, expected_count in BUILD_REQUIRED_CLASS_COUNTS
     )
+
+
+def expected_build_form_action(prospect):
+    endpoint = prospect.get("formspree_endpoint")
+    if isinstance(endpoint, str) and endpoint.strip():
+        return endpoint.strip()
+    return "#"
+
 
 BUILD_SERVICES_RESPONSE_SCAFFOLD = (
     '<div class="page-wrap section-gap">\n'
@@ -913,6 +921,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             if isinstance(value, str) and value
         ),
         expected_phone=prospect.get("phone"),
+        expected_form_action=expected_build_form_action(prospect),
         required_class_counts=required_class_counts,
         required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
     )

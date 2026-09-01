@@ -136,7 +136,7 @@ specify, OR to augment a sparse list. Prospect-specified items win.
 | Service                       | One-line description                                                |
 |-------------------------------|---------------------------------------------------------------------|
 | Emergency Leak Repair         | 24/7 response to burst pipes, slab leaks, and active water damage.  |
-| Water Heater Repair & Install | Tank and tankless systems. Same-day replacement available.          |
+| Water Heater Repair & Install | Tank and tankless system repair, replacement, and installation.      |
 | Drain Cleaning                | Hydro-jet and snake service for kitchen, bath, and main lines.      |
 | Sewer Line Repair             | Camera inspection, spot repair, and trenchless replacement.         |
 | Sump Pump Service             | Repair, replacement, and battery backup installation.               |
@@ -458,7 +458,7 @@ items always win.
 
 | Service                       | One-line description                                                |
 |-------------------------------|---------------------------------------------------------------------|
-| AC Repair & Installation      | Window units, central AC, mini-splits. Same-day repair, multi-day install. |
+| AC Repair & Installation      | Window units, central AC, and mini-split repair and installation.         |
 | Furnace Repair & Installation | Gas, electric, oil. Repair to full system replacement.              |
 | Heat Pump Service             | Installation, repair, and refrigerant service for heat pumps.       |
 | Duct Cleaning & Sealing       | Air duct cleaning, sealing leaks, improving system airflow.         |

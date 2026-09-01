@@ -121,6 +121,7 @@ BIDI_PHONE_CONTROLS = frozenset(
 ACTIONABLE_URL_ATTRIBUTES = ("href", "action", "formaction", "xlink:href")
 TRUSTED_IMAGE_ERROR_HANDLER = "this.style.display='none'"
 _EXPECTED_PHONE_UNSET = object()
+_EXPECTED_FORM_ACTION_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -1054,6 +1055,7 @@ def validate_generated_body(
     allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
+    expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -1209,6 +1211,35 @@ def validate_generated_body(
             "Generated body has invalid required component structure: "
             + "; ".join(child_sequence_mismatches[:3])
         )
+
+    if expected_form_action is not _EXPECTED_FORM_ACTION_UNSET:
+        if not isinstance(expected_form_action, str) or not expected_form_action:
+            raise GeneratedBodyError(
+                "Expected contact form action must be a non-empty string."
+            )
+        contact_forms = [
+            element
+            for element in body_root.find_all("form")
+            if "contact-form-wrap" in _exact_class_names(element)
+        ]
+        if len(contact_forms) != 1:
+            raise GeneratedBodyError(
+                "Generated body must contain exactly one contact form action owner."
+            )
+        actual_action = contact_forms[0].get("action")
+        if actual_action != expected_form_action:
+            raise GeneratedBodyError(
+                "Generated body contact form action does not match the verified endpoint."
+            )
+        alternate_actions = [
+            element.get("formaction")
+            for element in body_root.find_all(True)
+            if element.has_attr("formaction")
+        ]
+        if any(action != expected_form_action for action in alternate_actions):
+            raise GeneratedBodyError(
+                "Generated body contains an alternate unverified contact form action."
+            )
 
     exposure_surfaces, dom_adjacent_phone_surface = _claim_exposure_texts(body_root)
     claim_surfaces = (
@@ -1493,6 +1524,7 @@ def assemble_generated_html(
     allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
+    expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -1517,6 +1549,7 @@ def assemble_generated_html(
         allowed_class_names=allowed_class_names,
         required_exposed_values=required_exposed_values,
         expected_phone=expected_phone,
+        expected_form_action=expected_form_action,
         required_class_counts=required_class_counts,
         required_child_class_sequences=required_child_class_sequences,
     )
