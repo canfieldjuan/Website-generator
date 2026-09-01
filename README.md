@@ -98,6 +98,8 @@ LOCAL_GENERATION_BASE_URL=http://127.0.0.1:1234/v1
 LOCAL_GENERATION_MODEL=qwen/qwen3.8-27b
 # Local generation defaults to a two-hour request deadline. Override only when needed.
 GENERATION_TIMEOUT_SECONDS=7200
+# The template-sized default is 65,536 output tokens. Lower only for smaller prompts.
+GENERATION_MAX_OUTPUT_TOKENS=65536
 
 # Optional default after --generation-provider openrouter is explicitly selected.
 OPENROUTER_GENERATION_MODEL=anthropic/claude-sonnet-4.5

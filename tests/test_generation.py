@@ -13,6 +13,7 @@ from lib.generation import (
     DEFAULT_LOCAL_BASE_URL,
     DEFAULT_LOCAL_MODEL,
     DEFAULT_LOCAL_TIMEOUT_SECONDS,
+    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_TIMEOUT_SECONDS,
     MAX_HTML_BYTES,
     GeneratedHtmlError,
@@ -112,6 +113,7 @@ class GenerationConfigTests(unittest.TestCase):
         self.assertEqual(selected.model, DEFAULT_LOCAL_MODEL)
         self.assertEqual(selected.base_url, DEFAULT_LOCAL_BASE_URL)
         self.assertEqual(selected.timeout_seconds, DEFAULT_LOCAL_TIMEOUT_SECONDS)
+        self.assertEqual(selected.max_output_tokens, DEFAULT_MAX_OUTPUT_TOKENS)
 
     def test_openrouter_keeps_remote_timeout_default(self):
         with patch("lib.generation.OPENROUTER_API_KEY", "configured"):
@@ -180,6 +182,14 @@ class GenerationConfigTests(unittest.TestCase):
                 GenerationConfigurationError, "greater than zero"
             ):
                 resolve_generation_config()
+
+    def test_explicit_output_token_limit_overrides_the_template_sized_default(self):
+        with patch.dict(
+            os.environ, {"GENERATION_MAX_OUTPUT_TOKENS": "32768"}, clear=True
+        ):
+            selected = resolve_generation_config()
+
+        self.assertEqual(selected.max_output_tokens, 32768)
 
 
 class ProviderBoundaryTests(unittest.TestCase):
@@ -426,6 +436,18 @@ class HtmlAdmissionTests(unittest.TestCase):
 
 
 class PromptContractTests(unittest.TestCase):
+    def test_every_wired_html_prompt_requires_doctype_first(self):
+        for prompt_path in (
+            Path("references/02-redesign-gen-prompt.md"),
+            Path("references/04-interior-page-prompt.md"),
+            Path("references/06-build-prompt.md"),
+        ):
+            with self.subTest(prompt=str(prompt_path)):
+                prompt = prompt_path.read_text(encoding="utf-8")
+                self.assertIn("first characters", prompt)
+                self.assertIn("must be `<!DOCTYPE html>`", prompt)
+                self.assertNotIn("(or a leading comment)", prompt)
+
     def test_deployment_comments_are_required_inside_document_head(self):
         for prompt_path in (
             Path("references/06-build-prompt.md"),
