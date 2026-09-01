@@ -32,6 +32,7 @@ from lib.generation import (
     body_generation_config,
     create_generation_client,
     create_local_generation_client,
+    extract_square_placeholder_tokens,
     extract_template_body_scaffold,
     generate_text,
     preflight_generation_provider,
@@ -51,6 +52,11 @@ COMMENTED_BODY = (
     '<main>Ready</main>'
     '</body>'
 )
+
+
+def body_with_markers(markers):
+    marker_lines = "\n".join(markers)
+    return f"<body><!--\n{marker_lines}\n--><main>Ready</main></body>"
 
 
 class FakeModels:
@@ -540,6 +546,27 @@ class BodyAssemblyTests(unittest.TestCase):
                 with self.assertRaises(GeneratedBodyError):
                     validate_generated_body(body_result(content))
 
+    def test_prompt_defined_square_placeholders_fail_without_rejecting_other_brackets(self):
+        prompt = "Use [PROSPECT.phone], [SITE_SLUG], and [N]-MILE RADIUS. - [ ] check"
+        placeholders = extract_square_placeholder_tokens(prompt)
+
+        self.assertIn("[PROSPECT.phone]", placeholders)
+        self.assertIn("[SITE_SLUG]", placeholders)
+        self.assertIn("[N]", placeholders)
+        self.assertNotIn("[ ]", placeholders)
+        with self.assertRaisesRegex(GeneratedBodyError, "prompt placeholders"):
+            validate_generated_body(
+                body_result("<body><main>Call [PROSPECT.phone]</main></body>"),
+                forbidden_square_placeholders=placeholders,
+            )
+        self.assertEqual(
+            validate_generated_body(
+                body_result("<body><main>Open [Saturday]</main></body>"),
+                forbidden_square_placeholders=placeholders,
+            ),
+            "<body><main>Open [Saturday]</main></body>",
+        )
+
     def test_body_byte_boundary_accepts_limit_and_rejects_limit_plus_one(self):
         base = "<body></body>"
         at_limit = base.replace(
@@ -565,7 +592,7 @@ class BodyAssemblyTests(unittest.TestCase):
             colors=self.colors,
             title=r"Drees \1 <Plumbing>",
             body_theme="theme-light",
-            relocate_leading_comment=True,
+            required_leading_comment_markers=("deployment metadata",),
         )
 
         self.assertTrue(document.startswith("<!DOCTYPE html>"))
@@ -586,7 +613,19 @@ class BodyAssemblyTests(unittest.TestCase):
                 colors=self.colors,
                 title="Test",
                 body_theme="theme-light",
-                relocate_leading_comment=True,
+                required_leading_comment_markers=("deployment metadata",),
+            )
+
+        with self.assertRaisesRegex(GeneratedBodyError, "comment does not match"):
+            assemble_generated_html(
+                body_result("<body><!-- TODO --><main>Ready</main></body>"),
+                base_template=self.base_template,
+                theme_catalog=self.theme_catalog,
+                theme_name="warm",
+                colors=self.colors,
+                title="Test",
+                body_theme="theme-light",
+                required_leading_comment_markers=("deployment metadata",),
             )
 
         with self.assertRaisesRegex(GeneratedHtmlError, "six-digit hex"):
@@ -780,9 +819,12 @@ class PromptContractTests(unittest.TestCase):
                 self.assertNotIn("(or a leading comment)", prompt)
 
     def test_deployment_comments_are_generated_first_and_relocated_to_head(self):
-        for prompt_path in (
-            Path("references/06-build-prompt.md"),
-            Path("references/02-redesign-gen-prompt.md"),
+        for prompt_path, markers in (
+            (Path("references/06-build-prompt.md"), build.BUILD_DEPLOYMENT_COMMENT_MARKERS),
+            (
+                Path("references/02-redesign-gen-prompt.md"),
+                pipeline.REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+            ),
         ):
             with self.subTest(prompt=str(prompt_path)):
                 prompt = prompt_path.read_text(encoding="utf-8")
@@ -794,6 +836,8 @@ class PromptContractTests(unittest.TestCase):
                     "inserts it immediately after the opening `<head>`",
                     prompt,
                 )
+                for marker in markers:
+                    self.assertIn(marker, prompt)
 
 
 class AtomicWriteAndCliTests(unittest.TestCase):
@@ -835,7 +879,14 @@ class AtomicWriteAndCliTests(unittest.TestCase):
     def test_build_generator_uses_shared_admission_gate(self):
         client = FakeNativeClient(
             {
-                "output": [{"type": "message", "content": COMMENTED_BODY}],
+                "output": [
+                    {
+                        "type": "message",
+                        "content": body_with_markers(
+                            build.BUILD_DEPLOYMENT_COMMENT_MARKERS
+                        ),
+                    }
+                ],
                 "stats": {"total_output_tokens": 8},
             }
         )
@@ -850,13 +901,20 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         html = build.generate_build_html(prospect, config(), client)
 
         self.assertTrue(html.startswith("<!DOCTYPE html>"))
-        self.assertIn("<head>\n<!-- deployment metadata -->", html)
+        self.assertIn("<head>\n<!--\nNEW WEBSITE BUILD -- FROM SCRATCH", html)
         self.assertIn('<body class="theme-light"><main>Ready</main></body>', html)
 
     def test_redesign_generator_assembles_body_with_site_brand_contract(self):
         client = FakeNativeClient(
             {
-                "output": [{"type": "message", "content": COMMENTED_BODY}],
+                "output": [
+                    {
+                        "type": "message",
+                        "content": body_with_markers(
+                            pipeline.REDESIGN_DEPLOYMENT_COMMENT_MARKERS
+                        ),
+                    }
+                ],
                 "stats": {"total_output_tokens": 8},
             }
         )
@@ -881,7 +939,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("<title>Current Business</title>", html)
         self.assertIn("--accent: #123456;", html)
         self.assertIn("--secondary: #ABCDEF;", html)
-        self.assertIn("<head>\n<!-- deployment metadata -->", html)
+        self.assertIn("<head>\n<!--\nWEBSITE REDESIGN MOCKUP", html)
         self.assertIn('<body class="theme-dark"><main>Ready</main></body>', html)
 
     def test_interior_generator_assembles_body_without_deployment_comment(self):

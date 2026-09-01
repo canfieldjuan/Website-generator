@@ -293,6 +293,17 @@ def body_generation_config(config: GenerationConfig) -> GenerationConfig:
     )
 
 
+def extract_square_placeholder_tokens(*sources: str) -> tuple[str, ...]:
+    """Return prompt-defined square-bracket placeholders for output admission."""
+    tokens = {
+        match.group(0)
+        for source in sources
+        for match in re.finditer(r"\[[^\[\]\r\n]{1,160}\]", source)
+        if any(character.isalnum() for character in match.group(0))
+    }
+    return tuple(sorted(tokens, key=str.casefold))
+
+
 def preflight_generation_provider(
     config: GenerationConfig,
     *,
@@ -491,6 +502,7 @@ def validate_generated_body(
     result: GenerationResult,
     *,
     max_bytes: int = MAX_GENERATED_BODY_BYTES,
+    forbidden_square_placeholders: Iterable[str] = (),
 ) -> str:
     body = _strip_outer_code_fence(require_complete_text(result))
     if "```" in body:
@@ -512,6 +524,20 @@ def validate_generated_body(
     if re.search(r"{{[^{}]+}}", body):
         raise GeneratedBodyError(
             "Generated body contains unresolved template placeholders."
+        )
+    folded_body = body.casefold()
+    leaked_square_placeholders = sorted(
+        {
+            token
+            for token in forbidden_square_placeholders
+            if isinstance(token, str) and token and token.casefold() in folded_body
+        },
+        key=str.casefold,
+    )
+    if leaked_square_placeholders:
+        leaked = ", ".join(leaked_square_placeholders[:3])
+        raise GeneratedBodyError(
+            f"Generated body contains unresolved prompt placeholders: {leaked}."
         )
 
     parser = _GeneratedBodyParser()
@@ -608,7 +634,8 @@ def assemble_generated_html(
     colors: DocumentColors,
     title: str,
     body_theme: str,
-    relocate_leading_comment: bool = False,
+    required_leading_comment_markers: Iterable[str] = (),
+    forbidden_square_placeholders: Iterable[str] = (),
 ) -> str:
     if body_theme not in {"theme-light", "theme-dark"}:
         raise GeneratedHtmlError(
@@ -620,7 +647,10 @@ def assemble_generated_html(
         "--accent-dark": _require_hex_color("accent_dark", colors.accent_dark),
         "--secondary": _require_hex_color("secondary", colors.secondary),
     }
-    body = validate_generated_body(result)
+    body = validate_generated_body(
+        result,
+        forbidden_square_placeholders=forbidden_square_placeholders,
+    )
     body = re.sub(
         r"^<body(?:\s[^>]*)?>",
         f'<body class="{body_theme}">',
@@ -630,7 +660,12 @@ def assemble_generated_html(
     )
 
     head_comment = ""
-    if relocate_leading_comment:
+    comment_markers = tuple(required_leading_comment_markers)
+    if any(not isinstance(marker, str) or not marker for marker in comment_markers):
+        raise GeneratedHtmlError(
+            "Required deployment-comment markers must be non-empty strings."
+        )
+    if comment_markers:
         comment_match = re.match(
             r'^(<body class="(?:theme-light|theme-dark)">)\s*(<!--.*?-->)\s*',
             body,
@@ -641,6 +676,16 @@ def assemble_generated_html(
                 "Generated body is missing its leading deployment comment."
             )
         head_comment = comment_match.group(2)
+        missing_markers = [
+            marker
+            for marker in comment_markers
+            if marker.casefold() not in head_comment.casefold()
+        ]
+        if missing_markers:
+            raise GeneratedBodyError(
+                "Generated body's leading comment does not match the required "
+                "deployment-comment contract."
+            )
         body = comment_match.group(1) + body[comment_match.end() :]
 
     head_close = re.search(r"</head\s*>", base_template, re.IGNORECASE)

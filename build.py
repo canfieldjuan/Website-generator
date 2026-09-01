@@ -32,6 +32,7 @@ from lib.generation import (
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
+    extract_square_placeholder_tokens,
     extract_template_body_scaffold,
     generate_text,
     preflight_generation_provider,
@@ -62,6 +63,17 @@ BUILD_USER_TRUNCATE = 200000
 # Lower temperature than the HTML build to keep the voice tight.
 EMAIL_TEMPERATURE = 0.3
 DEFAULT_SALESPERSON_FIRST_NAME = "Juan"
+
+BUILD_DEPLOYMENT_COMMENT_MARKERS = (
+    "NEW WEBSITE BUILD -- FROM SCRATCH",
+    "Prospect:",
+    "Trade:",
+    "Location:",
+    "HOSTING:",
+    "LEAD HANDLER:",
+    "ONGOING COST:",
+    "DEPLOY:",
+)
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
 
@@ -639,7 +651,8 @@ def generate_build_html(prospect, generation_config=None, client=None):
         colors=_resolve_build_document_colors(prospect),
         title=prospect.get("display_name") or prospect["business_name"],
         body_theme="theme-light",
-        relocate_leading_comment=True,
+        required_leading_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
+        forbidden_square_placeholders=extract_square_placeholder_tokens(system_prompt),
     )
 
 
