@@ -293,7 +293,11 @@ def create_generation_client(config: GenerationConfig) -> OpenAI:
 
 def create_local_generation_client(config: GenerationConfig) -> requests.Session:
     session = requests.Session()
-    session.trust_env = config.trust_env
+    # A loopback-only provider must not inherit HTTP(S)_PROXY from the shell:
+    # requests may otherwise send the complete prompt to that proxy even though
+    # the configured llama.cpp URL itself is local.  OpenRouter continues to
+    # honor GenerationConfig.trust_env through create_generation_client.
+    session.trust_env = False
     session.headers.update(
         {
             "Authorization": f"Bearer {config.api_key}",

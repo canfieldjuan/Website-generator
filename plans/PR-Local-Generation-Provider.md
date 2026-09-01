@@ -52,7 +52,9 @@ to paste a font import.
 The correct fix must make the URL constructor used by both preflight and
 generation admit only `localhost` or literal loopback addresses and reject
 credentials, remote/wildcard/lookalike hosts, and malformed ports before any
-request. It must reject `base`, `link`, `meta`, and HTML `title` from the body,
+request. The local HTTP client must also ignore environment proxy configuration
+so a loopback URL cannot forward the prompt through `HTTP_PROXY` or
+`HTTPS_PROXY`. It must reject `base`, `link`, `meta`, and HTML `title` from the body,
 preserve valid SVG accessibility titles, and align every wired prompt with that
 boundary. It must not alter OpenRouter, page content/layout, CSS tokens, or the
 Connect job contract.
@@ -94,7 +96,8 @@ OpenRouter behavior, deployment/email/image effects, or the Connect job contract
 8. Replace the LM Studio transport with direct loopback `llama.cpp` health,
    model-discovery, and chat-completion contracts plus a guarded startup script.
 9. Enforce locality at both local request entry points and exclude head metadata
-   from generated bodies while preserving SVG titles.
+   from generated bodies while preserving SVG titles; local requests never use
+   environment proxies.
 10. Remove cross-industry scaffold placeholders and deployment metadata from
     model context; expose the template class catalog and insert sanitized,
     code-owned head comments instead.
@@ -115,7 +118,7 @@ OpenRouter behavior, deployment/email/image effects, or the Connect job contract
 
 The CLI resolves a `GenerationConfig` from explicit arguments and environment
 configuration. Local is the default, accepts only localhost or literal loopback
-endpoints, and preflights standalone `llama.cpp`
+endpoints, ignores environment proxy settings, and preflights standalone `llama.cpp`
 `/health` and `/v1/models` responses; OpenRouter requires the operator to select
 it and provide a model. Local generation uses `llama.cpp`'s OpenAI-compatible
 `/v1/chat/completions` contract, sends plain system/user messages, disables Qwen

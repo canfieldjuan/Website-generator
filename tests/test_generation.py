@@ -459,13 +459,13 @@ class ProviderBoundaryTests(unittest.TestCase):
             max_retries=0,
         )
 
-    def test_local_client_sets_auth_and_honors_proxy_setting(self):
+    def test_local_client_sets_auth_and_ignores_environment_proxies(self):
         selected = GenerationConfig(
             provider="local",
             model=DEFAULT_LOCAL_MODEL,
             base_url=DEFAULT_LOCAL_BASE_URL,
             api_key="secret-key",
-            trust_env=False,
+            trust_env=True,
         )
 
         with patch("lib.generation.requests.Session") as session_factory:
