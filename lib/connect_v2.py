@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -635,7 +636,7 @@ def resolve_connect_generation_config() -> GenerationConfig:
             raise GenerationConfigurationError(
                 "Connect generation requires a literal loopback endpoint."
             )
-    return config
+    return replace(config, trust_env=False)
 
 
 def _has_usable_hero_photo(prospect: dict[str, Any]) -> bool:

@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 
@@ -54,6 +54,7 @@ class GenerationConfig:
     api_key: str
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    trust_env: bool = True
 
 
 @dataclass(frozen=True)
@@ -170,10 +171,14 @@ def resolve_generation_config(
 
 
 def create_generation_client(config: GenerationConfig) -> OpenAI:
+    client_options: dict[str, Any] = {}
+    if not config.trust_env:
+        client_options["http_client"] = DefaultHttpxClient(trust_env=False)
     return OpenAI(
         base_url=config.base_url,
         api_key=config.api_key,
         timeout=config.timeout_seconds,
+        **client_options,
     )
 
 

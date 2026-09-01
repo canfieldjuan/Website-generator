@@ -8,6 +8,7 @@ import threading
 import unittest
 import uuid
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -49,6 +50,8 @@ from lib.generation import (
     GenerationConfigurationError,
     GenerationProviderUnavailable,
     GenerationResponseError,
+    create_generation_client,
+    preflight_generation_provider,
 )
 
 
@@ -590,6 +593,60 @@ class GenerationSeamTests(unittest.TestCase):
                     "loopback",
                 ):
                     resolve_connect_generation_config()
+
+    def test_connect_client_bypasses_environment_proxies(self):
+        class ModelHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                payload = json.dumps(
+                    {
+                        "object": "list",
+                        "data": [
+                            {
+                                "id": DEFAULT_LOCAL_MODEL,
+                                "object": "model",
+                                "created": 0,
+                                "owned_by": "local",
+                            }
+                        ],
+                    }
+                ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, _format, *_args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), ModelHandler)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        endpoint = f"http://127.0.0.1:{server.server_port}/v1"
+        proxy_environment = {
+            "LOCAL_GENERATION_BASE_URL": endpoint,
+            "HTTP_PROXY": "http://127.0.0.1:1",
+            "HTTPS_PROXY": "http://127.0.0.1:1",
+            "ALL_PROXY": "http://127.0.0.1:1",
+            "http_proxy": "http://127.0.0.1:1",
+            "https_proxy": "http://127.0.0.1:1",
+            "all_proxy": "http://127.0.0.1:1",
+            "NO_PROXY": "",
+            "no_proxy": "",
+        }
+        try:
+            with patch.dict(os.environ, proxy_environment):
+                config = resolve_connect_generation_config()
+                self.assertFalse(config.trust_env)
+                client = create_generation_client(config)
+                try:
+                    preflight_generation_provider(config, client=client)
+                finally:
+                    client.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=1)
 
     def test_in_memory_preparation_matches_file_loading_without_mutating_input(self):
         source = dict(PROSPECT)

@@ -50,11 +50,12 @@ that cannot satisfy the job contract.
 ## Mechanism
 
 `connect_provider.py` validates that the configured model endpoint is a literal
-loopback, preflights the configured local model, opens a listening socket on an
-ephemeral `127.0.0.1` port, rotates a bearer token, and only then atomically
-writes the v2 registration under the XDG runtime directory. Uvicorn consumes
-that same listening socket. The durable instance UUID and jobs live in a SQLite
-database under the XDG state directory.
+loopback and disables environment-proxy discovery for that Connect-only model
+client. It then preflights the configured local model, opens a listening socket
+on an ephemeral `127.0.0.1` port, rotates a bearer token, and only then
+atomically writes the v2 registration under the XDG runtime directory. Uvicorn
+consumes that same listening socket. The durable instance UUID and jobs live in
+a SQLite database under the XDG state directory.
 
 `POST /v2/jobs` validates the request JSON before accepting the artifact, then
 streams and bounds the artifact, verifies declared size and SHA-256, and stores
@@ -82,7 +83,9 @@ builds with no official keyring fail closed as authority-unavailable.
   OpenRouter-configured CLI cannot silently change Connect's cost/privacy
   contract.
 - CLI endpoint overrides remain available, but Connect rejects non-loopback,
-  wildcard, malformed, and hostname-lookalike generation endpoints.
+  wildcard, malformed, and hostname-lookalike generation endpoints and ignores
+  environment proxy variables. Normal CLI and explicit OpenRouter clients keep
+  their existing proxy behavior.
 - No parameters are declared in v1.0. Theme and section choices remain in the
   prospect JSON's existing deterministic contract.
 - A supplied hero/background photo preserves the deterministic photo layout;
@@ -112,7 +115,7 @@ builds with no official keyring fail closed as authority-unavailable.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 71 tests in 4.099 seconds on the updated combined head.
+  passed: 72 tests in 5.539 seconds on the updated combined head.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema
