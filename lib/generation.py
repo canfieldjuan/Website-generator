@@ -167,15 +167,17 @@ class _GeneratedBodyParser(HTMLParser):
         self.decoded_attribute_values.extend(
             value for _name, value in attrs if value is not None
         )
+        element_class_names: set[str] = set()
         for name, value in attrs:
             if name.casefold() != "class" or not value:
                 continue
             for class_name in value.split():
                 self.class_names.add(class_name)
-                folded_class = class_name.casefold()
-                self.class_name_counts[folded_class] = (
-                    self.class_name_counts.get(folded_class, 0) + 1
-                )
+                element_class_names.add(class_name.casefold())
+        for folded_class in element_class_names:
+            self.class_name_counts[folded_class] = (
+                self.class_name_counts.get(folded_class, 0) + 1
+            )
         tag_name = tag.lower()
         if tag_name == "body":
             self.body_events.append("start")
@@ -669,7 +671,7 @@ def validate_generated_body(
         )
 
     claim_surfaces = (
-        "".join(parser.visible_text_parts),
+        " ".join(parser.visible_text_parts),
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )

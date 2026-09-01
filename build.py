@@ -106,6 +106,17 @@ BUILD_REQUIRED_CLASS_COUNTS = (
     *REQUIRED_FOOTER_CLASS_COUNTS,
 )
 
+
+def required_build_class_counts(prospect):
+    """Return the exact page skeleton valid for the sanitized prospect."""
+    if prospect.get("phone"):
+        return BUILD_REQUIRED_CLASS_COUNTS
+    return tuple(
+        requirement
+        for requirement in BUILD_REQUIRED_CLASS_COUNTS
+        if requirement[0] != "coverage-band"
+    )
+
 BUILD_SERVICES_RESPONSE_SCAFFOLD = (
     '<div class="page-wrap section-gap">\n'
     '  <div class="sec-hd">\n'
@@ -740,6 +751,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         "business_name": prospect["business_name"],
         "phone": prospect.get("phone"),
     }
+    required_class_counts = required_build_class_counts(prospect)
     if logo_url:
         logo_instruction = (
             f"Use this exact logo URL when rendering the nav: {json.dumps(logo_url)}."
@@ -752,7 +764,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
     response_boundary = (
         f"{BUILD_RESPONSE_BOUNDARY_REMINDER}\n"
         "MANDATORY CLASS COUNTS: "
-        f"{json.dumps(dict(BUILD_REQUIRED_CLASS_COUNTS), ensure_ascii=False)}\n"
+        f"{json.dumps(dict(required_class_counts), ensure_ascii=False)}\n"
         "MANDATORY SERVICES: At the position required by "
         "prospect._computed_section_order, reproduce the exact scaffold below. "
         "Replace every square-bracket token with the selected prospect or "
@@ -815,7 +827,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         ),
         forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
         forbidden_class_names=interior_only_classes,
-        required_class_counts=BUILD_REQUIRED_CLASS_COUNTS,
+        required_class_counts=required_class_counts,
     )
 
 

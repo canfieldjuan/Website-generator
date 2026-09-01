@@ -1028,6 +1028,33 @@ class BodyAssemblyTests(unittest.TestCase):
                 required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
             )
 
+    def test_body_admission_counts_a_class_once_per_element(self):
+        repeated_token_body = (
+            '<body><div class="service-card SERVICE-CARD service-card '
+            'service-card service-card service-card"></div></body>'
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "service-card expected 6, got 1",
+        ):
+            validate_generated_body(
+                body_result(repeated_token_body),
+                required_class_counts=(("service-card", 6),),
+            )
+
+        six_element_body = (
+            "<body>"
+            + '<div class="service-card"></div>' * 6
+            + "</body>"
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(six_element_body),
+                required_class_counts=(("service-card", 6),),
+            ),
+            six_element_body,
+        )
+
     def test_body_admission_accepts_one_plain_body(self):
         self.assertEqual(validate_generated_body(body_result()), COMPLETE_BODY)
 
@@ -1040,6 +1067,27 @@ class BodyAssemblyTests(unittest.TestCase):
             )
 
         self.assertEqual(validate_generated_body(body_result(body)), body)
+
+    def test_body_admission_preserves_rendered_text_boundaries_for_claims(self):
+        denied_body = (
+            "<body><p><span>Free</span><br><span>Estimates</span></p></body>"
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "Free Estimates"):
+            validate_generated_body(
+                body_result(denied_body),
+                forbidden_visible_phrases=("Free Estimates",),
+            )
+
+        clean_body = (
+            "<body><p><span>Free</span><br><span>consultation</span></p></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(clean_body),
+                forbidden_visible_phrases=("Free Estimates",),
+            ),
+            clean_body,
+        )
 
     def test_body_admission_rejects_gated_claim_in_decoded_attributes(self):
         denied_bodies = (
@@ -1651,6 +1699,43 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 prospect,
                 config(),
                 FakeLocalClient(local_chat_payload(missing_services)),
+            )
+
+    def test_build_generator_requires_coverage_band_only_with_a_phone(self):
+        body_without_coverage = COMPLETE_BUILD_BODY.replace(
+            '<div class="coverage-band"></div>',
+            "",
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "REPLACE",
+        }
+        build.sanitize_placeholders(prospect)
+        self.assertIsNone(prospect["phone"])
+
+        client = FakeLocalClient(local_chat_payload(body_without_coverage))
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            client,
+        )
+        self.assertIn(body_without_coverage, html)
+        request = next(call for call in client.calls if call[0] == "POST")
+        user_content = request[2]["json"]["messages"][1]["content"]
+        self.assertNotIn('"coverage-band": 1', user_content)
+
+        prospect["phone"] = "217-555-0100"
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "coverage-band expected 1, got 0",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(body_without_coverage)),
             )
 
     def test_build_generator_rejects_claim_without_matching_promise(self):

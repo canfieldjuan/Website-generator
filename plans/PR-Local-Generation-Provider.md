@@ -180,6 +180,25 @@ the diff. This must not move service choice or copy into code, change prospect
 service precedence or selection, alter visible design, add retries, change
 provider behavior, or affect deployment/email/image or Connect job contracts.
 
+### Exact-head admission contract revision
+
+The shared admission parser currently concatenates visible text nodes without
+a separator, counts repeated class tokens within one element more than once,
+and applies one unconditional build skeleton even when placeholder sanitation
+has removed the phone number that makes the coverage band valid. Those are
+three boundary-model errors: browser-rendered denied claims can disappear from
+the comparison string, one DOM element can impersonate several required
+components, and correct no-phone output can be rejected.
+
+The correct fix must preserve a text-node boundary when comparing rendered
+claims while retaining the compact surface used to catch split placeholders;
+count each required class no more than once per element, including case-folded
+duplicates; and require the coverage band only when the sanitized prospect has
+a phone number. Tests must prove each adverse case and its positive opposite.
+This must not alter the denied-claim catalog, placeholder sanitation, other
+mandatory component counts, prompt copy, visual design, provider selection,
+GPU/runtime behavior, or any image, email, deployment, or Connect contract.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -219,6 +238,12 @@ provider behavior, or affect deployment/email/image or Connect job contracts.
     preserving model-owned service selection and code-owned count admission.
 17. Normalize Unicode whitespace at the unsupported-claim comparison boundary
     so browser-equivalent claim text cannot bypass admission.
+18. Preserve text-node boundaries for unsupported-claim matching without
+    weakening split-placeholder detection.
+19. Count each required class once per element rather than once per repeated
+    class token.
+20. Make the coverage-band count conditional on the sanitized phone value while
+    leaving every other mandatory build count unchanged.
 
 ### Files touched
 
