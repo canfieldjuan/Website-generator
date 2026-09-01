@@ -132,7 +132,7 @@ builds with no official keyring fail closed as authority-unavailable.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 105 tests in 3.205 seconds on the updated combined tree.
+  passed: 106 tests in 3.198 seconds on the updated combined tree.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema
@@ -148,9 +148,11 @@ builds with no official keyring fail closed as authority-unavailable.
   31,031 prompt tokens.
 - Both required searches of that fresh artifact returned `0`: no unresolved
   trust/template tokens and no unsupported `Upfront Flat-Rate`, `Surprise Fees`,
-  `Free Estimates`, or `Owner Answers` claims were emitted. The following commit
-  records this proof only and does not change runtime, prompts, tests, or fixture
-  inputs.
+  `Free Estimates`, or `Owner Answers` claims were emitted. After merging the
+  stricter prompt-placeholder and caller-marker admission from the core branch,
+  reconstructing that fresh artifact through the updated admission path returned
+  `connect real artifact stricter-admission probe: PASS`. The proof-only commits
+  do not change runtime, prompts, tests, or fixture inputs.
 
 ## Estimated diff size
 
