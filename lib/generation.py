@@ -119,6 +119,25 @@ BIDI_PHONE_CONTROLS = frozenset(
     }
 )
 ACTIONABLE_URL_ATTRIBUTES = ("href", "action", "formaction", "xlink:href")
+EMAIL_LIKE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9.!#$%&'*+/=?^_`{|}~-])"
+    r"([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z]{2,63})"
+    r"(?![A-Za-z0-9-])"
+)
+UNSTRUCTURED_TESTIMONIAL_TAGS = frozenset(("blockquote", "cite"))
+REVIEW_ROOT_CLASSES = frozenset(
+    ("review-card", "reviews-aggregate", "reviews-summary-row")
+)
+QUOTED_PROSE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])[\"“]\s*\S(?:.{1,500}?\S)?\s*[\"”]",
+    re.DOTALL,
+)
+ATTRIBUTED_PROSE_PATTERN = re.compile(
+    r"[.!?][\"”]?\s*[—–]\s*[A-Z][A-Za-z'.’\-]+"
+    r"(?:\s+(?:[A-Z][A-Za-z'.’\-]+|[A-Z]\.)){0,3}\b"
+)
 TRUSTED_IMAGE_ERROR_HANDLER = "this.style.display='none'"
 NONDETERMINISTIC_RENDERING_TAGS = frozenset(
     {
@@ -136,6 +155,7 @@ NONDETERMINISTIC_RENDERING_TAGS = frozenset(
     }
 )
 _EXPECTED_PHONE_UNSET = object()
+_EXPECTED_EMAIL_UNSET = object()
 _EXPECTED_FORM_ACTION_UNSET = object()
 _EXPECTED_REVIEWS_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
@@ -279,7 +299,6 @@ class _GeneratedBodyParser(HTMLParser):
         self.body_events: list[str] = []
         self.forbidden_tags: list[str] = []
         self.nondeterministic_rendering_tags: list[str] = []
-        self.tag_names: set[str] = set()
         self.has_content_outside_body = False
         self.visible_text_parts: list[str] = []
         self.decoded_attribute_values: list[str] = []
@@ -329,7 +348,6 @@ class _GeneratedBodyParser(HTMLParser):
                 self.class_name_counts.get(class_name, 0) + 1
             )
         tag_name = tag.lower()
-        self.tag_names.add(tag_name)
         if tag_name == "body":
             self.body_events.append("start")
             self.body_depth += 1
@@ -882,6 +900,20 @@ def _phone_like_digit_values(value: str) -> set[str]:
     return digits
 
 
+def _email_like_values(value: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKC", value)
+    return {
+        match.group(1).casefold()
+        for match in EMAIL_LIKE_PATTERN.finditer(normalized)
+    }
+
+
+def _canonical_email_value(value: str) -> str | None:
+    candidate = unicodedata.normalize("NFKC", unquote(value)).strip()
+    match = EMAIL_LIKE_PATTERN.fullmatch(candidate)
+    return match.group(1).casefold() if match else None
+
+
 def _claim_exposure_texts(
     body_root: Tag,
     *,
@@ -1087,6 +1119,37 @@ def _elements_with_class(root: Tag, class_name: str) -> list[Tag]:
     ]
 
 
+def _inside_review_root(element: Tag) -> bool:
+    return bool(_exact_class_names(element) & REVIEW_ROOT_CLASSES) or any(
+        _exact_class_names(parent) & REVIEW_ROOT_CLASSES
+        for parent in element.parents
+        if isinstance(parent, Tag)
+    )
+
+
+def _validate_no_unstructured_testimonials(body_root: Tag) -> None:
+    for element in (body_root, *body_root.find_all(True)):
+        if _inside_review_root(element):
+            continue
+        if element.name.casefold() in UNSTRUCTURED_TESTIMONIAL_TAGS:
+            raise GeneratedBodyError(
+                "Generated body contains an unstructured testimonial tag."
+            )
+
+    exposure_surfaces, inline_surface = _claim_exposure_texts(
+        body_root,
+        excluded_root_classes=REVIEW_ROOT_CLASSES,
+    )
+    if any(
+        QUOTED_PROSE_PATTERN.search(surface)
+        or ATTRIBUTED_PROSE_PATTERN.search(surface)
+        for surface in (*exposure_surfaces, inline_surface)
+    ):
+        raise GeneratedBodyError(
+            "Generated body contains unstructured testimonial content."
+        )
+
+
 def _single_component(root: Tag, class_name: str, owner: str) -> Tag:
     matches = _elements_with_class(root, class_name)
     if len(matches) != 1:
@@ -1256,11 +1319,7 @@ def _normalized_source_review(review: ReviewEvidence) -> ReviewEvidence:
 def _ambient_review_claim_values(body_root: Tag) -> tuple[list[float], list[int]]:
     exposure_surfaces, inline_surface = _claim_exposure_texts(
         body_root,
-        excluded_root_classes={
-            "review-card",
-            "reviews-aggregate",
-            "reviews-summary-row",
-        },
+        excluded_root_classes=REVIEW_ROOT_CLASSES,
     )
     text = _normalize_claim_match_text(
         " ".join((*exposure_surfaces, inline_surface))
@@ -1414,6 +1473,7 @@ def _validate_review_contract(
     body_root: Tag,
     contract: ReviewAdmissionContract,
 ) -> None:
+    _validate_no_unstructured_testimonials(body_root)
     if contract.mode == "omit":
         _validate_ambient_review_claims(body_root, contract)
         return
@@ -1515,10 +1575,10 @@ def validate_generated_body(
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_comment_markers: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
-    forbidden_testimonial_tags: Iterable[str] = (),
     allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
+    expected_email: object = _EXPECTED_EMAIL_UNSET,
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
@@ -1579,19 +1639,6 @@ def validate_generated_body(
         names = ", ".join(sorted(set(parser.nondeterministic_rendering_tags)))
         raise GeneratedBodyError(
             f"Generated body contains a browser-inert tag: {names}."
-        )
-    forbidden_testimonial_tag_names = {
-        tag.casefold()
-        for tag in forbidden_testimonial_tags
-        if isinstance(tag, str) and tag
-    }
-    leaked_testimonial_tags = sorted(
-        parser.tag_names & forbidden_testimonial_tag_names
-    )
-    if leaked_testimonial_tags:
-        names = ", ".join(leaked_testimonial_tags)
-        raise GeneratedBodyError(
-            f"Generated body contains an unstructured testimonial tag: {names}."
         )
     normalized_comments = tuple(
         _normalize_claim_match_text(comment) for comment in parser.comment_values
@@ -1710,16 +1757,17 @@ def validate_generated_body(
             raise GeneratedBodyError(
                 "Expected contact form action must be a non-empty string."
             )
-        contact_forms = [
-            element
-            for element in body_root.find_all("form")
-            if "contact-form-wrap" in _exact_class_names(element)
-        ]
-        if len(contact_forms) != 1:
+        forms = body_root.find_all("form")
+        if len(forms) != 1:
+            raise GeneratedBodyError(
+                "Generated body must contain exactly one generated form."
+            )
+        contact_form = forms[0]
+        if "contact-form-wrap" not in _exact_class_names(contact_form):
             raise GeneratedBodyError(
                 "Generated body must contain exactly one contact form action owner."
             )
-        actual_action = contact_forms[0].get("action")
+        actual_action = contact_form.get("action")
         if actual_action != expected_form_action:
             raise GeneratedBodyError(
                 "Generated body contact form action does not match the verified endpoint."
@@ -1752,6 +1800,51 @@ def validate_generated_body(
         raise GeneratedBodyError(
             f"Generated body is missing required visible substitution: {missing}."
         )
+
+    if expected_email is not _EXPECTED_EMAIL_UNSET:
+        expected_email_value = None
+        if expected_email is not None:
+            if not isinstance(expected_email, str):
+                raise GeneratedBodyError(
+                    "Expected business email must be text or null."
+                )
+            expected_email_value = _canonical_email_value(expected_email)
+            if expected_email_value is None:
+                raise GeneratedBodyError(
+                    "Expected business email must be one complete email address."
+                )
+
+        exposed_emails: set[str] = set()
+        email_surfaces = (
+            *parser.visible_text_parts,
+            *parser.decoded_attribute_values,
+            *(unquote(value) for value in parser.decoded_attribute_values),
+        )
+        for surface in email_surfaces:
+            exposed_emails.update(_email_like_values(surface))
+        mailto_targets = []
+        for element in (body_root, *body_root.find_all(True)):
+            for attribute in ("href", "xlink:href"):
+                value = element.get(attribute)
+                if not isinstance(value, str):
+                    continue
+                decoded_value = unquote(value).strip()
+                if decoded_value.casefold().startswith("mailto:"):
+                    mailbox = decoded_value[7:].split("?", 1)[0].strip()
+                    mailto_targets.append(_canonical_email_value(mailbox))
+
+        if expected_email_value is None:
+            if exposed_emails or mailto_targets:
+                raise GeneratedBodyError(
+                    "Generated body contains an email with no verified business email."
+                )
+        elif (
+            exposed_emails - {expected_email_value}
+            or any(target != expected_email_value for target in mailto_targets)
+        ):
+            raise GeneratedBodyError(
+                "Generated body contains an unexpected business email."
+            )
 
     if expected_phone is not _EXPECTED_PHONE_UNSET:
         exposed_phone_digits: set[str] = set()
@@ -2014,10 +2107,10 @@ def assemble_generated_html(
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_comment_markers: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
-    forbidden_testimonial_tags: Iterable[str] = (),
     allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
+    expected_email: object = _EXPECTED_EMAIL_UNSET,
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
@@ -2041,10 +2134,10 @@ def assemble_generated_html(
         forbidden_visible_phrases=forbidden_visible_phrases,
         forbidden_comment_markers=forbidden_comment_markers,
         forbidden_class_names=forbidden_class_names,
-        forbidden_testimonial_tags=forbidden_testimonial_tags,
         allowed_class_names=allowed_class_names,
         required_exposed_values=required_exposed_values,
         expected_phone=expected_phone,
+        expected_email=expected_email,
         expected_form_action=expected_form_action,
         expected_reviews=expected_reviews,
         required_class_counts=required_class_counts,
