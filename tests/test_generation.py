@@ -136,10 +136,18 @@ _UNSET = object()
 
 
 class FakeLocalResponse:
-    def __init__(self, payload=None, *, json_error=None, status_error=None):
+    def __init__(
+        self,
+        payload=None,
+        *,
+        json_error=None,
+        status_error=None,
+        status_code=200,
+    ):
         self.payload = payload
         self.json_error = json_error
         self.status_error = status_error
+        self.status_code = status_code
 
     def raise_for_status(self):
         if self.status_error:
@@ -162,11 +170,15 @@ class FakeLocalClient:
         models_status_error=None,
         chat_status_error=None,
         chat_json_error=None,
+        health_status_code=200,
+        models_status_code=200,
+        chat_status_code=200,
     ):
         self.calls = []
         self.health_response = FakeLocalResponse(
             {"status": "ok"} if health_payload is _UNSET else health_payload,
             status_error=health_status_error,
+            status_code=health_status_code,
         )
         self.models_response = FakeLocalResponse(
             {
@@ -176,6 +188,7 @@ class FakeLocalClient:
             if models_payload is _UNSET
             else models_payload,
             status_error=models_status_error,
+            status_code=models_status_code,
         )
         self.chat_response = FakeLocalResponse(
             {
@@ -202,6 +215,7 @@ class FakeLocalClient:
             else chat_payload,
             json_error=chat_json_error,
             status_error=chat_status_error,
+            status_code=chat_status_code,
         )
 
     def get(self, url, **kwargs):
@@ -591,6 +605,9 @@ class ProviderBoundaryTests(unittest.TestCase):
                 ("GET", "http://127.0.0.1:8080/v1/models"),
             ],
         )
+        self.assertTrue(
+            all(call[2]["allow_redirects"] is False for call in client.calls)
+        )
 
     def test_local_preflight_rejects_non_loopback_base_url_without_dispatch(self):
         selected = GenerationConfig(
@@ -640,6 +657,18 @@ class ProviderBoundaryTests(unittest.TestCase):
             [("GET", "http://127.0.0.1:8080/health")],
         )
 
+    def test_local_preflight_rejects_redirect_without_following_it(self):
+        client = FakeLocalClient(health_status_code=307)
+
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "standalone llama.cpp",
+        ):
+            preflight_generation_provider(config(), client=client)
+
+        self.assertEqual(len(client.calls), 1)
+        self.assertIs(client.calls[0][2]["allow_redirects"], False)
+
     def test_local_preflight_rejects_malformed_model_identity(self):
         selected = config()
         client = FakeLocalClient(models_payload={"data": [{"id": None}]})
@@ -681,6 +710,7 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(call["json"]["reasoning_format"], "deepseek")
         self.assertIs(call["json"]["stream"], False)
         self.assertEqual(call["timeout"], config().timeout_seconds)
+        self.assertIs(call["allow_redirects"], False)
         self.assertNotIn("cache_control", str(call["json"]))
         self.assertEqual(generated.finish_reason, "stop")
         self.assertEqual(generated.usage["completion_tokens"], 8)
@@ -716,6 +746,24 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(generated.finish_reason, "length")
         with self.assertRaisesRegex(GenerationResponseError, "finish_reason=length"):
             validate_generated_html(generated)
+
+    def test_local_request_rejects_redirect_without_following_it(self):
+        client = FakeLocalClient(chat_status_code=307)
+
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "local generation failed",
+        ):
+            generate_text(
+                config(),
+                system_prompt="system",
+                user_parts=(PromptPart("prospect"),),
+                temperature=0.4,
+                client=client,
+            )
+
+        self.assertEqual(len(client.calls), 1)
+        self.assertIs(client.calls[0][2]["allow_redirects"], False)
 
     def test_local_request_rejects_multiple_choices(self):
         client = FakeLocalClient(

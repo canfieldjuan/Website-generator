@@ -199,6 +199,21 @@ This must not alter the denied-claim catalog, placeholder sanitation, other
 mandatory component counts, prompt copy, visual design, provider selection,
 GPU/runtime behavior, or any image, email, deployment, or Connect contract.
 
+### Loopback redirect contract revision
+
+Restricting the configured local endpoint and disabling environment proxies is
+not sufficient locality enforcement while the HTTP client still follows
+redirects. A loopback health, model-discovery, or generation response can point
+Requests at a remote target; the generation redirect can replay the complete
+prospect prompt even though the selected provider remains labelled local.
+
+The correct fix must disable redirects on every shared local llama.cpp request,
+including both preflight requests and the generation POST, and prove the flag at
+the request boundary. Redirect responses must surface through the existing
+provider-unavailable behavior rather than trigger another request. This must not
+change OpenRouter, retry behavior, endpoint validation, payloads, timeouts,
+provider labels, GPU/runtime behavior, or Connect capability semantics.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -244,6 +259,8 @@ GPU/runtime behavior, or any image, email, deployment, or Connect contract.
     class token.
 20. Make the coverage-band count conditional on the sanitized phone value while
     leaving every other mandatory build count unchanged.
+21. Disable redirects on every shared loopback llama.cpp request so a local
+    response cannot replay prompts or preflight traffic to a remote target.
 
 ### Files touched
 

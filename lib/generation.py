@@ -350,6 +350,15 @@ def extract_square_placeholder_tokens(*sources: str) -> tuple[str, ...]:
     return tuple(sorted(tokens, key=str.casefold))
 
 
+def _raise_for_local_response_status(response: Any) -> None:
+    status_code = getattr(response, "status_code", None)
+    if isinstance(status_code, int) and 300 <= status_code < 400:
+        raise requests.HTTPError(
+            f"Local generation endpoint returned redirect status {status_code}."
+        )
+    response.raise_for_status()
+
+
 def preflight_generation_provider(
     config: GenerationConfig,
     *,
@@ -370,8 +379,9 @@ def preflight_generation_provider(
         health_response = selected_client.get(
             health_url,
             timeout=preflight_timeout,
+            allow_redirects=False,
         )
-        health_response.raise_for_status()
+        _raise_for_local_response_status(health_response)
         health_payload = health_response.json()
         if not isinstance(health_payload, dict) or health_payload.get("status") != "ok":
             raise ValueError("health endpoint did not report status=ok")
@@ -379,8 +389,9 @@ def preflight_generation_provider(
         models_response = selected_client.get(
             models_url,
             timeout=preflight_timeout,
+            allow_redirects=False,
         )
-        models_response.raise_for_status()
+        _raise_for_local_response_status(models_response)
         models_payload = models_response.json()
         model_items = (
             models_payload.get("data") if isinstance(models_payload, dict) else None
@@ -493,8 +504,9 @@ def _generate_local_text(
             endpoint,
             json=request_body,
             timeout=config.timeout_seconds,
+            allow_redirects=False,
         )
-        response.raise_for_status()
+        _raise_for_local_response_status(response)
     except Exception as exc:
         raise GenerationProviderUnavailable(
             f"local generation failed for model {config.model!r}: {exc}"
