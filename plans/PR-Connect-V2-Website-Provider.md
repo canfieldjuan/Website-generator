@@ -142,10 +142,15 @@ builds with no official keyring fail closed as authority-unavailable.
   failure, and interrupted-job restart reconciliation.
 - `bash scripts/local_pr_review.sh` passed, including `git diff --check` and both
   required plan documents.
-- The core CLI fixture completed against exact model `qwen/qwen3.8-27b`, and its
-  assembled artifact passed both required claim-leak searches. The same
-  controlled fixture remains pending on this combined Connect tree before this
-  dependent slice may merge.
+- The required fixture command completed on combined code head `bb12fca` against
+  exact model `qwen/qwen3.8-27b` and wrote a fresh
+  `outputs/builds/drees-plumbing-inc/index.html`; the cold request reported
+  31,031 prompt tokens.
+- Both required searches of that fresh artifact returned `0`: no unresolved
+  trust/template tokens and no unsupported `Upfront Flat-Rate`, `Surprise Fees`,
+  `Free Estimates`, or `Owner Answers` claims were emitted. The following commit
+  records this proof only and does not change runtime, prompts, tests, or fixture
+  inputs.
 
 ## Estimated diff size
 
