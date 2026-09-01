@@ -98,15 +98,23 @@ builds with no official keyring fail closed as authority-unavailable.
 
 ## Verification
 
-- `python3 -m unittest discover -s tests -v`
-- `python3 -m compileall -q build.py pipeline.py connect_provider.py lib tests`
+- `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
+  passed: 61 tests in 2.868 seconds.
+- `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
+  requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema
   validation against the pinned `connect-contracts` commit.
 - Endpoint tests for missing/wrong auth, malformed multipart, size/hash/media
   mismatches, same/conflicting IDs, busy concurrency, completed output, provider
   failure, and interrupted-job restart reconciliation.
-- `bash scripts/local_pr_review.sh`
-- The controlled real-Qwen proof remains the final cross-surface acceptance run.
+- `bash scripts/local_pr_review.sh` passed, including `git diff --check` and both
+  required plan documents.
+- The controlled real-Qwen proof is not complete. The selected NVIDIA runtime
+  aborted on a CUDA out-of-memory allocation; the isolated CPU runtime then
+  refused the saved value-cache/flash-attention combination before loading; and
+  the existing authenticated local API did not answer the credentialed probe.
+  The original runtime selection was restored and `lms ps` confirmed that no
+  model remained loaded. This is a local acceptance blocker, not passing proof.
 
 ## Estimated diff size
 
