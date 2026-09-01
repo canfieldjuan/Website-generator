@@ -652,7 +652,10 @@ def generate_build_html(prospect, generation_config=None, client=None):
         title=prospect.get("display_name") or prospect["business_name"],
         body_theme="theme-light",
         required_leading_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
-        forbidden_square_placeholders=extract_square_placeholder_tokens(system_prompt),
+        forbidden_square_placeholders=extract_square_placeholder_tokens(
+            system_prompt,
+            static_block,
+        ),
     )
 
 

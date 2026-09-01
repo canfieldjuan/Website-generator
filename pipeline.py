@@ -393,7 +393,10 @@ BASE BODY TEMPLATE:
         title=site_name,
         body_theme=_site_body_theme(site_json),
         required_leading_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
-        forbidden_square_placeholders=extract_square_placeholder_tokens(system_prompt),
+        forbidden_square_placeholders=extract_square_placeholder_tokens(
+            system_prompt,
+            base_body,
+        ),
     )
 
 def generate_interior_page(
@@ -465,7 +468,10 @@ SOURCE CONTENT:
         colors=_resolve_site_document_colors(site_json),
         title=f"{page_label} | {site_name}",
         body_theme=_site_body_theme(site_json),
-        forbidden_square_placeholders=extract_square_placeholder_tokens(system_prompt),
+        forbidden_square_placeholders=extract_square_placeholder_tokens(
+            system_prompt,
+            base_body,
+        ),
     )
 
 
