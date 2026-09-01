@@ -39,21 +39,29 @@ authentication, durable job transitions, idempotency, or generated HTML.
 
 ### Review-blocker contract revision
 
-Exact-head review exposed three fail-closed gaps in already-declared Connect
+Exact-head review exposed four fail-closed gaps in already-declared Connect
 surfaces. `GeneratedBodyError` is a `ValueError` but is absent from the
 model-response exception tuple, so rejected model HTML is mislabeled as invalid
 prospect input. The shared entitlement JSON decoder lets parser recursion escape
 instead of converting it to the existing invalid-entitlement decision. Clean
 shutdown also assumes parsed registration and `auth` values are dictionaries,
-so a replaced or corrupted registration can abort the remaining cleanup.
+so a replaced or corrupted registration can abort the remaining cleanup. The
+shared prospect preparer also accepts a non-string optional `display_name`, even
+though final document assembly consumes a truthy value as text after generation;
+that deterministic input failure is therefore mislabeled as retryable provider
+failure after spending a model call.
 
 The correct fix must classify `GeneratedBodyError` with other retryable model
 response failures, translate excessive nesting once inside the shared
 entitlement object decoder, and make registration cleanup treat malformed,
 wrong-shaped, non-UTF-8, or excessively nested content as an ownership mismatch.
+It must also reject a non-string, non-null `display_name` in shared prospect
+preparation before generation, including falsy values that could defeat a
+truthiness-based check.
 It must add regression coverage for both sides of each boundary. It must not
 broaden accepted entitlement/registration shapes, delete an unowned
-registration, change job or error schemas, or alter provider startup order.
+registration, broadly reclassify internal exceptions as input failures, change
+job or error schemas, or alter provider startup order.
 
 ## Scope (this PR)
 
@@ -72,8 +80,9 @@ registration, change job or error schemas, or alter provider startup order.
    manifest, submission, and status access unless it is active.
 7. Align provider startup, errors, documentation, and loopback tests with the
    direct standalone `llama.cpp` runtime inherited from the core slice.
-8. Close the three exact-head review blockers in model-error classification,
-   entitlement decoding, and registration cleanup without changing schemas.
+8. Close the four exact-head review blockers in model-error classification,
+   entitlement decoding, registration cleanup, and pre-generation optional-field
+   validation without changing schemas.
 
 ### Files touched
 
@@ -111,7 +120,8 @@ and returns the same validated assembled HTML as the CLI without maintaining a
 second template or output path.
 
 Before generation, the shared prospect preparer requires each required field to
-be a non-empty string. The Connect adapter also changes a photo-dependent hero
+be a non-empty string and an optional `display_name` to be a string or null. The
+Connect adapter also changes a photo-dependent hero
 selection to the existing gradient shape when the one accepted input artifact
 does not contain a usable `context == "hero"` photo URL. This keeps the advertised
 single HTML output self-contained without invoking image acquisition.
@@ -172,12 +182,12 @@ as any other invalid token.
 
 ## Verification
 
-- `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 120 tests in 4.098 seconds on the updated combined tree, including
+- `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests -v`
+  passed: 122 tests in 3.498 seconds on the updated combined tree, including
   direct `llama.cpp` preflight, loopback proxy bypass, startup boundaries, and
   the Connect retryable runtime instruction plus the exact-head review
-  regressions.
-- `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
+  regressions, including truthy and falsy malformed optional display names.
+- `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema
   validation against the pinned `connect-contracts` commit.

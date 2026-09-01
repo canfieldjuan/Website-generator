@@ -659,6 +659,41 @@ class GenerationSeamTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "non-empty strings"):
                     build.prepare_prospect(source)
 
+    def test_optional_display_name_must_be_string_or_null(self):
+        for invalid in (123, 0, False, [], {}):
+            with self.subTest(invalid=invalid):
+                source = {**PROSPECT, "display_name": invalid}
+                with self.assertRaisesRegex(ValueError, "strings or null"):
+                    build.prepare_prospect(source)
+
+        for valid in ("Custom title", "", None):
+            with self.subTest(valid=valid):
+                source = {**PROSPECT, "display_name": valid}
+                self.assertEqual(build.prepare_prospect(source)["display_name"], valid)
+
+    def test_malformed_optional_display_name_is_nonretryable_before_generation(self):
+        for invalid in (123, 0):
+            with self.subTest(invalid=invalid):
+                source = {**PROSPECT, "display_name": invalid}
+                data = json.dumps(source).encode("utf-8")
+                document = job_request(data)
+                with tempfile.TemporaryDirectory() as directory, patch.object(
+                    build, "generate_build_html"
+                ) as generated:
+                    runtime = ProviderRuntime(
+                        ConnectStore(Path(directory) / "connect.sqlite3"),
+                        generate_website_artifact,
+                    )
+                    try:
+                        runtime.accept(document, data)
+                        failed = runtime.wait_for_terminal(document["job_id"])
+                        self.assertEqual(failed.status, "failed")
+                        self.assertEqual(failed.error_code, "INPUT_INVALID")
+                        self.assertFalse(failed.error_retryable)
+                        generated.assert_not_called()
+                    finally:
+                        runtime.close()
+
     def test_malformed_required_field_is_nonretryable_input_failure(self):
         source = dict(PROSPECT)
         source["business_name"] = 123

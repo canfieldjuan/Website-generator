@@ -76,6 +76,7 @@ BUILD_DEPLOYMENT_COMMENT_MARKERS = (
 )
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
+OPTIONAL_STRING_FIELDS = ("display_name",)
 
 # Substring markers that indicate a prospect-JSON field was left at its
 # template default. Case-insensitive substring match against the value.
@@ -183,6 +184,16 @@ def prepare_prospect(prospect, build_date=None):
         raise ValueError(
             "Prospect JSON required field(s) must be non-empty strings: "
             f"{', '.join(invalid)}"
+        )
+    invalid_optional_strings = [
+        key
+        for key in OPTIONAL_STRING_FIELDS
+        if prospect.get(key) is not None and not isinstance(prospect[key], str)
+    ]
+    if invalid_optional_strings:
+        raise ValueError(
+            "Prospect JSON optional field(s) must be strings or null: "
+            f"{', '.join(invalid_optional_strings)}"
         )
     sanitize_placeholders(prospect)
     sanitize_reviews(prospect)
