@@ -36,9 +36,9 @@ and request construction.
 This runtime replacement must not change the Qwen model choice, prompt content,
 body/document admission, trusted template assembly, explicit OpenRouter path,
 email/image/deployment behavior, or the dependent Connect job/authentication
-contract. A real-model fixture remains required before the Connect slice can
-merge, but it must not be started while the operator has requested that the GPU
-remain unloaded.
+contract. A controlled real-model fixture remains required before the Connect
+slice can merge, and the runtime must be unloaded after its evidence is
+captured.
 
 ## Scope (this PR)
 
@@ -161,8 +161,6 @@ the build or redesign metadata contract.
 
 - Local Connect v2 registration, authenticated routes, durable jobs, and
   conformance tests remain isolated in the dependent Connect-provider slice.
-- The controlled real-Qwen fixture must run again at the dependent Connect PR's
-  exact head before that slice can merge.
 - Desktop/web UI, model catalogs, automatic model loading, and cloud fallback
   remain outside this milestone.
 
@@ -181,12 +179,23 @@ the build or redesign metadata contract.
 - `/tmp/website-redesign-connect-venv/bin/python pipeline.py --help` — passed;
   provider/model and existing skip flags shown.
 - `git diff --check` — passed.
-- The earlier LM Studio fixture is historical evidence for the Qwen model and
-  generated-body contract only; it does not verify the replacement
-  `llama.cpp` transport.
-- The exact-model `llama.cpp` fixture and both required artifact searches remain
-  pending because the operator directed that the GPU stay unloaded during this
-  implementation pass.
+- Exact-head standalone-runtime fixture:
+  `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:18081/v1
+  GENERATION_TIMEOUT_SECONDS=14400
+  /home/juan-canfield/.cache/website-redesign-connect-venv/bin/python build.py
+  examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
+  --skip-deploy` completed successfully against `llama.cpp` v0.3.0 at commit
+  `c1d0e7a004015f23bc0233470b747b596f29b264`, serving the exact
+  `qwen/qwen3.8-27b` alias. The command produced no deployment, email, or image
+  side effect.
+- The admitted artifact was
+  `outputs/builds/drees-plumbing-inc/index.html` (74,544 bytes, SHA-256
+  `1ae5aef15a28d3ddc19d0a86cf92ec67cf49d4b49a101563858783c196b28331`).
+  The shared HTML validator accepted it; the required unresolved-placeholder
+  search returned `0`, and the required fabricated-claim search returned `0`.
+- The standalone runtime was stopped after validation. Both fixture ports were
+  free, the GPU compute-process query was empty, and the model VRAM was
+  released.
 - Mocked local transport tests prove the configured request reaches the
   `llama.cpp` chat route once, disables thinking, preserves finish status, and
   fails closed on malformed, reasoning, tool, and multi-choice responses.
