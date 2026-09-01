@@ -1989,6 +1989,49 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(unexpected_plain_phone)),
             )
 
+        unexpected_tooltip_phone = body_without_coverage.replace(
+            "</nav>",
+            '<button title="Call 217-555-0199">Request service</button></nav>',
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "phone-like value with no verified phone",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unexpected_tooltip_phone)),
+            )
+
+        unexpected_accessible_description_phone = body_without_coverage.replace(
+            "</nav>",
+            '<button aria-description="Call 217-555-0199">'
+            "Request service</button></nav>",
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "phone-like value with no verified phone",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(
+                    local_chat_payload(unexpected_accessible_description_phone)
+                ),
+            )
+
+        non_exposed_attribute_phones = body_without_coverage.replace(
+            "</nav>",
+            '<span data-tracking-id="217-555-0199"></span>'
+            '<span hidden title="Call 217-555-0199"></span></nav>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(non_exposed_attribute_phones)),
+        )
+        self.assertIn('data-tracking-id="217-555-0199"', html)
+
         non_phone_numbers = body_without_coverage.replace(
             "</nav>",
             "<span>Serving since 2011. Rated 4.8 by 12 customers.</span></nav>",
@@ -2054,6 +2097,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             ),
             (
                 COMPLETE_BUILD_BODY.replace(
+                    '<body class="theme-light">',
+                    '<body class="theme-light" hidden>',
+                ),
+                "business_name",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
                     '<a href="tel:2175550100">217-555-0100</a>',
                     '<a href="tel:2175550100" '
                     'style="display:none!important">217-555-0100</a>',
@@ -2082,6 +2132,14 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 COMPLETE_BUILD_BODY.replace(
                     "</nav>",
                     "<span>Alternate 217-555-0199</span></nav>",
+                ),
+                "unexpected exposed phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    "</nav>",
+                    '<button title="Call 217-555-0199">Request service</button>'
+                    "</nav>",
                 ),
                 "unexpected exposed phone",
             ),

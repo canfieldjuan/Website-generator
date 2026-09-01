@@ -722,6 +722,10 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
             return value if isinstance(value, str) else ""
         return ""
 
+    def tooltip_text(node: Tag) -> str:
+        value = node.get("title")
+        return value if isinstance(value, str) else ""
+
     def visit_visual(node: Any) -> None:
         if isinstance(node, Comment):
             return
@@ -732,6 +736,9 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
             return
         if is_render_suppressed(node):
             return
+        tooltip = tooltip_text(node)
+        if tooltip:
+            visual_parts.append(tooltip)
         replacement = replacement_text(node)
         if replacement:
             visual_parts.append(replacement)
@@ -793,18 +800,22 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
                 accessible_text(child, active_references) for child in node.children
             )
 
-        descriptions = [
+        direct_description = node.get("aria-description")
+        descriptions = (
+            [direct_description]
+            if isinstance(direct_description, str) and direct_description
+            else []
+        )
+        descriptions.extend(
             resolve_references(node, attribute, active_references)
             for attribute in ("aria-describedby", "aria-details", "aria-errormessage")
             if isinstance(node.get(attribute), str) and node.get(attribute).strip()
-        ]
+        )
         return " ".join((primary_text, *descriptions))
 
-    accessible_parts: list[str] = []
-    for child in body_root.children:
-        visit_visual(child)
-        accessible_parts.append(accessible_text(child, frozenset()))
-    return "".join(visual_parts), "".join(accessible_parts)
+    visit_visual(body_root)
+    accessible = accessible_text(body_root, frozenset())
+    return " ".join(visual_parts), accessible
 
 
 def _exact_class_names(element: Tag) -> set[str]:

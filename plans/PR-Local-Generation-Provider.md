@@ -258,6 +258,10 @@ every exposed phone-like value must resolve to the verified phone, and when no
 phone is verified neither phone-like exposure nor a `tel:` target may appear.
 Inline display/visibility suppression, including an `!important` priority,
 must not satisfy required visual or accessibility exposure.
+User-exposed attributes such as `title` and direct accessibility descriptions
+must participate in that exposure check, while hidden elements and internal
+`data-*` metadata must not. Suppression on the generated body root must apply
+to its descendants just as suppression on any nested element does.
 The shared parser must also reject unclosed, unexpectedly closed, or misnested
 non-void descendants before BeautifulSoup repair, while accepting standard void
 elements and valid self-closing SVG content. Finally, each generator must pass
@@ -339,6 +343,9 @@ behavior, or any image, email, deployment, and Connect job contract.
     admission for build, redesign, and interior output.
 30. Treat priority-bearing inline display and visibility suppression as hidden
     when validating required generated output exposure.
+31. Include user-exposed tooltip and accessibility-description attributes in
+    output truth admission, honor body-root suppression, and avoid treating
+    hidden or internal metadata as copy.
 
 ### Files touched
 
