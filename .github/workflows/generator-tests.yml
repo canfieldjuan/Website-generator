@@ -5,6 +5,7 @@ on:
     paths:
       - "build.py"
       - "pipeline.py"
+      - "connect_provider.py"
       - "lib/**"
       - "tests/**"
       - "requirements*.txt"
@@ -14,6 +15,7 @@ on:
     paths:
       - "build.py"
       - "pipeline.py"
+      - "connect_provider.py"
       - "lib/**"
       - "tests/**"
       - "requirements*.txt"

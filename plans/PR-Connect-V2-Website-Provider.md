@@ -9,6 +9,13 @@ invoke it. Local Connect v2 at contract commit
 authority. This slice implements that existing contract without adding a
 broker, consumer-specific UI, or a second generation pipeline.
 
+That pinned contract also requires each provider to enforce the independent
+`connect.capability_exchange` entitlement on every live route. The repository
+does not currently contain an official issuer public keyring, so this slice
+ships the fail-closed verifier and canonical fixture proof; release authority
+and license provisioning remain explicitly blocked on issue #27 rather than
+using a runtime override or test key in production.
+
 The authenticated HTTP surface, durable idempotency store, worker lifecycle,
 and contract-boundary tests form one vertical capability proof. The slice may
 exceed the repository's 400-line soft target because separating persistence or
@@ -28,11 +35,13 @@ that cannot satisfy the job contract.
    conflicting-ID rejection, and one active generation worker.
 5. Reuse the local Qwen generation seam only; add conformance, endpoint,
    concurrency, restart, and failure-path tests plus operator documentation.
+6. Re-evaluate the signed local Connect entitlement on every route and deny
+   manifest, submission, and status access unless it is active.
 
 ### Files touched
 
 - `connect_provider.py`
-- `lib/connect_v2.py`, `lib/connect_store.py`
+- `lib/connect_v2.py`, `lib/connect_store.py`, `lib/connect_entitlement.py`
 - `tests/test_connect_provider.py`
 - `requirements.txt`, `requirements-dev.txt`, `.github/workflows/generator-tests.yml`
 - `README.md`
@@ -53,6 +62,12 @@ worker transitions accepted → processing → completed/failed and stores the
 validated HTML artifact. GET routes project stored state into the canonical v2
 manifest and job-status shapes.
 
+The HTTP layer checks bearer authentication first and the independently signed
+local entitlement second on every request. Entitlement verification uses an
+embedded build-owned public keyring, strict bounded JSON/base64url/claim
+validation, Ed25519 signatures, and owner-only no-symlink file reads. Source
+builds with no official keyring fail closed as authority-unavailable.
+
 ## Intentional
 
 - Connect invocation is local-Qwen-only and advertises `external: false`; an
@@ -66,6 +81,8 @@ manifest and job-status shapes.
   durable retryable `PROVIDER_INTERRUPTED` failure rather than silently rerun.
 - Completed bytes remain provider-owned SQLite state and cross Connect only in
   the bounded canonical output artifact.
+- Canonical entitlement fixture keys are test-only. Production cannot select a
+  keyring with an environment variable.
 
 ## Deferred
 
@@ -75,6 +92,9 @@ manifest and job-status shapes.
   retrieval, and consumer UI remain deferred by the v2 contract.
 - Additional website capabilities require a real consumer use case and their
   own atomic capability versions.
+- Official entitlement authority and license provisioning are release
+  operations tracked by #27; the provider must remain unavailable until both
+  exist.
 
 ## Verification
 
@@ -90,7 +110,7 @@ manifest and job-status shapes.
 
 ## Estimated diff size
 
-Expected 9 files and approximately 1,850–2,100 added lines, split between the
+Expected 11 files and approximately 2,400–2,700 added lines, split between the
 durable provider and its contract/concurrency/restart boundary suite. The
 overage is justified above; removing those tests or persistence boundaries
 would make the advertised asynchronous capability unproved or non-durable.

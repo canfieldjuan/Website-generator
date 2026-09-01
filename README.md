@@ -152,6 +152,15 @@ accepted inputs, job states, and completed HTML are retained in
 `~/.local/state/website-redesign/`). The bearer token rotates on each process
 start while the provider instance ID remains stable with that retained state.
 
+Every Connect route also requires the independently signed local entitlement
+feature `connect.capability_exchange`. The license is read from
+`$XDG_CONFIG_HOME/local-connect/entitlement-v1.json` (or
+`~/.config/local-connect/entitlement-v1.json`) on each request, so activation or
+expiry takes effect without restarting the provider. Source checkouts contain
+no official issuer key and therefore fail closed; official keyring and license
+provisioning are tracked in issue #27. Test fixture keys must never be used as
+production authority.
+
 Only one process and one active generation job are allowed for that state.
 Identical caller-owned job IDs replay idempotently; conflicting reuse is
 rejected. An accepted job resumes after restart, while a job interrupted after

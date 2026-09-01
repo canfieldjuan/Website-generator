@@ -25,6 +25,7 @@ from python_multipart import MultipartParser
 from python_multipart.multipart import parse_options_header
 
 import build
+from lib.connect_entitlement import EntitlementGate
 from lib.connect_store import (
     ConnectStore,
     JobConflict,
@@ -252,7 +253,12 @@ def manifest(instance_id: str) -> dict[str, Any]:
     }
 
 
-def create_app(runtime: ProviderRuntime, bearer_token: str) -> FastAPI:
+def create_app(
+    runtime: ProviderRuntime,
+    bearer_token: str,
+    entitlement_gate: EntitlementGate | None = None,
+) -> FastAPI:
+    selected_entitlement_gate = entitlement_gate or EntitlementGate.from_installation()
     app = FastAPI(
         title="Website Redesign Local Connect Provider",
         docs_url=None,
@@ -262,14 +268,16 @@ def create_app(runtime: ProviderRuntime, bearer_token: str) -> FastAPI:
 
     @app.get("/v2/manifest")
     async def get_manifest(request: Request):
-        unauthorized = _authenticate(request, bearer_token)
-        return unauthorized or JSONResponse(manifest(runtime.instance_id))
+        denial = _authorize(request, bearer_token, selected_entitlement_gate)
+        if denial is not None:
+            return denial
+        return JSONResponse(manifest(runtime.instance_id))
 
     @app.post("/v2/jobs")
     async def create_job(request: Request):
-        unauthorized = _authenticate(request, bearer_token)
-        if unauthorized:
-            return unauthorized
+        denial = _authorize(request, bearer_token, selected_entitlement_gate)
+        if denial is not None:
+            return denial
         try:
             request_bytes, artifact_bytes = await read_job_multipart(request)
             request_document = decode_job_request(request_bytes)
@@ -289,9 +297,9 @@ def create_app(runtime: ProviderRuntime, bearer_token: str) -> FastAPI:
 
     @app.get("/v2/jobs/{job_id}")
     async def get_job(job_id: str, request: Request):
-        unauthorized = _authenticate(request, bearer_token)
-        if unauthorized:
-            return unauthorized
+        denial = _authorize(request, bearer_token, selected_entitlement_gate)
+        if denial is not None:
+            return denial
         if not is_uuid4(job_id):
             return error_response(
                 400, "JOB_ID_INVALID", "The job ID must be a lowercase UUIDv4.", False
@@ -746,6 +754,22 @@ def _authenticate(request: Request, token: str) -> JSONResponse | None:
     ):
         return error_response(
             401, "AUTHENTICATION_REQUIRED", "A valid bearer token is required.", False
+        )
+    return None
+
+
+def _authorize(
+    request: Request, token: str, entitlement_gate: EntitlementGate
+) -> JSONResponse | None:
+    authentication_failure = _authenticate(request, token)
+    if authentication_failure is not None:
+        return authentication_failure
+    if not entitlement_gate.decision().is_active:
+        return error_response(
+            403,
+            "CONNECT_ENTITLEMENT_REQUIRED",
+            "An active Local Connect capability-exchange entitlement is required.",
+            False,
         )
     return None
 

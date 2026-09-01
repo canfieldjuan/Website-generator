@@ -6,6 +6,7 @@ import tempfile
 import threading
 import unittest
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +16,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 import build
 import connect_provider
+from lib.connect_entitlement import EntitlementDecision, EntitlementGate
 from lib.connect_store import ConnectStore, JobConflict, ProviderBusy, canonical_json
 from lib.connect_v2 import (
     APP_ID,
@@ -27,6 +29,7 @@ from lib.connect_v2 import (
     ProviderRuntime,
     create_app,
     decode_job_request,
+    error_response,
     generate_website_artifact,
     job_status_document,
     manifest,
@@ -91,6 +94,14 @@ def multipart_parts(request_document, data, *, artifact_media="application/json"
 
 def fake_generation(_input):
     return HTML, "example-plumbing-homepage.html"
+
+
+class MutableEntitlementGate:
+    def __init__(self, decision=EntitlementDecision.ACTIVE):
+        self.current = decision
+
+    def decision(self):
+        return self.current
 
 
 class RequestBoundaryTests(unittest.TestCase):
@@ -247,7 +258,10 @@ class ProviderApiTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.store = ConnectStore(Path(self.temp.name) / "connect.sqlite3")
         self.runtime = ProviderRuntime(self.store, fake_generation)
-        self.client = TestClient(create_app(self.runtime, TOKEN))
+        self.entitlement = MutableEntitlementGate()
+        self.client = TestClient(
+            create_app(self.runtime, TOKEN, self.entitlement)
+        )
         self.headers = {"Authorization": f"Bearer {TOKEN}"}
 
     def tearDown(self):
@@ -371,7 +385,9 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
             runtime = ProviderRuntime(
                 ConnectStore(Path(directory) / "connect.sqlite3"), blocking_generation
             )
-            client = TestClient(create_app(runtime, TOKEN))
+            client = TestClient(
+                create_app(runtime, TOKEN, MutableEntitlementGate())
+            )
             headers = {"Authorization": f"Bearer {TOKEN}"}
             data = artifact_bytes()
             try:
@@ -487,6 +503,106 @@ class GenerationSeamTests(unittest.TestCase):
                 write.assert_not_called()
 
 
+class EntitlementTests(unittest.TestCase):
+    def setUp(self):
+        configured = os.environ.get("CONNECT_CONTRACTS_DIR")
+        if not configured:
+            self.skipTest("CONNECT_CONTRACTS_DIR is required for entitlement fixtures")
+        self.fixtures = Path(configured) / "entitlements" / "v1" / "fixtures"
+        self.keyring = (self.fixtures / "test-keyring.json").read_bytes()
+        self.now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    def write_fixture(self, root, name):
+        parent = Path(root) / "local-connect"
+        parent.mkdir(mode=0o700)
+        parent.chmod(0o700)
+        path = parent / "entitlement-v1.json"
+        path.write_bytes((self.fixtures / name).read_bytes())
+        path.chmod(0o600)
+        return path
+
+    def test_canonical_entitlement_fixtures_match_contract_decisions(self):
+        cases = {
+            "valid/active.json": EntitlementDecision.ACTIVE,
+            "valid/expired.json": EntitlementDecision.EXPIRED,
+            "valid/not-yet-valid.json": EntitlementDecision.NOT_YET_VALID,
+            "valid/missing-feature.json": EntitlementDecision.FEATURE_MISSING,
+            "invalid/unknown-key.json": EntitlementDecision.INVALID,
+            "invalid/bad-signature.json": EntitlementDecision.INVALID,
+            "invalid/duplicate-claim-key.json": EntitlementDecision.INVALID,
+            "invalid/malformed-base64.json": EntitlementDecision.INVALID,
+        }
+        for fixture, expected in cases.items():
+            with self.subTest(fixture=fixture), tempfile.TemporaryDirectory() as root:
+                path = self.write_fixture(root, fixture)
+                gate = EntitlementGate.for_test(
+                    path=path, keyring_document=self.keyring, now=self.now
+                )
+                self.assertEqual(gate.decision(), expected)
+
+    def test_missing_authority_missing_file_and_unsafe_permissions_fail_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            missing = Path(root) / "local-connect" / "entitlement-v1.json"
+            no_authority = EntitlementGate(path=missing, keys={}, now=lambda: self.now)
+            self.assertEqual(
+                no_authority.decision(), EntitlementDecision.AUTHORITY_UNAVAILABLE
+            )
+            gate = EntitlementGate.for_test(
+                path=missing, keyring_document=self.keyring, now=self.now
+            )
+            self.assertEqual(gate.decision(), EntitlementDecision.MISSING)
+
+            path = self.write_fixture(root, "valid/active.json")
+            path.chmod(0o644)
+            self.assertEqual(gate.decision(), EntitlementDecision.MISSING)
+
+    def test_every_route_rechecks_entitlement_and_authentication_stays_first(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = ConnectStore(Path(root) / "connect.sqlite3")
+            runtime = ProviderRuntime(store, fake_generation)
+            entitlement = MutableEntitlementGate(EntitlementDecision.EXPIRED)
+            client = TestClient(create_app(runtime, TOKEN, entitlement))
+            headers = {"Authorization": f"Bearer {TOKEN}"}
+            data = artifact_bytes()
+            document = job_request(data)
+            try:
+                self.assertEqual(client.get("/v2/manifest").status_code, 401)
+                denied = (
+                    client.get("/v2/manifest", headers=headers),
+                    client.post("/v2/jobs", headers=headers),
+                    client.get(f"/v2/jobs/{document['job_id']}", headers=headers),
+                )
+                for response in denied:
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(
+                        response.json()["error"]["code"],
+                        "CONNECT_ENTITLEMENT_REQUIRED",
+                    )
+
+                entitlement.current = EntitlementDecision.ACTIVE
+                self.assertEqual(
+                    client.get("/v2/manifest", headers=headers).status_code, 200
+                )
+                accepted = client.post(
+                    "/v2/jobs",
+                    headers=headers,
+                    files=multipart_parts(document, data),
+                )
+                self.assertEqual(accepted.status_code, 202)
+                runtime.wait_for_terminal(document["job_id"])
+
+                entitlement.current = EntitlementDecision.MISSING
+                self.assertEqual(
+                    client.get(
+                        f"/v2/jobs/{document['job_id']}", headers=headers
+                    ).status_code,
+                    403,
+                )
+            finally:
+                client.close()
+                runtime.close()
+
+
 class RegistrationTests(unittest.TestCase):
     def test_registration_is_private_atomic_and_token_rotates(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -563,6 +679,15 @@ class CanonicalContractTests(unittest.TestCase):
 
             data = artifact_bytes()
             completed_request = job_request(data)
+            self.validate("job-request.schema.json", completed_request)
+            self.validate(
+                "error.schema.json",
+                json.loads(
+                    error_response(
+                        409, "PROVIDER_BUSY", "Provider is busy.", True
+                    ).body
+                ),
+            )
             request_hash = hashlib.sha256(
                 canonical_json(completed_request).encode()
             ).hexdigest()
