@@ -815,6 +815,17 @@ def validate_generated_body(
         )
     class_count_mismatches = []
     for class_name, expected_count in required_class_counts:
+        case_variants = sorted(
+            candidate
+            for candidate in parser.class_name_counts
+            if candidate != class_name
+            and candidate.casefold() == class_name.casefold()
+        )
+        if case_variants:
+            class_count_mismatches.append(
+                f"{class_name} has invalid case variant: {', '.join(case_variants[:3])}"
+            )
+            continue
         actual_count = parser.class_name_counts.get(class_name, 0)
         if actual_count != expected_count:
             class_count_mismatches.append(

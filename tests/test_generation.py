@@ -1078,7 +1078,7 @@ class BodyAssemblyTests(unittest.TestCase):
 
     def test_body_admission_counts_a_class_once_per_element(self):
         repeated_token_body = (
-            '<body><div class="service-card SERVICE-CARD service-card '
+            '<body><div class="service-card service-card service-card '
             'service-card service-card service-card"></div></body>'
         )
         with self.assertRaisesRegex(
@@ -1095,7 +1095,7 @@ class BodyAssemblyTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(
             GeneratedBodyError,
-            "service-card expected 6, got 0",
+            "service-card has invalid case variant: SERVICE-CARD",
         ):
             validate_generated_body(
                 body_result(wrong_case_body),
@@ -1918,6 +1918,20 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 prospect,
                 config(),
                 FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY)),
+            )
+
+        wrong_case_coverage = COMPLETE_BUILD_BODY.replace(
+            'class="coverage-band"',
+            'class="Coverage-Band"',
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "coverage-band has invalid case variant: Coverage-Band",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_case_coverage)),
             )
 
         prospect["phone"] = "217-555-0100"
