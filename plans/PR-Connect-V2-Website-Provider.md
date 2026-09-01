@@ -49,10 +49,12 @@ that cannot satisfy the job contract.
 
 ## Mechanism
 
-`connect_provider.py` preflights the configured local model, starts a FastAPI
-server on an ephemeral `127.0.0.1` port, rotates a bearer token, and atomically
-writes the v2 registration under the XDG runtime directory. The durable
-instance UUID and jobs live in a SQLite database under the XDG state directory.
+`connect_provider.py` validates that the configured model endpoint is a literal
+loopback, preflights the configured local model, opens a listening socket on an
+ephemeral `127.0.0.1` port, rotates a bearer token, and only then atomically
+writes the v2 registration under the XDG runtime directory. Uvicorn consumes
+that same listening socket. The durable instance UUID and jobs live in a SQLite
+database under the XDG state directory.
 
 `POST /v2/jobs` validates the request JSON before accepting the artifact, then
 streams and bounds the artifact, verifies declared size and SHA-256, and stores
@@ -73,6 +75,8 @@ builds with no official keyring fail closed as authority-unavailable.
 - Connect invocation is local-Qwen-only and advertises `external: false`; an
   OpenRouter-configured CLI cannot silently change Connect's cost/privacy
   contract.
+- CLI endpoint overrides remain available, but Connect rejects non-loopback,
+  wildcard, malformed, and hostname-lookalike generation endpoints.
 - No parameters are declared in v1.0. Theme and section choices remain in the
   prospect JSON's existing deterministic contract.
 - The provider refuses to register when Qwen is unavailable. It never auto-loads
@@ -99,7 +103,7 @@ builds with no official keyring fail closed as authority-unavailable.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 65 tests in 2.975 seconds on the updated combined head.
+  passed: 67 tests in 2.358 seconds on the updated combined head.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema

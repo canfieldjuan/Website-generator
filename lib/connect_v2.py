@@ -6,6 +6,7 @@ import base64
 import fcntl
 import hashlib
 import hmac
+import ipaddress
 import json
 import math
 import os
@@ -18,6 +19,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -39,6 +41,7 @@ from lib.generation import (
     MAX_HTML_BYTES,
     GeneratedHtmlError,
     GenerationConfigurationError,
+    GenerationConfig,
     GenerationProviderUnavailable,
     GenerationResponseError,
     resolve_generation_config,
@@ -597,6 +600,44 @@ def job_status_document(job: StoredJob, instance_id: str) -> dict[str, Any]:
     return document
 
 
+def resolve_connect_generation_config() -> GenerationConfig:
+    """Resolve the pinned local model without permitting a remote endpoint."""
+    config = resolve_generation_config("local", DEFAULT_LOCAL_MODEL)
+    try:
+        endpoint = urlsplit(config.base_url)
+        hostname = endpoint.hostname
+        _ = endpoint.port
+    except ValueError as exc:
+        raise GenerationConfigurationError(
+            "Connect generation requires a valid loopback HTTP base URL."
+        ) from exc
+    if (
+        endpoint.scheme.lower() not in {"http", "https"}
+        or not endpoint.netloc
+        or hostname is None
+        or endpoint.username is not None
+        or endpoint.password is not None
+        or endpoint.query
+        or endpoint.fragment
+    ):
+        raise GenerationConfigurationError(
+            "Connect generation requires a valid loopback HTTP base URL."
+        )
+    normalized_hostname = hostname.rstrip(".").lower()
+    if normalized_hostname != "localhost":
+        try:
+            address = ipaddress.ip_address(normalized_hostname)
+        except ValueError as exc:
+            raise GenerationConfigurationError(
+                "Connect generation requires a literal loopback endpoint."
+            ) from exc
+        if not address.is_loopback:
+            raise GenerationConfigurationError(
+                "Connect generation requires a literal loopback endpoint."
+            )
+    return config
+
+
 def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
     try:
         prospect_document = json.loads(
@@ -609,7 +650,7 @@ def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
         display_name = f"{build.slugify(prospect['business_name'])}-homepage.html"
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise ValueError("The input artifact is not a valid prospect document.") from exc
-    config = resolve_generation_config("local", DEFAULT_LOCAL_MODEL)
+    config = resolve_connect_generation_config()
     html = build.generate_build_html(prospect, config)
     return html.encode("utf-8"), display_name
 

@@ -21,13 +21,13 @@ from lib.connect_v2 import (
     new_bearer_token,
     registration_document,
     remove_registration_if_owned,
+    resolve_connect_generation_config,
     write_registration,
 )
 from lib.generation import (
     GenerationConfigurationError,
     GenerationProviderUnavailable,
     preflight_generation_provider,
-    resolve_generation_config,
 )
 
 
@@ -51,6 +51,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def bind_loopback_listener(backlog: int) -> socket.socket:
+    """Return a loopback socket that accepts connections before discovery."""
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(backlog)
+        listener.setblocking(False)
+        return listener
+    except Exception:
+        listener.close()
+        raise
+
+
 def main() -> int:
     args = parse_args()
     try:
@@ -65,7 +79,7 @@ def main() -> int:
     state_dir.chmod(0o700)
 
     try:
-        generation_config = resolve_generation_config("local", DEFAULT_LOCAL_MODEL)
+        generation_config = resolve_connect_generation_config()
         preflight_generation_provider(generation_config)
     except (GenerationConfigurationError, GenerationProviderUnavailable) as exc:
         print(f"Connect provider preflight failed: {exc}", file=sys.stderr)
@@ -81,14 +95,19 @@ def main() -> int:
     runtime: ProviderRuntime | None = None
     registration_path: Path | None = None
     token = new_bearer_token()
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener: socket.socket | None = None
     try:
-        listener.bind(("127.0.0.1", 0))
-        port = int(listener.getsockname()[1])
         store = ConnectStore(state_dir / "connect-v2.sqlite3")
         runtime = ProviderRuntime(store)
         app = create_app(runtime, token)
+        config = uvicorn.Config(
+            app,
+            log_level="info",
+            access_log=False,
+            server_header=False,
+        )
+        listener = bind_loopback_listener(config.backlog)
+        port = int(listener.getsockname()[1])
         registration = registration_document(
             instance_id=runtime.instance_id,
             port=port,
@@ -99,12 +118,6 @@ def main() -> int:
             f"Website Redesign Connect v2 is available at "
             f"http://127.0.0.1:{port}/"
         )
-        config = uvicorn.Config(
-            app,
-            log_level="info",
-            access_log=False,
-            server_header=False,
-        )
         uvicorn.Server(config).run(sockets=[listener])
         return 0
     finally:
@@ -112,7 +125,8 @@ def main() -> int:
             remove_registration_if_owned(registration_path, token)
         if runtime is not None:
             runtime.close()
-        listener.close()
+        if listener is not None:
+            listener.close()
         provider_lock.close()
 
 

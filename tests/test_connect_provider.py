@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import socket
 import stat
 import tempfile
 import threading
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, FormatChecker
@@ -38,11 +40,16 @@ from lib.connect_v2 import (
     new_bearer_token,
     registration_document,
     remove_registration_if_owned,
+    resolve_connect_generation_config,
     sanitize_display_name,
     validate_job_request,
     write_registration,
 )
-from lib.generation import GenerationProviderUnavailable, GenerationResponseError
+from lib.generation import (
+    GenerationConfigurationError,
+    GenerationProviderUnavailable,
+    GenerationResponseError,
+)
 
 
 TOKEN = "A" * 64
@@ -483,6 +490,36 @@ class GenerationSeamTests(unittest.TestCase):
         self.assertIn("_computed_theme", captured["prospect"])
         self.assertIn("build_date", captured["prospect"])
 
+    def test_connect_generation_accepts_only_literal_loopback_endpoints(self):
+        valid_endpoints = (
+            "http://localhost:1234/v1",
+            "https://127.0.0.7:9443/v1",
+            "http://[::1]:1234/v1",
+        )
+        for endpoint in valid_endpoints:
+            with self.subTest(valid=endpoint), patch.dict(
+                os.environ,
+                {"LOCAL_GENERATION_BASE_URL": endpoint},
+            ):
+                self.assertEqual(resolve_connect_generation_config().base_url, endpoint)
+
+        invalid_endpoints = (
+            "https://api.example.com/v1",
+            "http://127.0.0.1.example.com/v1",
+            "http://0.0.0.0:1234/v1",
+            "file:///tmp/model",
+        )
+        for endpoint in invalid_endpoints:
+            with self.subTest(invalid=endpoint), patch.dict(
+                os.environ,
+                {"LOCAL_GENERATION_BASE_URL": endpoint},
+            ):
+                with self.assertRaisesRegex(
+                    GenerationConfigurationError,
+                    "loopback",
+                ):
+                    resolve_connect_generation_config()
+
     def test_in_memory_preparation_matches_file_loading_without_mutating_input(self):
         source = dict(PROSPECT)
         with tempfile.TemporaryDirectory() as directory:
@@ -516,6 +553,43 @@ class GenerationSeamTests(unittest.TestCase):
             ), patch.object(connect_provider, "write_registration") as write:
                 self.assertEqual(connect_provider.main(), 2)
                 write.assert_not_called()
+
+    def test_registration_is_published_only_after_listener_accepts_connections(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(
+                runtime_dir=Path(directory) / "runtime",
+                state_dir=Path(directory) / "state",
+            )
+            observed = {"connected": False}
+
+            def assert_listening(runtime_dir, document):
+                endpoint = urlsplit(document["transport"]["base_url"])
+                with socket.create_connection(
+                    (endpoint.hostname, endpoint.port),
+                    timeout=1.0,
+                ):
+                    observed["connected"] = True
+                return Path(runtime_dir) / "registration.json"
+
+            with patch.object(
+                connect_provider,
+                "parse_args",
+                return_value=args,
+            ), patch.object(
+                connect_provider,
+                "resolve_connect_generation_config",
+                return_value=SimpleNamespace(),
+            ), patch.object(
+                connect_provider,
+                "preflight_generation_provider",
+            ), patch.object(
+                connect_provider,
+                "write_registration",
+                side_effect=assert_listening,
+            ), patch.object(connect_provider.uvicorn.Server, "run"):
+                self.assertEqual(connect_provider.main(), 0)
+
+            self.assertTrue(observed["connected"])
 
 
 class EntitlementTests(unittest.TestCase):
