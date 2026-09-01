@@ -75,7 +75,7 @@ second template or output path.
 Before generation, the shared prospect preparer requires each required field to
 be a non-empty string. The Connect adapter also changes a photo-dependent hero
 selection to the existing gradient shape when the one accepted input artifact
-does not contain a usable hero/background photo URL. This keeps the advertised
+does not contain a usable `context == "hero"` photo URL. This keeps the advertised
 single HTML output self-contained without invoking image acquisition.
 The same adapter measures the exact pretty-serialized prospect prompt block and
 rejects the input when it would cross the generator's limit, so Connect never
@@ -84,15 +84,17 @@ Request and prospect JSON share one strict decoder that rejects duplicate keys,
 non-finite constants and exponent overflows, excessive parser depth, and
 unpaired Unicode surrogates before hashing or generation. Integral metadata is
 range-checked without converting arbitrary-size JSON integers to floats.
-Photo-dependent hero shapes survive only when the input supplies an absolute
-HTTP(S) image URL or an embedded `data:image/` URL; relative and local paths
-fall back to the existing gradient layout.
+Photo-dependent hero shapes survive only when the actual hero record supplies
+an absolute HTTP(S) image URL or an embedded `data:image/` URL; background-only,
+relative, and local paths fall back to the existing gradient layout.
 
 The HTTP layer checks bearer authentication first and the independently signed
 local entitlement second on every request. Entitlement verification uses an
 embedded build-owned public keyring, strict bounded JSON/base64url/claim
 validation, Ed25519 signatures, and owner-only no-symlink file reads. Source
-builds with no official keyring fail closed as authority-unavailable.
+builds with no official keyring fail closed as authority-unavailable. Malformed
+or non-ASCII bearer credentials fail as the same shaped unauthorized response
+as any other invalid token.
 
 ## Intentional
 
@@ -105,9 +107,10 @@ builds with no official keyring fail closed as authority-unavailable.
   their existing proxy behavior.
 - No parameters are declared in v1.0. Theme and section choices remain in the
   prospect JSON's existing deterministic contract.
-- A supplied hero/background photo preserves the deterministic photo layout;
-  absent, partial, or unrelated photo metadata uses the existing photo-free
-  gradient layout because this capability does not produce image artifacts.
+- A supplied, accessible hero photo preserves the deterministic photo layout;
+  absent, background-only, partial, or unrelated photo metadata uses the
+  existing photo-free gradient layout because this capability does not produce
+  image artifacts.
 - The provider refuses to register when Qwen is unavailable. It never auto-loads
   a model.
 - Accepted jobs survive restart. Jobs interrupted while processing become a
@@ -132,14 +135,14 @@ builds with no official keyring fail closed as authority-unavailable.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 106 tests in 3.198 seconds on the updated combined tree.
+  passed: 107 tests in 3.184 seconds on the updated combined tree.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema
   validation against the pinned `connect-contracts` commit.
-- Endpoint tests for missing/wrong auth, malformed multipart, size/hash/media
-  mismatches, same/conflicting IDs, busy concurrency, completed output, provider
-  failure, and interrupted-job restart reconciliation.
+- Endpoint tests for missing/wrong/non-ASCII auth, malformed multipart,
+  size/hash/media mismatches, same/conflicting IDs, busy concurrency, completed
+  output, provider failure, and interrupted-job restart reconciliation.
 - `bash scripts/local_pr_review.sh` passed, including `git diff --check` and both
   required plan documents.
 - The required fixture command completed on combined code head `bb12fca` against

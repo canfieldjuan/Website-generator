@@ -640,7 +640,7 @@ def _has_usable_hero_photo(prospect: dict[str, Any]) -> bool:
         return False
     return any(
         isinstance(photo, dict)
-        and photo.get("context") in {"hero", "background"}
+        and photo.get("context") == "hero"
         and _is_connect_accessible_image_url(photo.get("url"))
         for photo in photos
     )
@@ -833,11 +833,16 @@ def error_response(
 def _authenticate(request: Request, token: str) -> JSONResponse | None:
     authorization = request.headers.get("authorization", "")
     scheme, separator, credential = authorization.partition(" ")
+    credential_matches = (
+        credential.isascii()
+        and token.isascii()
+        and hmac.compare_digest(credential.encode("ascii"), token.encode("ascii"))
+    )
     if (
         separator != " "
         or scheme.lower() != "bearer"
         or not credential
-        or not hmac.compare_digest(credential, token)
+        or not credential_matches
     ):
         return error_response(
             401, "AUTHENTICATION_REQUIRED", "A valid bearer token is required.", False

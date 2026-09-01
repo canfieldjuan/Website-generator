@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator, FormatChecker
+from starlette.requests import Request
 
 import build
 import connect_provider
@@ -31,6 +32,7 @@ from lib.connect_v2 import (
     ProviderLock,
     ProviderRuntime,
     ProtocolError,
+    _authenticate,
     create_app,
     decode_job_request,
     default_runtime_dir,
@@ -321,6 +323,22 @@ class ProviderApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), manifest(self.runtime.instance_id))
 
+        non_ascii = _authenticate(
+            Request(
+                {
+                    "type": "http",
+                    "headers": [(b"authorization", b"Bearer \xff")],
+                }
+            ),
+            TOKEN,
+        )
+        self.assertIsNotNone(non_ascii)
+        self.assertEqual(non_ascii.status_code, 401)
+        self.assertEqual(
+            json.loads(non_ascii.body)["error"]["code"],
+            "AUTHENTICATION_REQUIRED",
+        )
+
     def test_job_completes_with_integrity_bound_html_output(self):
         data = artifact_bytes()
         document = job_request(data)
@@ -586,13 +604,21 @@ class GenerationSeamTests(unittest.TestCase):
             source = dict(PROSPECT)
             source["photos"] = [{"context": "hero", "url": url}]
             missing_assets.append(source)
+        source = dict(PROSPECT)
+        source["photos"] = [
+            {
+                "context": "background",
+                "url": "https://images.example.test/background.jpg",
+            }
+        ]
+        missing_assets.append(source)
         supplied_assets = []
         for url in (
             "https://images.example.test/hero.jpg",
             "data:image/png;base64,AA==",
         ):
             source = dict(PROSPECT)
-            source["photos"] = [{"context": "background", "url": url}]
+            source["photos"] = [{"context": "hero", "url": url}]
             supplied_assets.append(source)
         with patch.object(
             build, "apply_design_selections", side_effect=select_split
