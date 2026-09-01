@@ -465,20 +465,21 @@ claim remains admissible.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python pipeline.py --help` — passed;
   provider/model and existing skip flags shown.
 - `git diff --check` — passed.
-- Exact-head standalone-runtime fixture:
+- Standalone-runtime fixture at generator code head
+  `f94aa759343cca7e63975e862151b0a6c4be5af7`:
   `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:18081/v1
   GENERATION_TIMEOUT_SECONDS=14400
   /home/juan-canfield/.cache/website-redesign-connect-venv/bin/python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
-  --skip-deploy` completed successfully against `llama.cpp` v0.3.0 at commit
-  `c1d0e7a004015f23bc0233470b747b596f29b264`, serving the exact
+  --skip-deploy` completed successfully against the `llama.cpp` v0.3.0 build at
+  commit `c1d0e7a004015f23bc0233470b747b596f29b264`, serving the exact
   `qwen/qwen3.8-27b` alias. The command produced no deployment, email, or image
   side effect. `CUDA_VISIBLE_DEVICES=0` and the launcher's default
   `LLAMA_CPP_GPU_LAYERS=all` confined inference to the RTX 3090; the live server
-  process held 19,922 MiB there.
+  process held 19,898 MiB there.
 - The admitted artifact was
-  `outputs/builds/drees-plumbing-inc/index.html` (71,766 bytes, SHA-256
-  `11193b14e62bb5c5bb86fa762d7a1c5894eeba49f4f403ab89580842647e0b4f`).
+  `outputs/builds/drees-plumbing-inc/index.html` (71,704 bytes, SHA-256
+  `6b6a0ad79134c8717d963e868958513e59aa10714aebf6b9f8e6c05d17daeeb4`).
   The shared HTML validator accepted it; the required unresolved-placeholder
   search returned `0`, and the required fabricated-claim search returned `0`.
   It contains one services grid, six service cards, six service names, six
