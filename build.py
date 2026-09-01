@@ -21,6 +21,7 @@ import re
 import json
 import hashlib
 import argparse
+import copy
 from datetime import date
 
 from lib.images import fetch_unsplash_hero, generate_image_openrouter
@@ -150,12 +151,20 @@ def load_prospect(path):
         raise FileNotFoundError(f"Prospect JSON not found: {path}")
     with open(path, "r") as f:
         prospect = json.load(f)
+    return prepare_prospect(prospect)
+
+
+def prepare_prospect(prospect, build_date=None):
+    """Validate and normalize an in-memory prospect document."""
+    if not isinstance(prospect, dict):
+        raise ValueError("Prospect JSON must contain one object.")
+    prospect = copy.deepcopy(prospect)
     missing = [k for k in REQUIRED_FIELDS if not prospect.get(k)]
     if missing:
         raise ValueError(f"Prospect JSON missing required field(s): {', '.join(missing)}")
     sanitize_placeholders(prospect)
     sanitize_reviews(prospect)
-    build_date = date.today()
+    build_date = build_date or date.today()
     prospect["build_date"] = build_date.isoformat()
     normalize_years(prospect, build_date)
     return prospect
@@ -568,6 +577,46 @@ def generate_email_draft(prospect, generation_config=None, client=None):
     return draft.strip()
 
 
+def apply_design_selections(prospect, *, announce=True):
+    """Apply the deterministic design choices shared by CLI and Connect."""
+    # Deterministic theme selection. Setting this on the prospect dict
+    # before HTML generation means the LLM reads `_computed_theme` as a
+    # fact in the prospect JSON and applies the matching block from
+    # references/09-themes.md. Two builds of the same prospect always
+    # pick the same theme; different prospects within a trade get
+    # different themes from the trade's allowed_themes list in 07.
+    prospect["_computed_theme"] = select_theme(prospect)
+    if announce:
+        print(f"[*] Theme: {prospect['_computed_theme']}")
+
+    # Deterministic palette selection. Independent from theme (different
+    # hash slice). When prospect.brand_colors is set this returns None
+    # and the LLM uses those colors verbatim per 06's :root rule.
+    palette = select_palette(prospect)
+    if palette:
+        prospect["_computed_palette"] = palette
+        if announce:
+            print(f"[*] Palette: accent={palette['accent']} accent_dark={palette['accent_dark']}")
+
+    # Hero shape coupled to theme. Same prospect -> same theme ->
+    # same hero shape. Couples visual language: editorial themes get
+    # split-photo heroes, minimal themes get gradient (no photo),
+    # everything else gets the historical fullbleed.
+    prospect["_computed_hero_shape"] = select_hero_shape(prospect)
+    if announce:
+        print(f"[*] Hero shape: {prospect['_computed_hero_shape']}")
+
+    # Section ordering. Independent of theme/palette/hero-shape --
+    # uses md5[16:24] slice so it varies even when two prospects
+    # collide on the earlier axes. The LLM reads
+    # _computed_section_order and renders sections in the order
+    # documented in references/10-section-orders.md for that name.
+    prospect["_computed_section_order"] = select_section_order(prospect)
+    if announce:
+        print(f"[*] Section order: {prospect['_computed_section_order']}")
+    return prospect
+
+
 def main(
     prospect_json_path,
     *,
@@ -589,38 +638,7 @@ def main(
 
     print(f"[*] Building {prospect['business_name']} ({prospect['trade']}, {prospect['city']}, {prospect['state']})")
     print(f"[*] Output: {output_dir}/")
-
-    # Deterministic theme selection. Setting this on the prospect dict
-    # before HTML generation means the LLM reads `_computed_theme` as a
-    # fact in the prospect JSON and applies the matching block from
-    # references/09-themes.md. Two builds of the same prospect always
-    # pick the same theme; different prospects within a trade get
-    # different themes from the trade's allowed_themes list in 07.
-    prospect["_computed_theme"] = select_theme(prospect)
-    print(f"[*] Theme: {prospect['_computed_theme']}")
-
-    # Deterministic palette selection. Independent from theme (different
-    # hash slice). When prospect.brand_colors is set this returns None
-    # and the LLM uses those colors verbatim per 06's :root rule.
-    palette = select_palette(prospect)
-    if palette:
-        prospect["_computed_palette"] = palette
-        print(f"[*] Palette: accent={palette['accent']} accent_dark={palette['accent_dark']}")
-
-    # Hero shape coupled to theme. Same prospect -> same theme ->
-    # same hero shape. Couples visual language: editorial themes get
-    # split-photo heroes, minimal themes get gradient (no photo),
-    # everything else gets the historical fullbleed.
-    prospect["_computed_hero_shape"] = select_hero_shape(prospect)
-    print(f"[*] Hero shape: {prospect['_computed_hero_shape']}")
-
-    # Section ordering. Independent of theme/palette/hero-shape --
-    # uses md5[16:24] slice so it varies even when two prospects
-    # collide on the earlier axes. The LLM reads
-    # _computed_section_order and renders sections in the order
-    # documented in references/10-section-orders.md for that name.
-    prospect["_computed_section_order"] = select_section_order(prospect)
-    print(f"[*] Section order: {prospect['_computed_section_order']}")
+    apply_design_selections(prospect)
 
     # Hero image acquisition (unless skipped or prospect already provided one).
     # Path 1 (Unsplash) is tried first when UNSPLASH_ACCESS_KEY is set --

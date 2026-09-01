@@ -28,10 +28,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: canfieldjuan/connect-contracts
+          ref: c5405935bd1354cf6a4c8539425a53dfd7f52949
+          path: connect-contracts
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements-dev.txt
       - run: python -m unittest discover -s tests -v
-      - run: python -m compileall -q build.py pipeline.py lib tests
+        env:
+          CONNECT_CONTRACTS_DIR: ${{ github.workspace }}/connect-contracts
+      - run: python -m compileall -q build.py pipeline.py connect_provider.py lib tests

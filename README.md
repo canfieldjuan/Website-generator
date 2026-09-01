@@ -10,6 +10,7 @@ Two parallel implementations of the same pipeline: fetch a small-business websit
 |---|---|---|
 | **Redesign pipeline** | `pipeline.py` | Client already has a website — you're pitching a modernised version |
 | **From-scratch build** | `build.py` | No existing site — you fill a prospect JSON and generate one cold |
+| **Local Connect provider** | `connect_provider.py` | Another local app supplies prospect JSON and receives generated HTML |
 | **Claude skill** | `SKILL.md` + `references/*.md` | Running inside a Claude skill host (no Python at runtime) |
 
 All three share the same prompt files in `references/`. The skill and the scripts are two UIs on top of the same LLM prompts.
@@ -127,6 +128,34 @@ python build.py examples/my-prospect.json --generation-provider openrouter --gen
 
 Output site: `outputs/builds/<slug>/index.html`
 Pitch email draft: `outputs/email_drafts/<slug>.md` (never published to Vercel)
+
+### Expose local generation through Local Connect
+
+Local Connect exposes one capability: `website.generate.single-page` version
+`1.0`. It accepts one bounded `application/json` prospect artifact and returns
+one complete `text/html` artifact. The provider always uses local
+`qwen/qwen3.8-27b`; it does not scrape a URL, generate images or email, deploy,
+or fall back to OpenRouter.
+
+Start LM Studio and load the model yourself, then run:
+
+```bash
+lms load qwen/qwen3.8-27b
+python connect_provider.py
+```
+
+The provider fails before registration if LM Studio or that exact model is not
+available. While running, it publishes an owner-private v2 registration under
+`$XDG_RUNTIME_DIR/local-connect/v2/providers/`. Its durable provider identity,
+accepted inputs, job states, and completed HTML are retained in
+`$XDG_STATE_HOME/website-redesign/` (or
+`~/.local/state/website-redesign/`). The bearer token rotates on each process
+start while the provider instance ID remains stable with that retained state.
+
+Only one process and one active generation job are allowed for that state.
+Identical caller-owned job IDs replay idempotently; conflicting reuse is
+rejected. An accepted job resumes after restart, while a job interrupted after
+generation began becomes an explicit retryable `PROVIDER_INTERRUPTED` failure.
 
 ---
 
