@@ -53,7 +53,7 @@ from lib.generation import (
     GenerationConfigurationError,
     GenerationProviderUnavailable,
     GenerationResponseError,
-    create_generation_client,
+    create_local_generation_client,
     preflight_generation_provider,
 )
 
@@ -522,13 +522,19 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
 
     def test_invalid_input_and_model_unavailability_have_distinct_failures(self):
         failures = (
-            (lambda _input: (_ for _ in ()).throw(ValueError("bad input")), "INPUT_INVALID", False),
+            (
+                lambda _input: (_ for _ in ()).throw(ValueError("bad input")),
+                "INPUT_INVALID",
+                False,
+                None,
+            ),
             (
                 lambda _input: (_ for _ in ()).throw(
                     GenerationProviderUnavailable("offline")
                 ),
                 "MODEL_RUNTIME_UNAVAILABLE",
                 True,
+                "scripts/start_llama_server.sh",
             ),
             (
                 lambda _input: (_ for _ in ()).throw(
@@ -536,9 +542,10 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
                 ),
                 "MODEL_RESPONSE_INVALID",
                 True,
+                None,
             ),
         )
-        for generation, expected_code, retryable in failures:
+        for generation, expected_code, retryable, message_fragment in failures:
             with self.subTest(expected_code=expected_code), tempfile.TemporaryDirectory() as directory:
                 runtime = ProviderRuntime(
                     ConnectStore(Path(directory) / "connect.sqlite3"), generation
@@ -550,6 +557,8 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
                     failed = runtime.wait_for_terminal(document["job_id"])
                     self.assertEqual(failed.error_code, expected_code)
                     self.assertEqual(failed.error_retryable, retryable)
+                    if message_fragment:
+                        self.assertIn(message_fragment, failed.error_message)
                 finally:
                     runtime.close()
 
@@ -747,9 +756,9 @@ class GenerationSeamTests(unittest.TestCase):
 
     def test_connect_generation_accepts_only_literal_loopback_endpoints(self):
         valid_endpoints = (
-            "http://localhost:1234/v1",
+            "http://localhost:8080/v1",
             "https://127.0.0.7:9443/v1",
-            "http://[::1]:1234/v1",
+            "http://[::1]:8080/v1",
         )
         for endpoint in valid_endpoints:
             with self.subTest(valid=endpoint), patch.dict(
@@ -761,7 +770,7 @@ class GenerationSeamTests(unittest.TestCase):
         invalid_endpoints = (
             "https://api.example.com/v1",
             "http://127.0.0.1.example.com/v1",
-            "http://0.0.0.0:1234/v1",
+            "http://0.0.0.0:8080/v1",
             "file:///tmp/model",
         )
         for endpoint in invalid_endpoints:
@@ -778,19 +787,21 @@ class GenerationSeamTests(unittest.TestCase):
     def test_connect_client_bypasses_environment_proxies(self):
         class ModelHandler(BaseHTTPRequestHandler):
             def do_GET(self):
-                payload = json.dumps(
-                    {
+                if self.path == "/health":
+                    document = {"status": "ok"}
+                else:
+                    document = {
                         "object": "list",
                         "data": [
                             {
                                 "id": DEFAULT_LOCAL_MODEL,
                                 "object": "model",
                                 "created": 0,
-                                "owned_by": "local",
+                                "owned_by": "llamacpp",
                             }
                         ],
                     }
-                ).encode("utf-8")
+                payload = json.dumps(document).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
@@ -819,7 +830,7 @@ class GenerationSeamTests(unittest.TestCase):
             with patch.dict(os.environ, proxy_environment):
                 config = resolve_connect_generation_config()
                 self.assertFalse(config.trust_env)
-                client = create_generation_client(config)
+                client = create_local_generation_client(config)
                 try:
                     preflight_generation_provider(config, client=client)
                 finally:

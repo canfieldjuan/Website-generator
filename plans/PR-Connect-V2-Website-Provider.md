@@ -22,6 +22,21 @@ exceed the repository's 400-line soft target because separating persistence or
 authentication from the endpoint would temporarily advertise a capability
 that cannot satisfy the job contract.
 
+### llama.cpp integration contract
+
+The stacked generator now uses standalone `llama.cpp`, but this provider's CLI
+help, retryable runtime error, README instructions, and loopback fixtures still
+name LM Studio or its former port. Those are active operator/contract surfaces,
+not cosmetic wording: they would direct a failed Connect job toward a runtime
+that no longer satisfies the generator transport.
+
+This slice must align those surfaces with `scripts/start_llama_server.sh`, the
+default `127.0.0.1:8080/v1` endpoint, and the exact
+`qwen/qwen3.8-27b` alias. It must continue to fail before registration when
+`llama.cpp` is unhealthy or serves a different alias. It must not change the
+advertised capability, artifact/job schemas, entitlement enforcement, bearer
+authentication, durable job transitions, idempotency, or generated HTML.
+
 ## Scope (this PR)
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
@@ -37,6 +52,8 @@ that cannot satisfy the job contract.
    concurrency, restart, and failure-path tests plus operator documentation.
 6. Re-evaluate the signed local Connect entitlement on every route and deny
    manifest, submission, and status access unless it is active.
+7. Align provider startup, errors, documentation, and loopback tests with the
+   direct standalone `llama.cpp` runtime inherited from the core slice.
 
 ### Files touched
 
@@ -52,7 +69,8 @@ that cannot satisfy the job contract.
 
 `connect_provider.py` validates that the configured model endpoint is a literal
 loopback and disables environment-proxy discovery for that Connect-only model
-client. It then preflights the configured local model, opens a listening socket
+client. It then preflights standalone `llama.cpp` health and the exact served
+model alias, opens a listening socket
 on an ephemeral `127.0.0.1` port, rotates a bearer token, and only then
 atomically writes the v2 registration under the XDG runtime directory. Uvicorn
 consumes that same listening socket. The durable instance UUID and jobs live in
@@ -111,8 +129,8 @@ as any other invalid token.
   absent, background-only, partial, or unrelated photo metadata uses the
   existing photo-free gradient layout because this capability does not produce
   image artifacts.
-- The provider refuses to register when Qwen is unavailable. It never auto-loads
-  a model.
+- The provider refuses to register when standalone `llama.cpp` or the exact
+  Qwen alias is unavailable. It never auto-starts a runtime or model.
 - Accepted jobs survive restart. Jobs interrupted while processing become a
   durable retryable `PROVIDER_INTERRUPTED` failure rather than silently rerun.
 - Completed bytes remain provider-owned SQLite state and cross Connect only in
@@ -135,7 +153,9 @@ as any other invalid token.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 107 tests in 3.184 seconds on the updated combined tree.
+  passed: 118 tests in 3.084 seconds on the updated combined tree, including
+  direct `llama.cpp` preflight, loopback proxy bypass, startup boundaries, and
+  the Connect retryable runtime instruction.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema
@@ -145,17 +165,10 @@ as any other invalid token.
   output, provider failure, and interrupted-job restart reconciliation.
 - `bash scripts/local_pr_review.sh` passed, including `git diff --check` and both
   required plan documents.
-- The required fixture command completed on combined code head `bb12fca` against
-  exact model `qwen/qwen3.8-27b` and wrote a fresh
-  `outputs/builds/drees-plumbing-inc/index.html`; the cold request reported
-  31,031 prompt tokens.
-- Both required searches of that fresh artifact returned `0`: no unresolved
-  trust/template tokens and no unsupported `Upfront Flat-Rate`, `Surprise Fees`,
-  `Free Estimates`, or `Owner Answers` claims were emitted. After merging the
-  stricter prompt-placeholder and caller-marker admission from the core branch,
-  reconstructing that fresh artifact through the updated admission path returned
-  `connect real artifact stricter-admission probe: PASS`. The proof-only commits
-  do not change runtime, prompts, tests, or fixture inputs.
+- The earlier exact-Qwen artifact is historical model/body evidence only; it
+  predates the direct `llama.cpp` transport and cannot verify this head.
+- The required exact-model `llama.cpp` fixture and both artifact searches remain
+  pending while the operator has directed that the GPU stay unloaded.
 
 ## Estimated diff size
 

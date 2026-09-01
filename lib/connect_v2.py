@@ -201,8 +201,9 @@ class ProviderRuntime:
                     job_id,
                     code="MODEL_RUNTIME_UNAVAILABLE",
                     message=(
-                        "Local Qwen generation is unavailable; start LM Studio and "
-                        f"load {DEFAULT_LOCAL_MODEL}."
+                        "Local Qwen generation is unavailable; start standalone "
+                        f"llama.cpp for {DEFAULT_LOCAL_MODEL} with "
+                        "scripts/start_llama_server.sh."
                     ),
                     retryable=True,
                 )

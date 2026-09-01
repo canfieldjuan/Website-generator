@@ -146,15 +146,19 @@ one complete `text/html` artifact. The provider always uses local
 `qwen/qwen3.8-27b`; it does not scrape a URL, generate images or email, deploy,
 or fall back to OpenRouter.
 
-Start LM Studio and load the model yourself, then run:
+Start standalone `llama.cpp`, then run the Connect provider in a second shell:
 
 ```bash
-lms load qwen/qwen3.8-27b
+export LLAMA_CPP_MODEL_PATH=/absolute/path/to/Qwen3.8-27B-Q4_K_M.gguf
+# Set LLAMA_CPP_SERVER_BIN too when llama-server is not on PATH.
+scripts/start_llama_server.sh
+
+# Second shell, after /health reports ready:
 python connect_provider.py
 ```
 
-The provider fails before registration if LM Studio or that exact model is not
-available. While running, it publishes an owner-private v2 registration under
+The provider fails before registration if `llama.cpp` is unhealthy or does not
+serve that exact model alias. While running, it publishes an owner-private v2 registration under
 `$XDG_RUNTIME_DIR/local-connect/v2/providers/`. Its durable provider identity,
 accepted inputs, job states, and completed HTML are retained in
 `$XDG_STATE_HOME/website-redesign/` (or

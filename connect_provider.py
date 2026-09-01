@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Expose local JSON-to-HTML generation through Local Connect v2. "
-            "LM Studio and qwen/qwen3.8-27b must already be running."
+            "Standalone llama.cpp must already serve qwen/qwen3.8-27b."
         )
     )
     parser.add_argument(
