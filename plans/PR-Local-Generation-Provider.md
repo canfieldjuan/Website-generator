@@ -455,6 +455,17 @@ image, email, deployment, and Connect contracts must remain unchanged.
     generated-body admission.
 46. Make every business-phone output instruction conditional and give a
     sanitized no-phone prospect one consistent request-service CTA path.
+47. Bind review cards, aggregate ratings, counts, and review links to the
+    sanitized source data; reject review UI and ambient review claims when no
+    source evidence exists.
+48. Reject testimonial-shaped semantic tags plus quoted or attributed prose
+    outside the canonical source-bound review roots, including ASCII and curly
+    single-quote forms.
+49. Bind every exposed or actionable business email to the sanitized source,
+    including addresses assembled across inline DOM nodes, without joining
+    fragments across semantic block boundaries.
+50. Require exactly one generated contact form, its exact verified action (or
+    the explicit `#` fallback), and no conflicting per-control `formaction`.
 
 ### Files touched
 
@@ -548,6 +559,21 @@ checks browser-visible, element-spanning text so known unsupported claims fail
 before any write. When the JSON explicitly carries the matching promise, the
 claim remains admissible.
 
+Review admission is source-bound: sanitized review entries own review cards,
+the source rating/count/link own aggregate review UI, and a no-review prospect
+must not emit canonical review components, ambient score/count claims,
+testimonial tags, or quoted/attributed testimonial prose elsewhere in the
+document. Business-email admission similarly compares direct text and decoded
+attributes with a block-boundary-aware DOM adjacency stream so split inline
+addresses cannot bypass the source contract. Its synthetic boundary is invalid
+inside both phone and email values. Block elements and actionable contact links
+establish semantic boundaries; otherwise unseparated inline nodes are scanned
+as one rendered candidate, so an adjacent fabricated prefix cannot hide behind
+an expected child-node address. `mailto:` targets must resolve to the same
+sanitized email. The generated body must contain one and only one contact form;
+trusted code verifies its exact action and rejects a conflicting submit-control
+override before assembly.
+
 ## Intentional
 
 - Generation commands do not auto-start or silently fall back from
@@ -575,14 +601,17 @@ claim remains admissible.
 ## Verification
 
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 89 tests passed, including the `llama.cpp` health/model/chat contract,
+  — 118 tests passed in 1.401 seconds, including the `llama.cpp`
+  health/model/chat contract,
   browser- and URL-decoded placeholder admission, startup-script boundaries, and both
   HTML entry points' shared assembly. The suite also proves this slice cannot
   reconfigure the pre-existing extraction or image model roles through new
   environment variables, keeps interior-page components out of homepage
   generation, checks claim-bearing attributes, preserves a deterministic
   document palette for uncatalogued trades, and rejects missing, duplicated, or
-  unresolved mandatory page structure.
+  unresolved mandatory page structure. The final suite also covers source-bound
+  review cards and aggregate claims, testimonial-shaped prose, direct and
+  inline-split business email identity, and single-form action ownership.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest
@@ -606,6 +635,12 @@ claim remains admissible.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.BodyAssemblyTests.test_body_admission_rejects_gated_claim_in_decoded_attributes`
   — passed after the Unicode-whitespace review correction; covers ordinary,
   non-breaking, em-space, percent-encoded, and clean-label paths.
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.AtomicWriteAndCliTests.test_build_generator_rejects_reviews_without_source_evidence tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_every_business_email_to_source tests.test_generation.AtomicWriteAndCliTests.test_build_generator_enforces_identity_and_phone_substitutions -v`
+  — 3 tests passed in 0.420 seconds. The boundary set rejects ASCII/curly
+  single-quoted testimonial prose and wrong or absent-source email addresses,
+  including addresses split across inline nodes; it accepts the verified direct
+  and split-inline addresses plus non-address fragments separated by block
+  boundaries.
 - `bash -n scripts/start_llama_server.sh` — passed.
 - `scripts/start_llama_server.sh --help` — passed without loading a model.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python build.py --help` — passed;
