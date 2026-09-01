@@ -891,11 +891,19 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Unsupported JSON constant: {value}")
 
 
+def _parse_finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"JSON number is outside the finite float range: {value}")
+    return parsed
+
+
 def _decode_strict_json(payload: bytes) -> Any:
     document = json.loads(
         payload.decode("utf-8"),
         object_pairs_hook=_reject_duplicate_json_keys,
         parse_constant=_reject_json_constant,
+        parse_float=_parse_finite_json_float,
     )
     _reject_unicode_surrogates(document)
     return document
@@ -923,9 +931,8 @@ def _new_output_artifact_id(input_artifact_id: str) -> str:
 
 
 def _is_json_integer(value: Any) -> bool:
-    return (
-        not isinstance(value, bool)
-        and isinstance(value, (int, float))
-        and math.isfinite(value)
-        and float(value).is_integer()
-    )
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value) and value.is_integer()

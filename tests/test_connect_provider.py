@@ -30,6 +30,7 @@ from lib.connect_v2 import (
     OUTPUT_MEDIA_TYPE,
     ProviderLock,
     ProviderRuntime,
+    ProtocolError,
     create_app,
     decode_job_request,
     default_runtime_dir,
@@ -142,6 +143,23 @@ class RequestBoundaryTests(unittest.TestCase):
                 document = job_request(b"")
                 document["inputs"][0]["byte_size"] = boundary
                 validate_job_request(document)
+
+    def test_oversized_integer_metadata_is_rejected_without_float_conversion(self):
+        oversized = 10**1000
+        cases = (
+            ("protocol_version", oversized, "JOB_REQUEST_INVALID"),
+            ("byte_size", oversized, "INPUT_SIZE_UNSUPPORTED"),
+        )
+        for field, value, expected_code in cases:
+            with self.subTest(field=field):
+                document = job_request(artifact_bytes())
+                if field == "protocol_version":
+                    document[field] = value
+                else:
+                    document["inputs"][0][field] = value
+                with self.assertRaises(ProtocolError) as raised:
+                    validate_job_request(document)
+                self.assertEqual(raised.exception.code, expected_code)
 
     def test_unsupported_capability_media_and_parameters_fail_closed(self):
         mutations = (
@@ -409,6 +427,16 @@ class ProviderApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "JOB_REQUEST_INVALID")
 
+    def test_oversized_integer_metadata_is_a_shaped_request_error(self):
+        data = artifact_bytes()
+        document = job_request(data)
+        document["protocol_version"] = 10**1000
+
+        response = self.submit(document, data)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "JOB_REQUEST_INVALID")
+
     def test_lone_surrogate_is_a_shaped_request_error(self):
         data = artifact_bytes()
         document = job_request(data)
@@ -629,6 +657,32 @@ class GenerationSeamTests(unittest.TestCase):
                 generated.assert_not_called()
             finally:
                 runtime.close()
+
+    def test_nonfinite_exponent_in_artifact_is_nonretryable_input_failure(self):
+        for numeric_token in (b"1e999", b"-1e999"):
+            with self.subTest(numeric_token=numeric_token):
+                data = (
+                    artifact_bytes()[:-1]
+                    + b',"google_review_score":'
+                    + numeric_token
+                    + b"}"
+                )
+                document = job_request(data)
+                with tempfile.TemporaryDirectory() as directory, patch.object(
+                    build, "generate_build_html"
+                ) as generated:
+                    runtime = ProviderRuntime(
+                        ConnectStore(Path(directory) / "connect.sqlite3"),
+                        generate_website_artifact,
+                    )
+                    try:
+                        runtime.accept(document, data)
+                        failed = runtime.wait_for_terminal(document["job_id"])
+                        self.assertEqual(failed.error_code, "INPUT_INVALID")
+                        self.assertFalse(failed.error_retryable)
+                        generated.assert_not_called()
+                    finally:
+                        runtime.close()
 
     def test_connect_rejects_prompt_block_that_would_be_truncated(self):
         expected = build.prepare_prospect(PROSPECT)
