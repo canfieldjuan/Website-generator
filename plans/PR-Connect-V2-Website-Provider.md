@@ -212,9 +212,9 @@ as any other invalid token.
   The required unresolved-placeholder search returned `0`, and the required
   fabricated-claim search returned `0`.
 
-## Estimated diff size
+## Final diff size
 
-Expected 11 files and approximately 2,400–2,700 added lines, split between the
-durable provider and its contract/concurrency/restart boundary suite. The
-overage is justified above; removing those tests or persistence boundaries
-would make the advertised asynchronous capability unproved or non-durable.
+Measured against the current provider base: 11 files changed, with 3,363
+insertions and 33 deletions across the durable provider and its contract,
+concurrency, and restart boundary suite. Removing those tests or persistence
+boundaries would make the advertised asynchronous capability unproved.
