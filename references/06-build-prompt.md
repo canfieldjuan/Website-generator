@@ -85,7 +85,7 @@ Trade display rule:
 Output rules:
 - Output ONLY raw HTML. No markdown code fences (no ```html, no ```),
   no preamble like "Here is the website", no trailing commentary. The
-  first characters must be `<!DOCTYPE html>` (or a leading HTML comment).
+  first characters must be `<!DOCTYPE html>`.
   The last characters must be `</html>`.
 - Single complete HTML file containing the full `03-base-template.html`
   CSS and the generated HTML body.
@@ -677,7 +677,9 @@ mile count like 20 -- that misrepresents coverage.) Markup:
 
 ## DEPLOYMENT COMMENT BLOCK
 
-Add this comment block at the very top of the output, before DOCTYPE.
+Add this comment block immediately after the opening `<head>` tag. Do not put
+the comment or any other content before the DOCTYPE or between the DOCTYPE and
+the opening `<html>` tag.
 Use `prospect.build_date` verbatim for the Generated line -- do NOT
 guess or fabricate a date. If `prospect.build_date` is absent, omit the
 Generated line entirely rather than inventing a value.
@@ -765,7 +767,8 @@ NEVER invent dates, years, or "since" claims. Specifically:
 ## QUALITY CHECKLIST
 
 Before outputting, verify:
-- [ ] `<!DOCTYPE html>` at top (after the comment block), `</html>` at bottom
+- [ ] `<!DOCTYPE html>` is first, the deployment comment is inside `<head>`,
+      and `</html>` is last
 - [ ] No markdown fences, no preamble text
 - [ ] :root block populated with theme + brand colors
 - [ ] Google Fonts import matches the trade's theme

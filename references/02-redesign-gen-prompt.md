@@ -120,9 +120,8 @@ CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the provided `03-b
 Output rules:
 - Output ONLY raw HTML. No markdown code fences (no ```html, no ```), no
   preamble like "Here is the redesigned HTML", no trailing commentary. The
-  first characters of your response must be the `<!--` deployment comment or
-  `<!DOCTYPE html>`. The last characters must be `</html>`. Anything else
-  causes a parse failure downstream.
+  first characters must be `<!DOCTYPE html>`. The last characters must be
+  `</html>`. Anything else causes a parse failure downstream.
 - Single complete HTML file containing the full `03-base-template.html` CSS and your generated HTML body.
 - Populate the `:root` block with the derived brand colors.
 - Update the Google Fonts import to match the chosen theme typography.
@@ -573,7 +572,9 @@ Before outputting, verify:
 
 ## DEPLOYMENT BLOCK
 
-Add this comment block at the very top of every HTML file output, before the DOCTYPE.
+Add this comment block immediately after the opening `<head>` tag. Do not put
+the comment or any other content before the DOCTYPE or between the DOCTYPE and
+the opening `<html>` tag.
 Populate CURRENT_ANNUAL_COST using this lookup (all figures are typical annual totals
 including platform fee + domain + common add-ons):
 
