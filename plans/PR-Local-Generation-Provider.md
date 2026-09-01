@@ -74,7 +74,7 @@ same-directory temporary file plus `os.replace`.
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 31 tests passed.
+  — 33 tests passed.
 - `python3 -m compileall -q build.py pipeline.py lib tests` — passed.
 - `python3 build.py --help` — passed; provider/model and existing skip flags shown.
 - `python3 pipeline.py --help` — passed; provider/model and existing skip flags shown.

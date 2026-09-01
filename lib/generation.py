@@ -69,6 +69,8 @@ class _DocumentStructureParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.events: list[tuple[str, str]] = []
+        self.content_container_depth = 0
+        self.has_text_outside_content = False
 
     def handle_decl(self, decl: str) -> None:
         if decl.strip().lower() == "doctype html":
@@ -77,10 +79,18 @@ class _DocumentStructureParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in {"html", "head", "body"}:
             self.events.append(("start", tag))
+        if tag in {"head", "body"}:
+            self.content_container_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
         if tag in {"html", "head", "body"}:
             self.events.append(("end", tag))
+        if tag in {"head", "body"} and self.content_container_depth:
+            self.content_container_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if data.strip() and self.content_container_depth == 0:
+            self.has_text_outside_content = True
 
 
 def resolve_generation_config(
@@ -279,7 +289,6 @@ def validate_generated_html(
         raise GeneratedHtmlError(
             f"Generated HTML is {len(encoded)} bytes; limit is {max_bytes}."
         )
-
     parser = _DocumentStructureParser()
     parser.feed(html)
     parser.close()
@@ -299,6 +308,10 @@ def validate_generated_html(
         )
     if not re.search(r"</html>\s*$", html, re.IGNORECASE):
         raise GeneratedHtmlError("Generated HTML contains content after </html>.")
+    if parser.has_text_outside_content:
+        raise GeneratedHtmlError(
+            "Generated HTML contains provider chatter outside head or body."
+        )
     return html
 
 

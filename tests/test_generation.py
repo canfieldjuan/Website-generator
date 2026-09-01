@@ -297,6 +297,45 @@ class HtmlAdmissionTests(unittest.TestCase):
         )
         self.assertEqual(validate_generated_html(result(separated)), separated)
 
+    def test_provider_chatter_outside_head_or_body_is_rejected(self):
+        invalid_documents = {
+            "before head": COMPLETE_HTML.replace(
+                '<html lang="en">',
+                '<html lang="en">Finished.',
+                1,
+            ),
+            "between head and body": COMPLETE_HTML.replace(
+                "</head>",
+                "</head>Finished.",
+                1,
+            ),
+            "after body": COMPLETE_HTML.replace(
+                "</body>",
+                "</body>Finished.",
+                1,
+            ),
+        }
+        for position, document in invalid_documents.items():
+            with self.subTest(position=position):
+                with self.assertRaisesRegex(GeneratedHtmlError, "outside head or body"):
+                    validate_generated_html(result(document))
+
+    def test_whitespace_outside_head_and_body_is_accepted(self):
+        separated = COMPLETE_HTML.replace(
+            '<html lang="en">',
+            '<html lang="en">\n  ',
+            1,
+        ).replace(
+            "</head>",
+            "</head>\n  ",
+            1,
+        ).replace(
+            "</body>",
+            "</body>\n  ",
+            1,
+        )
+        self.assertEqual(validate_generated_html(result(separated)), separated)
+
     def test_utf8_bom_before_doctype_is_accepted(self):
         self.assertEqual(validate_generated_html(result("\ufeff" + COMPLETE_HTML)), COMPLETE_HTML)
 
