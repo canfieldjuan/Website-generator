@@ -73,13 +73,18 @@ same-directory temporary file plus `os.replace`.
 
 ## Verification
 
-- `python3 -m unittest discover -s tests -v` — 27 tests passed.
+- `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
+  — 31 tests passed.
 - `python3 -m compileall -q build.py pipeline.py lib tests` — passed.
 - `python3 build.py --help` — passed; provider/model and existing skip flags shown.
 - `python3 pipeline.py --help` — passed; provider/model and existing skip flags shown.
 - `git diff --check` — passed.
-- The required real fixture build is deferred to the accepted final proof because
-  Qwen was intentionally not loaded automatically during this slice.
+- The required real fixture build is not complete. The selected NVIDIA runtime
+  aborted on a CUDA out-of-memory allocation; the isolated CPU runtime then
+  refused the saved value-cache/flash-attention combination before loading; and
+  the existing authenticated local API did not answer the credentialed probe.
+  The original runtime selection was restored and `lms ps` confirmed that no
+  model remained loaded. This remains an acceptance blocker, not passing proof.
 
 ## Estimated diff size
 
