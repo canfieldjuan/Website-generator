@@ -56,6 +56,8 @@ def main() -> int:
     try:
         runtime_dir = args.runtime_dir or default_runtime_dir()
         state_dir = args.state_dir or default_state_dir()
+        if not runtime_dir.is_absolute() or not state_dir.is_absolute():
+            raise RuntimeError("Connect runtime and state directories must be absolute.")
     except RuntimeError as exc:
         print(f"Connect provider configuration failed: {exc}", file=sys.stderr)
         return 2

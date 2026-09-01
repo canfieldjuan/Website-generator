@@ -29,6 +29,8 @@ from lib.connect_v2 import (
     ProviderRuntime,
     create_app,
     decode_job_request,
+    default_runtime_dir,
+    default_state_dir,
     error_response,
     generate_website_artifact,
     job_status_document,
@@ -316,6 +318,19 @@ class ProviderApiTests(unittest.TestCase):
         conflict = self.submit(conflicting, data)
         self.assertEqual(conflict.status_code, 409)
         self.assertEqual(conflict.json()["error"]["code"], "JOB_ID_CONFLICT")
+
+    def test_integral_numeric_forms_replay_as_the_same_request(self):
+        data = artifact_bytes()
+        document = job_request(data)
+        document["protocol_version"] = 2.0
+        document["inputs"][0]["byte_size"] = float(len(data))
+        self.assertEqual(self.submit(document, data).status_code, 202)
+        self.runtime.wait_for_terminal(document["job_id"])
+
+        replay = json.loads(json.dumps(document))
+        replay["protocol_version"] = 2
+        replay["inputs"][0]["byte_size"] = len(data)
+        self.assertEqual(self.submit(replay, data).status_code, 200)
 
     def test_artifact_size_digest_and_part_media_must_match(self):
         data = artifact_bytes()
@@ -646,6 +661,14 @@ class RegistrationTests(unittest.TestCase):
                     ProviderLock(lock_path)
             finally:
                 first.close()
+
+    def test_relative_xdg_directories_are_rejected(self):
+        with patch.dict(os.environ, {"XDG_RUNTIME_DIR": "relative"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "absolute"):
+                default_runtime_dir()
+        with patch.dict(os.environ, {"XDG_STATE_HOME": "relative"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "absolute"):
+                default_state_dir()
 
     def test_constructed_output_name_cannot_escape_or_lose_html_extension(self):
         self.assertEqual(sanitize_display_name("../../outside"), "outside.html")

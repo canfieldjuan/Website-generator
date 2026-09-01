@@ -322,6 +322,7 @@ def validate_job_request(document: Any) -> None:
     )
     if not _is_json_integer(document["protocol_version"]) or document["protocol_version"] != 2:
         raise _invalid_request("protocol_version must be 2.")
+    document["protocol_version"] = int(document["protocol_version"])
     if not is_uuid4(document["job_id"]):
         raise _invalid_request("job_id must be a lowercase UUIDv4.")
 
@@ -369,6 +370,7 @@ def validate_job_request(document: Any) -> None:
             "INPUT_SIZE_UNSUPPORTED",
             f"The declared input size must be between 0 and {MAX_INPUT_BYTES} bytes.",
         )
+    artifact["byte_size"] = int(byte_size)
     if not isinstance(artifact["sha256"], str) or not SHA256_PATTERN.fullmatch(
         artifact["sha256"]
     ):
@@ -618,13 +620,19 @@ def default_runtime_dir() -> Path:
         raise RuntimeError(
             "XDG_RUNTIME_DIR is required for owner-private Local Connect discovery."
         )
-    return Path(configured) / "local-connect" / "v2" / "providers"
+    root = Path(configured)
+    if not root.is_absolute():
+        raise RuntimeError("XDG_RUNTIME_DIR must be an absolute path.")
+    return root / "local-connect" / "v2" / "providers"
 
 
 def default_state_dir() -> Path:
     root = os.environ.get("XDG_STATE_HOME")
     if root:
-        return Path(root) / APP_ID
+        state_root = Path(root)
+        if not state_root.is_absolute():
+            raise RuntimeError("XDG_STATE_HOME must be an absolute path.")
+        return state_root / APP_ID
     return Path.home() / ".local" / "state" / APP_ID
 
 
