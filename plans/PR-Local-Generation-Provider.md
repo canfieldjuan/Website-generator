@@ -190,8 +190,8 @@ three boundary-model errors: browser-rendered denied claims can disappear from
 the comparison string, one DOM element can impersonate several required
 components, and correct no-phone output can be rejected.
 
-The correct fix must preserve a text-node boundary when comparing rendered
-claims while retaining the compact surface used to catch split placeholders;
+The correct fix must compare both boundary-separated and compact text-node
+surfaces for rendered claims while retaining compact split-placeholder checks;
 count each required class no more than once per element, including case-folded
 duplicates; and require the coverage band only when the sanitized prospect has
 a phone number. Tests must prove each adverse case and its positive opposite.

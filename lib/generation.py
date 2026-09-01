@@ -683,6 +683,7 @@ def validate_generated_body(
         )
 
     claim_surfaces = (
+        "".join(parser.visible_text_parts),
         " ".join(parser.visible_text_parts),
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),

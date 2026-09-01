@@ -1117,14 +1117,17 @@ class BodyAssemblyTests(unittest.TestCase):
         self.assertEqual(validate_generated_body(body_result(body)), body)
 
     def test_body_admission_preserves_rendered_text_boundaries_for_claims(self):
-        denied_body = (
-            "<body><p><span>Free</span><br><span>Estimates</span></p></body>"
+        denied_bodies = (
+            "<body><p><span>Free</span><br><span>Estimates</span></p></body>",
+            "<body><p>Free Esti<span>mates</span></p></body>",
         )
-        with self.assertRaisesRegex(GeneratedBodyError, "Free Estimates"):
-            validate_generated_body(
-                body_result(denied_body),
-                forbidden_visible_phrases=("Free Estimates",),
-            )
+        for denied_body in denied_bodies:
+            with self.subTest(body=denied_body):
+                with self.assertRaisesRegex(GeneratedBodyError, "Free Estimates"):
+                    validate_generated_body(
+                        body_result(denied_body),
+                        forbidden_visible_phrases=("Free Estimates",),
+                    )
 
         clean_body = (
             "<body><p><span>Free</span><br><span>consultation</span></p></body>"
