@@ -186,10 +186,21 @@ as any other invalid token.
   output, provider failure, and interrupted-job restart reconciliation.
 - `bash scripts/local_pr_review.sh` passed, including `git diff --check` and both
   required plan documents.
-- The earlier exact-Qwen artifact is historical model/body evidence only; it
-  predates the direct `llama.cpp` transport and cannot verify this head.
-- The required exact-model `llama.cpp` fixture and both artifact searches remain
-  pending while the operator has directed that the GPU stay unloaded.
+- Exact-head standalone-runtime fixture:
+  `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:18080/v1
+  GENERATION_TIMEOUT_SECONDS=14400 /tmp/website-redesign-connect-venv/bin/python
+  build.py examples/prospect-plumber-template.json --skip-image-gen
+  --skip-email-draft --skip-deploy` completed successfully against the CPU-only
+  `llama.cpp` v0.3.0 build at commit
+  `c1d0e7a004015f23bc0233470b747b596f29b264`, serving the exact
+  `qwen/qwen3.8-27b` alias. The runtime was bound to loopback, performed no
+  deployment or email/image side effect, and was stopped after the fixture;
+  the post-run GPU-process query was empty.
+- The admitted artifact was
+  `outputs/builds/drees-plumbing-inc/index.html` (74,579 bytes, SHA-256
+  `c6ac30df35b5e331c2cedbd84127bc5de5324868454858d45799ed0f57f6e0f9`).
+  The required unresolved-placeholder search returned `0`, and the required
+  fabricated-claim search returned `0`.
 
 ## Estimated diff size
 
