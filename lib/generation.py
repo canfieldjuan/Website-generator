@@ -279,6 +279,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.body_events: list[str] = []
         self.forbidden_tags: list[str] = []
         self.nondeterministic_rendering_tags: list[str] = []
+        self.tag_names: set[str] = set()
         self.has_content_outside_body = False
         self.visible_text_parts: list[str] = []
         self.decoded_attribute_values: list[str] = []
@@ -328,6 +329,7 @@ class _GeneratedBodyParser(HTMLParser):
                 self.class_name_counts.get(class_name, 0) + 1
             )
         tag_name = tag.lower()
+        self.tag_names.add(tag_name)
         if tag_name == "body":
             self.body_events.append("start")
             self.body_depth += 1
@@ -880,11 +882,26 @@ def _phone_like_digit_values(value: str) -> set[str]:
     return digits
 
 
-def _claim_exposure_texts(body_root: Tag) -> tuple[tuple[str, str], str]:
+def _claim_exposure_texts(
+    body_root: Tag,
+    *,
+    excluded_root_classes: Iterable[str] = (),
+) -> tuple[tuple[str, str], str]:
     visual_parts: list[str] = []
     phone_visual_parts: list[str] = []
     id_targets: dict[str, list[Tag]] = {}
+    excluded_classes = frozenset(excluded_root_classes)
+
+    def is_excluded(node: Tag) -> bool:
+        return bool(_exact_class_names(node) & excluded_classes) or any(
+            _exact_class_names(parent) & excluded_classes
+            for parent in node.parents
+            if isinstance(parent, Tag)
+        )
+
     for element in (body_root, *body_root.find_all(True)):
+        if is_excluded(element):
+            continue
         identifier = element.get("id")
         if isinstance(identifier, str) and identifier:
             id_targets.setdefault(identifier, []).append(element)
@@ -934,6 +951,8 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[tuple[str, str], str]:
             return
         if not isinstance(node, Tag):
             return
+        if is_excluded(node):
+            return
         if is_render_suppressed(node):
             return
         has_phone_boundary = node.name.casefold() in PHONE_TEXT_BOUNDARY_TAGS
@@ -978,6 +997,8 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[tuple[str, str], str]:
         if isinstance(node, NavigableString):
             return str(node)
         if not isinstance(node, Tag):
+            return ""
+        if is_excluded(node):
             return ""
         if is_hidden_input(node):
             return ""
@@ -1027,7 +1048,11 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[tuple[str, str], str]:
         if isinstance(node, NavigableString):
             accessible_parts.append(str(node))
             return
-        if not isinstance(node, Tag) or is_hidden_input(node):
+        if (
+            not isinstance(node, Tag)
+            or is_excluded(node)
+            or is_hidden_input(node)
+        ):
             return
         aria_hidden = node.get("aria-hidden")
         if is_render_suppressed(node) or (
@@ -1071,6 +1096,71 @@ def _single_component(root: Tag, class_name: str, owner: str) -> Tag:
     return matches[0]
 
 
+def _canonical_component(
+    root: Tag,
+    class_name: str,
+    tag_name: str,
+    owner: str,
+    *,
+    allowed_attributes: Iterable[str] = (),
+) -> Tag:
+    element = _single_component(root, class_name, owner)
+    if element.name.casefold() != tag_name:
+        if tag_name == "a":
+            raise GeneratedBodyError(
+                f"Generated body {owner} CTA must be an anchor."
+            )
+        raise GeneratedBodyError(
+            f"Generated body {owner} {class_name} must be a {tag_name} element."
+        )
+    if _exact_class_names(element) != {class_name}:
+        raise GeneratedBodyError(
+            f"Generated body {owner} {class_name} has an invalid class shape."
+        )
+    allowed = {"class", *allowed_attributes}
+    unexpected = sorted(set(element.attrs) - allowed)
+    if unexpected:
+        raise GeneratedBodyError(
+            "Generated body review component attribute is unsupported: "
+            + ", ".join(unexpected[:3])
+            + "."
+        )
+    return element
+
+
+def _require_direct_components(
+    parent: Tag,
+    expected: tuple[Tag, ...],
+    owner: str,
+) -> None:
+    actual = tuple(
+        child for child in parent.children if isinstance(child, Tag)
+    )
+    if actual != expected:
+        raise GeneratedBodyError(
+            f"Generated body {owner} has an invalid component hierarchy."
+        )
+
+
+def _canonical_star_component(
+    root: Tag,
+    class_name: str,
+    owner: str,
+) -> Tag:
+    stars = _canonical_component(
+        root,
+        class_name,
+        "span",
+        owner,
+        allowed_attributes=("style",),
+    )
+    if stars.get_text("", strip=True) != "★★★★★":
+        raise GeneratedBodyError(
+            f"Generated body {owner} has invalid review star content."
+        )
+    return stars
+
+
 def _score_style_value(element: Tag, owner: str) -> float:
     style = element.get("style")
     if not isinstance(style, str):
@@ -1099,11 +1189,51 @@ def _direct_text(element: Tag) -> str:
 
 
 def _normalized_review_evidence(card: Tag) -> ReviewEvidence:
-    stars = _single_component(card, "review-stars-sm", "review card")
-    text = _single_component(card, "review-text", "review card")
-    author = _single_component(card, "review-author", "review card")
-    date = _single_component(card, "review-date", "review card")
-    platform = _single_component(card, "review-platform", "review card")
+    canonical_card = _canonical_component(card, "review-card", "div", "review card")
+    stars = _canonical_star_component(
+        canonical_card,
+        "review-stars-sm",
+        "review card",
+    )
+    text = _canonical_component(
+        canonical_card,
+        "review-text",
+        "p",
+        "review card",
+    )
+    meta = _canonical_component(
+        canonical_card,
+        "review-meta",
+        "div",
+        "review card",
+    )
+    author = _canonical_component(
+        canonical_card,
+        "review-author",
+        "span",
+        "review card",
+    )
+    date = _canonical_component(
+        canonical_card,
+        "review-date",
+        "span",
+        "review card",
+    )
+    platform = _canonical_component(
+        canonical_card,
+        "review-platform",
+        "span",
+        "review card",
+    )
+    _require_direct_components(canonical_card, (stars, text, meta), "review card")
+    _require_direct_components(meta, (author, platform), "review card")
+    _require_direct_components(author, (date,), "review card author")
+    if tuple(text.find_all(True)) or tuple(date.find_all(True)) or tuple(
+        platform.find_all(True)
+    ):
+        raise GeneratedBodyError(
+            "Generated body review card fields must contain plain source text."
+        )
     return ReviewEvidence(
         author=_normalize_claim_match_text(_direct_text(author)),
         rating=_score_style_value(stars, "review card"),
@@ -1124,29 +1254,17 @@ def _normalized_source_review(review: ReviewEvidence) -> ReviewEvidence:
 
 
 def _ambient_review_claim_values(body_root: Tag) -> tuple[list[float], list[int]]:
-    review_roots = {"review-card", "reviews-aggregate", "reviews-summary-row"}
-    surfaces: list[str] = []
-    for element in (body_root, *body_root.find_all(True)):
-        if _exact_class_names(element) & review_roots:
-            continue
-        if any(
-            _exact_class_names(parent) & review_roots
-            for parent in element.parents
-            if isinstance(parent, Tag)
-        ):
-            continue
-        surfaces.extend(
-            str(child)
-            for child in element.children
-            if isinstance(child, NavigableString)
-        )
-        surfaces.extend(
-            value
-            for attribute in ("aria-label", "aria-description", "title")
-            for value in (element.get(attribute),)
-            if isinstance(value, str)
-        )
-    text = _normalize_claim_match_text(" ".join(surfaces))
+    exposure_surfaces, inline_surface = _claim_exposure_texts(
+        body_root,
+        excluded_root_classes={
+            "review-card",
+            "reviews-aggregate",
+            "reviews-summary-row",
+        },
+    )
+    text = _normalize_claim_match_text(
+        " ".join((*exposure_surfaces, inline_surface))
+    )
     score_patterns = (
         r"\b(?:rated|rating)\s*(?:at\s*)?([0-5](?:\.\d+)?)\b",
         r"\b([0-5](?:\.\d+)?)\s*(?:/|out\s+of)\s*5\b",
@@ -1205,7 +1323,12 @@ def _validate_ambient_review_claims(
                 raise GeneratedBodyError(
                     "Generated body contains an unsourced ambient review star widget."
                 )
-            if _score_style_value(stars, "ambient review widget") != float(score):
+            canonical_stars = _canonical_star_component(
+                stars,
+                class_name,
+                "ambient review widget",
+            )
+            if _score_style_value(canonical_stars, "ambient review widget") != float(score):
                 raise GeneratedBodyError(
                     "Generated body contains an unexpected ambient review score."
                 )
@@ -1229,16 +1352,60 @@ def _validate_review_summary(
             f"Generated body {owner} has no complete source review evidence."
         )
 
-    stars = _single_component(root, stars_class, owner)
+    root_class = "reviews-aggregate" if aggregate else "reviews-summary-row"
+    canonical_root = _canonical_component(root, root_class, "div", owner)
+    stars = _canonical_star_component(canonical_root, stars_class, owner)
     if _score_style_value(stars, owner) != float(score):
         raise GeneratedBodyError(f"Generated body {owner} has the wrong review score.")
-    score_text = _single_component(root, score_class, owner).get_text(" ", strip=True)
+    score_element = _canonical_component(
+        canonical_root,
+        score_class,
+        "div" if aggregate else "span",
+        owner,
+    )
+    count_element = (
+        _canonical_component(canonical_root, count_class, "div", owner)
+        if aggregate
+        else score_element
+    )
+    link = _canonical_component(
+        canonical_root,
+        link_class,
+        "a",
+        owner,
+        allowed_attributes=("href", "target", "rel"),
+    )
+    if aggregate:
+        of_five = _canonical_component(
+            score_element,
+            "of-five",
+            "span",
+            owner,
+        )
+        _require_direct_components(score_element, (of_five,), owner)
+        _require_direct_components(
+            canonical_root,
+            (stars, score_element, count_element, link),
+            owner,
+        )
+    else:
+        strong_elements = tuple(score_element.find_all("strong", recursive=False))
+        if len(strong_elements) != 1 or strong_elements[0].attrs:
+            raise GeneratedBodyError(
+                "Generated body review summary has an invalid score element."
+            )
+        _require_direct_components(score_element, strong_elements, owner)
+        _require_direct_components(
+            canonical_root,
+            (stars, score_element, link),
+            owner,
+        )
+    score_text = score_element.get_text(" ", strip=True)
     if not _contains_complete_token_sequence(score_text, str(score)):
         raise GeneratedBodyError(f"Generated body {owner} has the wrong review score.")
-    count_text = _single_component(root, count_class, owner).get_text(" ", strip=True)
+    count_text = count_element.get_text(" ", strip=True)
     if not _contains_complete_token_sequence(count_text, str(count)):
         raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
-    link = _single_component(root, link_class, owner)
     if link.get("href") != contract.reviews_url:
         raise GeneratedBodyError(f"Generated body {owner} has the wrong reviews URL.")
 
@@ -1348,6 +1515,7 @@ def validate_generated_body(
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_comment_markers: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
+    forbidden_testimonial_tags: Iterable[str] = (),
     allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
@@ -1411,6 +1579,19 @@ def validate_generated_body(
         names = ", ".join(sorted(set(parser.nondeterministic_rendering_tags)))
         raise GeneratedBodyError(
             f"Generated body contains a browser-inert tag: {names}."
+        )
+    forbidden_testimonial_tag_names = {
+        tag.casefold()
+        for tag in forbidden_testimonial_tags
+        if isinstance(tag, str) and tag
+    }
+    leaked_testimonial_tags = sorted(
+        parser.tag_names & forbidden_testimonial_tag_names
+    )
+    if leaked_testimonial_tags:
+        names = ", ".join(leaked_testimonial_tags)
+        raise GeneratedBodyError(
+            f"Generated body contains an unstructured testimonial tag: {names}."
         )
     normalized_comments = tuple(
         _normalize_claim_match_text(comment) for comment in parser.comment_values
@@ -1833,6 +2014,7 @@ def assemble_generated_html(
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_comment_markers: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
+    forbidden_testimonial_tags: Iterable[str] = (),
     allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
@@ -1859,6 +2041,7 @@ def assemble_generated_html(
         forbidden_visible_phrases=forbidden_visible_phrases,
         forbidden_comment_markers=forbidden_comment_markers,
         forbidden_class_names=forbidden_class_names,
+        forbidden_testimonial_tags=forbidden_testimonial_tags,
         allowed_class_names=allowed_class_names,
         required_exposed_values=required_exposed_values,
         expected_phone=expected_phone,

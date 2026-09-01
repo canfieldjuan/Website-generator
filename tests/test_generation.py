@@ -97,7 +97,7 @@ def build_body_with_review_section(section):
 def aggregate_review_section(score, count, url="https://example.com/reviews"):
     return (
         '<section><div class="reviews-aggregate">'
-        f'<span class="reviews-stars-lg" style="--score: {score}">Stars</span>'
+        f'<span class="reviews-stars-lg" style="--score: {score}">★★★★★</span>'
         f'<div class="reviews-score">{score}'
         '<span class="of-five">out of 5</span></div>'
         f'<div class="reviews-count">Based on {count} reviews on Google</div>'
@@ -109,7 +109,7 @@ def aggregate_review_section(score, count, url="https://example.com/reviews"):
 def review_card_section(reviews, score, count, url="https://example.com/reviews"):
     cards = "".join(
         '<div class="review-card">'
-        f'<span class="review-stars-sm" style="--score: {review["rating"]}">Stars</span>'
+        f'<span class="review-stars-sm" style="--score: {review["rating"]}">★★★★★</span>'
         f'<p class="review-text">{review["text"]}</p>'
         '<div class="review-meta">'
         f'<span class="review-author">{review["author"]}'
@@ -121,7 +121,7 @@ def review_card_section(reviews, score, count, url="https://example.com/reviews"
     return (
         '<section><div class="reviews-card-grid">'
         f'{cards}</div><div class="reviews-summary-row">'
-        f'<span class="reviews-summary-stars" style="--score: {score}">Stars</span>'
+        f'<span class="reviews-summary-stars" style="--score: {score}">★★★★★</span>'
         f'<span class="reviews-summary-text"><strong>{score} out of 5</strong> '
         f'Based on {count} Google Reviews</span>'
         f'<a class="reviews-summary-cta" href="{url}">Read All on Google</a>'
@@ -2439,6 +2439,29 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(ambient_claim)),
             )
 
+        split_inline_claim = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            "<span>Rated 4.</span><span>9 by 127 customers</span></nav>",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unsourced ambient review"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(split_inline_claim)),
+            )
+
+        testimonial = COMPLETE_BUILD_BODY.replace(
+            '<form class="contact-form-wrap"',
+            "<blockquote>They were fantastic.</blockquote><cite>Jane D.</cite>"
+            '<form class="contact-form-wrap"',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "testimonial tag"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(testimonial)),
+            )
+
         unscored_widget = COMPLETE_BUILD_BODY.replace(
             "</nav>",
             '<span class="form-trust-stars">Stars</span></nav>',
@@ -2474,7 +2497,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
         exact_ambient = admitted_body.replace(
             "</nav>",
-            '<span class="trust-stars" style="--score: 4.4">Stars</span>'
+            '<span class="trust-stars" style="--score: 4.4">★★★★★</span>'
             "<span>Rated 4.4 by 12 customers</span></nav>",
         )
         html = build.generate_build_html(
@@ -2512,6 +2535,18 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 prospect,
                 config(),
                 FakeLocalClient(local_chat_payload(wrong_url)),
+            )
+
+        non_anchor = build_body_with_review_section(
+            aggregate_review_section("4.4", "12")
+            .replace('<a class="reviews-cta"', '<span class="reviews-cta"')
+            .replace("</a>", "</span>")
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "CTA must be an anchor"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(non_anchor)),
             )
 
         wrong_ambient = admitted_body.replace(
@@ -2583,6 +2618,18 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 prospect,
                 config(),
                 FakeLocalClient(local_chat_payload(fabricated_body)),
+            )
+
+        accessible_override = admitted_body.replace(
+            '<p class="review-text">Prompt and careful work.</p>',
+            '<p class="review-text" role="img" '
+            'aria-label="Best plumber in town">Prompt and careful work.</p>',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "review component attribute"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(accessible_override)),
             )
 
         wrong_rating = [dict(review) for review in reviews]

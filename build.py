@@ -1098,6 +1098,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
         forbidden_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
         forbidden_class_names=interior_only_classes,
+        forbidden_testimonial_tags=("blockquote", "cite"),
         allowed_class_names=homepage_classes,
         required_exposed_values=tuple(
             (name, value)
