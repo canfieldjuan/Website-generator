@@ -2064,6 +2064,28 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     ),
                 )
 
+        unverified_action_urls = (
+            "sms:2175550199",
+            "https://wa.me/%2B12175550199",
+        )
+        for action_url in unverified_action_urls:
+            with self.subTest(action_url=action_url), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "phone-like value with no verified phone",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(
+                        local_chat_payload(
+                            body_without_coverage.replace(
+                                "</nav>",
+                                f'<a href="{action_url}">Contact us</a></nav>',
+                            )
+                        )
+                    ),
+                )
+
         non_exposed_attribute_phones = body_without_coverage.replace(
             "</nav>",
             '<span data-tracking-id="217-555-0199"></span>'
@@ -2194,6 +2216,28 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 ),
                 "unexpected exposed phone",
             ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    "</nav>",
+                    '<a href="sms:2175550199">Text us</a></nav>',
+                ),
+                "unexpected actionable phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    "</nav>",
+                    '<form action="https://wa.me/12175550199">'
+                    "<button>Message us</button></form></nav>",
+                ),
+                "unexpected actionable phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    ">217-555-0100</a>",
+                    ">217-555-\u202e0100\u202c</a>",
+                ),
+                "directional controls",
+            ),
         )
         for adverse_body, message in adverse_bodies:
             with self.subTest(message=message), self.assertRaisesRegex(
@@ -2216,6 +2260,17 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(unicode_formatted_verified_phone)),
         )
         self.assertIn("217\u2011555\u20110100", html)
+
+        matching_optional_action = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            '<a href="sms:2175550100">Text us</a></nav>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(matching_optional_action)),
+        )
+        self.assertIn("sms:2175550100", html)
 
     def test_generators_reject_classes_outside_provided_catalog(self):
         prospect = {

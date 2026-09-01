@@ -265,7 +265,12 @@ to its descendants just as suppression on any nested element does. Each
 unsuppressed accessibility node must be evaluated independently even when an
 ancestor supplies its own ARIA name. Phone-shape matching must canonicalize
 Unicode decimal digits, dash punctuation, and invisible format separators that
-do not change what the user perceives as the number.
+do not change what the user perceives as the number. Directional formatting or
+isolation controls within phone-shaped data must fail closed because removing
+them can change the digits the browser presents. Every phone-shaped value in a
+decoded actionable URL attribute must follow the same verified-phone contract,
+independent of URI scheme or host; the existing required exact `tel:` action
+remains the primary contact-path requirement.
 The shared parser must also reject unclosed, unexpectedly closed, or misnested
 non-void descendants before BeautifulSoup repair, while accepting standard void
 elements and valid self-closing SVG content. Finally, each generator must pass
@@ -354,6 +359,10 @@ behavior, or any image, email, deployment, and Connect job contract.
     own accessible name while preserving hidden ID-reference resolution.
 33. Canonicalize Unicode digit, dash, and invisible-format variants before
     applying phone-shape admission.
+34. Reject bidirectional controls in phone-shaped exposure or action data while
+    retaining harmless invisible-separator normalization.
+35. Enforce the verified-phone contract on decoded `href`, `action`,
+    `formaction`, and SVG `xlink:href` phone-shaped destinations.
 
 ### Files touched
 

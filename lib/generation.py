@@ -57,6 +57,23 @@ PHONE_LIKE_PATTERN = re.compile(
     r"(?<!\d)(?:\+?1[\s()./-]*)?\(?[2-9]\d{2}\)?[\s./-]*"
     r"[2-9]\d{2}[\s./-]*\d{4}(?!\d)"
 )
+BIDI_PHONE_CONTROLS = frozenset(
+    {
+        "\u061c",
+        "\u200e",
+        "\u200f",
+        "\u202a",
+        "\u202b",
+        "\u202c",
+        "\u202d",
+        "\u202e",
+        "\u2066",
+        "\u2067",
+        "\u2068",
+        "\u2069",
+    }
+)
+ACTIONABLE_URL_ATTRIBUTES = ("href", "action", "formaction", "xlink:href")
 _EXPECTED_PHONE_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
@@ -672,16 +689,23 @@ def _compact_claim_match_text(value: str) -> str:
     return "".join(character for character in normalized if character.isalnum())
 
 
-def _normalize_phone_scan_text(value: str) -> str:
+def _phone_scan_components(value: str) -> tuple[str, frozenset[int]]:
     characters: list[str] = []
+    bidi_boundaries: set[int] = set()
     for character in unicodedata.normalize("NFKC", value):
         if character.isdecimal():
             characters.append(str(unicodedata.decimal(character)))
         elif unicodedata.category(character) == "Pd":
             characters.append("-")
+        elif character in BIDI_PHONE_CONTROLS:
+            bidi_boundaries.add(len(characters))
         elif unicodedata.category(character) != "Cf":
             characters.append(character)
-    return "".join(characters)
+    return "".join(characters), frozenset(bidi_boundaries)
+
+
+def _normalize_phone_scan_text(value: str) -> str:
+    return _phone_scan_components(value)[0]
 
 
 def _canonical_phone_digits(value: str) -> str:
@@ -692,6 +716,21 @@ def _canonical_phone_digits(value: str) -> str:
     )
     if len(digits) == 11 and digits.startswith("1"):
         return digits[1:]
+    return digits
+
+
+def _phone_like_digit_values(value: str) -> set[str]:
+    normalized, bidi_boundaries = _phone_scan_components(value)
+    digits: set[str] = set()
+    for match in PHONE_LIKE_PATTERN.finditer(normalized):
+        if any(
+            match.start() <= boundary <= match.end()
+            for boundary in bidi_boundaries
+        ):
+            raise GeneratedBodyError(
+                "Generated body contains directional controls in phone-shaped data."
+            )
+        digits.add(_canonical_phone_digits(match.group(0)))
     return digits
 
 
@@ -1060,23 +1099,27 @@ def validate_generated_body(
         )
 
     if expected_phone is not _EXPECTED_PHONE_UNSET:
-        exposed_phone_digits = {
-            _canonical_phone_digits(match.group(0))
-            for surface in exposure_surfaces
-            for match in PHONE_LIKE_PATTERN.finditer(
-                _normalize_phone_scan_text(surface)
-            )
-        }
+        exposed_phone_digits: set[str] = set()
+        for surface in exposure_surfaces:
+            exposed_phone_digits.update(_phone_like_digit_values(surface))
+        actionable_phone_digits: set[str] = set()
         tel_targets = []
-        for element in body_root.find_all(href=True):
-            href = element.get("href")
-            if not isinstance(href, str):
-                continue
-            decoded_href = unquote(href).strip()
-            if decoded_href.casefold().startswith("tel:"):
-                tel_targets.append(decoded_href)
+        for element in (body_root, *body_root.find_all(True)):
+            for attribute in ACTIONABLE_URL_ATTRIBUTES:
+                value = element.get(attribute)
+                if not isinstance(value, str):
+                    continue
+                decoded_value = unquote(value).strip()
+                actionable_phone_digits.update(
+                    _phone_like_digit_values(decoded_value)
+                )
+                if (
+                    attribute in {"href", "xlink:href"}
+                    and decoded_value.casefold().startswith("tel:")
+                ):
+                    tel_targets.append(decoded_value)
         if expected_phone is None:
-            if exposed_phone_digits:
+            if exposed_phone_digits or actionable_phone_digits:
                 raise GeneratedBodyError(
                     "Generated body contains a phone-like value with no verified phone."
                 )
@@ -1103,6 +1146,11 @@ def validate_generated_body(
             if unexpected_targets:
                 raise GeneratedBodyError(
                     "Generated body contains an unexpected tel target for phone."
+                )
+            unexpected_actionable_phone = actionable_phone_digits - {expected_digits}
+            if unexpected_actionable_phone:
+                raise GeneratedBodyError(
+                    "Generated body contains an unexpected actionable phone."
                 )
     normalized_claim_surfaces = tuple(
         _normalize_claim_match_text(surface) for surface in claim_surfaces
