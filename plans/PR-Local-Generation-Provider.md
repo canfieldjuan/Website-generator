@@ -193,8 +193,9 @@ components, and correct no-phone output can be rejected.
 The correct fix must compare both boundary-separated and compact text-node
 surfaces for rendered claims while retaining compact split-placeholder checks;
 count each required class no more than once per element, including case-folded
-duplicates; and require the coverage band only when the sanitized prospect has
-a phone number. Tests must prove each adverse case and its positive opposite.
+duplicates; and require exactly one coverage band when the sanitized prospect
+has a phone number and exactly zero otherwise. Tests must prove each adverse
+case and its positive opposite.
 This must not alter the denied-claim catalog, placeholder sanitation, other
 mandatory component counts, prompt copy, visual design, provider selection,
 GPU/runtime behavior, or any image, email, deployment, or Connect contract.
@@ -283,8 +284,8 @@ sanitation, or image, email, deployment, and Connect job contracts.
     weakening split-placeholder detection.
 19. Count each required class once per element rather than once per repeated
     class token.
-20. Make the coverage-band count conditional on the sanitized phone value while
-    leaving every other mandatory build count unchanged.
+20. Derive the exact coverage-band count from the sanitized phone value (`1`
+    when present, `0` when absent) while leaving every other count unchanged.
 21. Disable redirects on every shared loopback llama.cpp request so a local
     response cannot replay prompts or preflight traffic to a remote target.
 22. Scan ordered visual and accessibility exposure streams in both normalized

@@ -1908,7 +1908,17 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn(body_without_coverage, html)
         request = next(call for call in client.calls if call[0] == "POST")
         user_content = request[2]["json"]["messages"][1]["content"]
-        self.assertNotIn('"coverage-band": 1', user_content)
+        self.assertIn('"coverage-band": 0', user_content)
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "coverage-band expected 0, got 1",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY)),
+            )
 
         prospect["phone"] = "217-555-0100"
         with self.assertRaisesRegex(

@@ -119,9 +119,8 @@ def required_build_class_counts(prospect):
     if prospect.get("phone"):
         return BUILD_REQUIRED_CLASS_COUNTS
     return tuple(
-        requirement
-        for requirement in BUILD_REQUIRED_CLASS_COUNTS
-        if requirement[0] != "coverage-band"
+        (class_name, 0 if class_name == "coverage-band" else expected_count)
+        for class_name, expected_count in BUILD_REQUIRED_CLASS_COUNTS
     )
 
 BUILD_SERVICES_RESPONSE_SCAFFOLD = (
