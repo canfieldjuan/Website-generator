@@ -2,10 +2,6 @@ name: Content Kit Truth Audit
 
 on:
   pull_request:
-    paths:
-      - "content-pipeline/resolution-audit/**"
-      - "plans/PR-Resolution-Audit-*.md"
-      - ".github/workflows/content-kit-truth.yml"
 
 jobs:
   audit:
