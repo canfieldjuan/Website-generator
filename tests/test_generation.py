@@ -280,6 +280,23 @@ class HtmlAdmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(GeneratedHtmlError, "begin with the HTML doctype"):
             validate_generated_html(result("Finished.\n" + COMPLETE_HTML))
 
+    def test_provider_chatter_between_doctype_and_html_is_rejected(self):
+        chatter = COMPLETE_HTML.replace(
+            "<!DOCTYPE html>",
+            "<!DOCTYPE html>Here is your site:",
+            1,
+        )
+        with self.assertRaisesRegex(GeneratedHtmlError, "immediately after"):
+            validate_generated_html(result(chatter))
+
+    def test_only_whitespace_may_separate_doctype_and_html(self):
+        separated = COMPLETE_HTML.replace(
+            "<!DOCTYPE html>",
+            "<!DOCTYPE html>\n  ",
+            1,
+        )
+        self.assertEqual(validate_generated_html(result(separated)), separated)
+
     def test_utf8_bom_before_doctype_is_accepted(self):
         self.assertEqual(validate_generated_html(result("\ufeff" + COMPLETE_HTML)), COMPLETE_HTML)
 

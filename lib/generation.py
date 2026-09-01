@@ -260,9 +260,19 @@ def validate_generated_html(
         html = html[1:].lstrip()
     if "```" in html:
         raise GeneratedHtmlError("Generated HTML contains an unexpected code fence.")
-    if not re.match(r"^<!doctype\s+html\s*>", html, re.IGNORECASE):
+    doctype_match = re.match(r"^<!doctype\s+html\s*>", html, re.IGNORECASE)
+    if not doctype_match:
         raise GeneratedHtmlError(
             "Generated HTML must begin with the HTML doctype and no provider chatter."
+        )
+    if not re.match(
+        r"^\s*<html(?:\s|>)",
+        html[doctype_match.end() :],
+        re.IGNORECASE,
+    ):
+        raise GeneratedHtmlError(
+            "Generated HTML must place the root html element immediately after "
+            "the doctype with no provider chatter."
         )
     encoded = html.encode("utf-8")
     if len(encoded) > max_bytes:
