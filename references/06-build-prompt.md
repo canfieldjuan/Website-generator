@@ -7,7 +7,8 @@ NO current online presence. Driven by:
 - The trade-specific defaults file (`07-industry-defaults.md`)
 - The shared base template (`03-base-template.html`)
 
-Output: one complete HTML file, the prospect's homepage.
+The caller combines your generated body with the trusted template head to
+produce one complete HTML file.
 
 This prompt is the from-scratch sibling of `02-redesign-gen-prompt.md`. It
 deliberately skips concepts that only matter when there IS an existing site:
@@ -34,14 +35,16 @@ website for a local-business prospect that does not currently have a
 website online. The deliverable is a sales asset: the salesperson will
 send the live URL to the prospect before a 5-minute discovery call.
 
-You produce clean, modern, production-grade single-file HTML/CSS.
+You produce the variable `<body>` for clean, modern, production-grade
+single-file HTML/CSS.
 
 CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the
-provided `03-base-template.html` as your framework. You output the
-entire contents of `03-base-template.html`, only injecting content into
-the pre-defined HTML classes.
+provided `03-base-template.html` body scaffold as your framework. Output only
+one populated `<body>...</body>` fragment using its pre-defined HTML classes.
+The caller owns the doctype, `<html>`, `<head>`, CSS, font import, and `:root`
+tokens and assembles them after validating your body.
 - Do NOT invent new classes or layout structures.
-- Do NOT write new CSS rules (other than populating the :root block).
+- Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype.
 - You are an injection engine.
 
 Content source rules:
@@ -83,13 +86,14 @@ Trade display rule:
   extended.
 
 Output rules:
-- Output ONLY raw HTML. No markdown code fences (no ```html, no ```),
-  no preamble like "Here is the website", no trailing commentary. The
-  first characters must be `<!DOCTYPE html>`.
-  The last characters must be `</html>`.
-- Single complete HTML file containing the full `03-base-template.html`
-  CSS and the generated HTML body.
-- Populate the `:root` block in this priority order:
+- Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
+  preamble, trailing commentary, doctype, `<html>`, `<head>`, `<style>`, or
+  `<script>`. The first characters must be `<body` and the last characters
+  must be `</body>`.
+- Put the required deployment comment immediately after the opening `<body>`;
+  trusted code relocates it immediately after `<head>` in the final document.
+- Choose body content using this color priority; trusted code applies the
+  resulting values to `:root`:
     1. If `prospect.brand_colors` is provided, use those values
        verbatim (this is the explicit-brand path; the harness skips
        palette selection in this case).
@@ -103,7 +107,8 @@ Output rules:
        for that trade (the historical default). Only fires when the
        harness fails to populate `_computed_palette` -- normally a
        configuration bug worth investigating.
-- Update the Google Fonts import to match the chosen theme typography.
+- Use the chosen theme's classes and style notes; trusted code applies its
+  Google Fonts import and root typography tokens.
 - All links use real URLs from PROSPECT_JSON. The form action MUST be
   the prospect.formspree_endpoint value verbatim.
 - onerror handlers on every img tag for graceful fallback.
@@ -124,8 +129,8 @@ THEMES:
 SECTION ORDERS:
 { ...10-section-orders.md contents... }
 
-BASE TEMPLATE:
-{ ...03-base-template.html contents... }
+BASE BODY TEMPLATE:
+{ ...the body scaffold from 03-base-template.html... }
 
 PROSPECT JSON:
 { ...json... }
@@ -135,14 +140,14 @@ The first four blocks are cacheable static content; the prospect
 JSON varies per build and is sent uncached. Read `THEMES` to
 resolve `prospect._computed_theme` (one of `warm`, `civic`,
 `minimal`, `broadcast`, `editorial`, `brand-forward`) to the
-matching Google Fonts import + `:root` overrides + style notes,
-and apply those to the rendered HTML. Read `SECTION ORDERS` to
+matching style notes, and apply those to the rendered body. Trusted code owns
+the matching Google Fonts import and `:root` overrides. Read `SECTION ORDERS` to
 resolve `prospect._computed_section_order` (one of `default`,
 `services-led`, `reviews-led`) to the matching named ordering,
 and render sections in that order. See THEME & TYPOGRAPHY and
 SECTION ARCHITECTURE below.
 
-Output: the complete HTML file.
+Output: one complete `<body>...</body>` fragment.
 
 ---
 
@@ -567,15 +572,10 @@ For each build:
 
 1. Locate the theme named by `prospect._computed_theme` in the
    inlined `THEMES:` section.
-2. Insert that theme's Google Fonts `<link>` tag in the document `<head>`.
-3. In the `:root` block, override `--font-display`, `--font-body`,
-   `--font-serif`, and `--card-radius` with the values from that theme.
-   Color tokens (`--accent`, `--accent-dark`, `--secondary`, etc.) come
-   from `prospect.brand_colors` if set, otherwise the trade's `Color
-   defaults` in 07 -- the theme does NOT supply color values, only
-   typography and layout feel.
-4. Apply the theme's style notes (card style, headline style, badge
+2. Apply the theme's style notes (card style, headline style, badge
    style) consistently across the section components.
+3. Do not emit font links or root tokens. Trusted code applies the catalog's
+   exact Google Fonts and `:root` values after body admission.
 
 If `prospect._computed_theme` is missing or names a theme not present
 in 09, fall back to `warm` and emit a warning in the report (this
@@ -677,9 +677,9 @@ mile count like 20 -- that misrepresents coverage.) Markup:
 
 ## DEPLOYMENT COMMENT BLOCK
 
-Add this comment block immediately after the opening `<head>` tag. Do not put
-the comment or any other content before the DOCTYPE or between the DOCTYPE and
-the opening `<html>` tag.
+Put this comment block immediately after the opening `<body>` tag. Trusted code
+removes it from the body and inserts it immediately after the opening `<head>`
+tag in the final document.
 Use `prospect.build_date` verbatim for the Generated line -- do NOT
 guess or fabricate a date. If `prospect.build_date` is absent, omit the
 Generated line entirely rather than inventing a value.
@@ -767,11 +767,10 @@ NEVER invent dates, years, or "since" claims. Specifically:
 ## QUALITY CHECKLIST
 
 Before outputting, verify:
-- [ ] `<!DOCTYPE html>` is first, the deployment comment is inside `<head>`,
-      and `</html>` is last
+- [ ] `<body` is first, the deployment comment is its first child, and
+      `</body>` is last
 - [ ] No markdown fences, no preamble text
-- [ ] :root block populated with theme + brand colors
-- [ ] Google Fonts import matches the trade's theme
+- [ ] No doctype, `<html>`, `<head>`, `<style>`, or `<script>` output
 - [ ] All section IDs / classes come from the base template, no inventions
 - [ ] Contact form action == prospect.formspree_endpoint verbatim (or
       action="#" with the TODO comment if endpoint not provided)

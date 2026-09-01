@@ -5,12 +5,15 @@ from __future__ import annotations
 import os
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlsplit, urlunsplit
 
-from openai import OpenAI
+import requests
+from openai import DefaultHttpxClient, OpenAI
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 
@@ -20,10 +23,12 @@ DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:1234/v1"
 DEFAULT_LOCAL_API_KEY = "lm-studio"
 DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
-# Generated pages must be able to reproduce the required 84+ KiB base template
-# and populate it before the HTML byte-admission gate runs.
+# Non-HTML generation keeps the historical ceiling. HTML callers apply the
+# tighter body-only ceiling before trusted code assembles the final document.
 DEFAULT_MAX_OUTPUT_TOKENS = 65536
+MAX_GENERATED_BODY_TOKENS = 8192
 MAX_HTML_BYTES = 2 * 1024 * 1024
+MAX_GENERATED_BODY_BYTES = 512 * 1024
 SUPPORTED_PROVIDERS = frozenset(("local", "openrouter"))
 
 
@@ -43,6 +48,10 @@ class GeneratedHtmlError(ValueError):
     """Generated output is not a complete standalone HTML document."""
 
 
+class GeneratedBodyError(ValueError):
+    """Generated output is not an admissible template body fragment."""
+
+
 @dataclass(frozen=True)
 class PromptPart:
     text: str
@@ -57,6 +66,7 @@ class GenerationConfig:
     api_key: str
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    trust_env: bool = True
 
 
 @dataclass(frozen=True)
@@ -66,6 +76,22 @@ class GenerationResult:
     content: str
     finish_reason: str | None
     usage: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DocumentColors:
+    accent: str
+    accent_dark: str
+    secondary: str
+
+
+@dataclass(frozen=True)
+class ThemeDefinition:
+    font_link: str
+    font_display: str
+    font_body: str
+    font_serif: str
+    card_radius: str
 
 
 class _DocumentStructureParser(HTMLParser):
@@ -108,6 +134,63 @@ class _DocumentStructureParser(HTMLParser):
     def unknown_decl(self, data: str) -> None:
         if self.content_container_depth == 0:
             self.has_content_outside_content = True
+
+
+class _GeneratedBodyParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.body_depth = 0
+        self.body_events: list[str] = []
+        self.forbidden_tags: list[str] = []
+        self.has_content_outside_body = False
+
+    def handle_decl(self, decl: str) -> None:
+        self.has_content_outside_body = True
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_name = tag.lower()
+        if tag_name == "body":
+            self.body_events.append("start")
+            self.body_depth += 1
+            return
+        if tag_name in {"html", "head", "style", "script"}:
+            self.forbidden_tags.append(tag_name)
+        if self.body_depth == 0:
+            self.has_content_outside_body = True
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_name = tag.lower()
+        if tag_name == "body":
+            self.body_events.append("end")
+            if self.body_depth:
+                self.body_depth -= 1
+            else:
+                self.has_content_outside_body = True
+            return
+        if tag_name in {"html", "head", "style", "script"}:
+            self.forbidden_tags.append(tag_name)
+        if self.body_depth == 0:
+            self.has_content_outside_body = True
+
+    def handle_startendtag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        if tag.lower() == "body":
+            self.body_events.extend(("start", "end"))
+            self.has_content_outside_body = True
+            return
+        self.handle_starttag(tag, attrs)
+
+    def handle_data(self, data: str) -> None:
+        if data.strip() and self.body_depth == 0:
+            self.has_content_outside_body = True
+
+    def handle_pi(self, data: str) -> None:
+        if self.body_depth == 0:
+            self.has_content_outside_body = True
+
+    def unknown_decl(self, data: str) -> None:
+        self.has_content_outside_body = True
 
 
 def resolve_generation_config(
@@ -176,11 +259,37 @@ def resolve_generation_config(
 
 
 def create_generation_client(config: GenerationConfig) -> OpenAI:
+    client_options: dict[str, Any] = {}
+    if not config.trust_env:
+        client_options["http_client"] = DefaultHttpxClient(trust_env=False)
     return OpenAI(
         base_url=config.base_url,
         api_key=config.api_key,
         timeout=config.timeout_seconds,
         max_retries=0,
+        **client_options,
+    )
+
+
+def create_local_generation_client(config: GenerationConfig) -> requests.Session:
+    session = requests.Session()
+    session.trust_env = config.trust_env
+    session.headers.update(
+        {
+            "Authorization": f"Bearer {config.api_key}",
+            "Content-Type": "application/json",
+        }
+    )
+    return session
+
+
+def body_generation_config(config: GenerationConfig) -> GenerationConfig:
+    return replace(
+        config,
+        max_output_tokens=min(
+            config.max_output_tokens,
+            MAX_GENERATED_BODY_TOKENS,
+        ),
     )
 
 
@@ -222,18 +331,23 @@ def generate_text(
     cache_system_prompt: bool = False,
     client: Any | None = None,
 ) -> GenerationResult:
-    selected_client = client or create_generation_client(config)
     parts = tuple(user_parts)
-    if config.provider == "openrouter":
-        system_content: Any = [
-            _openrouter_content_part(system_prompt, cache_system_prompt)
-        ]
-        user_content: Any = [
-            _openrouter_content_part(part.text, part.cacheable) for part in parts
-        ]
-    else:
-        system_content = system_prompt
-        user_content = "\n\n".join(part.text for part in parts)
+    if config.provider == "local":
+        return _generate_local_text(
+            config,
+            system_prompt=system_prompt,
+            user_content="\n\n".join(part.text for part in parts),
+            temperature=temperature,
+            client=client,
+        )
+
+    selected_client = client or create_generation_client(config)
+    system_content: Any = [
+        _openrouter_content_part(system_prompt, cache_system_prompt)
+    ]
+    user_content: Any = [
+        _openrouter_content_part(part.text, part.cacheable) for part in parts
+    ]
 
     try:
         response = selected_client.chat.completions.create(
@@ -268,6 +382,99 @@ def generate_text(
     )
 
 
+def _generate_local_text(
+    config: GenerationConfig,
+    *,
+    system_prompt: str,
+    user_content: str,
+    temperature: float,
+    client: Any | None,
+) -> GenerationResult:
+    selected_client = client or create_local_generation_client(config)
+    endpoint = _native_lm_studio_chat_url(config.base_url)
+    request_body = {
+        "model": config.model,
+        "system_prompt": system_prompt,
+        "input": user_content,
+        "temperature": temperature,
+        "max_output_tokens": config.max_output_tokens,
+        "reasoning": "off",
+        "store": False,
+    }
+    try:
+        response = selected_client.post(
+            endpoint,
+            json=request_body,
+            timeout=config.timeout_seconds,
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        raise GenerationProviderUnavailable(
+            f"local generation failed for model {config.model!r}: {exc}"
+        ) from exc
+
+    try:
+        payload = response.json()
+    except (TypeError, ValueError) as exc:
+        raise GenerationResponseError(
+            "Local generation provider returned invalid JSON."
+        ) from exc
+    if not isinstance(payload, dict):
+        raise GenerationResponseError(
+            "Local generation provider returned a non-object response."
+        )
+
+    output = payload.get("output")
+    if not isinstance(output, list):
+        raise GenerationResponseError(
+            "Local generation provider returned no output collection."
+        )
+    messages: list[str] = []
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            raise GenerationResponseError(
+                "Local generation provider returned non-message output while "
+                "reasoning and tools were disabled."
+            )
+        content = item.get("content")
+        if not isinstance(content, str):
+            raise GenerationResponseError(
+                "Local generation provider returned a message without text content."
+            )
+        messages.append(content)
+    if len(messages) != 1:
+        raise GenerationResponseError(
+            "Local generation provider must return exactly one text message."
+        )
+
+    stats = payload.get("stats")
+    if not isinstance(stats, dict):
+        raise GenerationResponseError(
+            "Local generation provider returned no token statistics."
+        )
+    total_output_tokens = stats.get("total_output_tokens")
+    if (
+        isinstance(total_output_tokens, bool)
+        or not isinstance(total_output_tokens, int)
+        or total_output_tokens < 0
+    ):
+        raise GenerationResponseError(
+            "Local generation provider returned invalid output-token statistics."
+        )
+    finish_reason = (
+        "length"
+        if total_output_tokens >= config.max_output_tokens
+        else "stop"
+    )
+    return GenerationResult(
+        provider=config.provider,
+        model=config.model,
+        content=messages[0],
+        finish_reason=finish_reason,
+        usage=dict(stats),
+    )
+
+
 def require_complete_text(result: GenerationResult) -> str:
     if result.finish_reason != "stop":
         reason = result.finish_reason or "missing"
@@ -278,6 +485,228 @@ def require_complete_text(result: GenerationResult) -> str:
     if not content:
         raise GenerationResponseError("Generation returned empty text.")
     return content
+
+
+def validate_generated_body(
+    result: GenerationResult,
+    *,
+    max_bytes: int = MAX_GENERATED_BODY_BYTES,
+) -> str:
+    body = _strip_outer_code_fence(require_complete_text(result))
+    if "```" in body:
+        raise GeneratedBodyError(
+            "Generated body contains an unexpected code fence."
+        )
+    if not re.match(r"^<body(?:\s|>)", body, re.IGNORECASE):
+        raise GeneratedBodyError(
+            "Generated body must begin with one body element and no provider chatter."
+        )
+    if not re.search(r"</body>\s*$", body, re.IGNORECASE):
+        raise GeneratedBodyError(
+            "Generated body must end with its closing body tag."
+        )
+    if len(body.encode("utf-8")) > max_bytes:
+        raise GeneratedBodyError(
+            f"Generated body exceeds the {max_bytes}-byte limit."
+        )
+    if re.search(r"{{[^{}]+}}", body):
+        raise GeneratedBodyError(
+            "Generated body contains unresolved template placeholders."
+        )
+
+    parser = _GeneratedBodyParser()
+    parser.feed(body)
+    parser.close()
+    if parser.body_events != ["start", "end"] or parser.body_depth:
+        raise GeneratedBodyError(
+            "Generated body must contain exactly one balanced body root."
+        )
+    if parser.forbidden_tags:
+        names = ", ".join(sorted(set(parser.forbidden_tags)))
+        raise GeneratedBodyError(
+            f"Generated body contains forbidden document or executable tags: {names}."
+        )
+    if parser.has_content_outside_body:
+        raise GeneratedBodyError(
+            "Generated body contains content outside its body root."
+        )
+    return body
+
+
+def extract_template_body_scaffold(template_html: str) -> str:
+    head_close = re.search(r"</head\s*>", template_html, re.IGNORECASE)
+    if not head_close:
+        raise GeneratedHtmlError("Base template has no closing head tag.")
+    match = re.search(
+        r"<body(?:\s[^>]*)?>.*?</body\s*>",
+        template_html[head_close.end() :],
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        raise GeneratedHtmlError("Base template has no complete body scaffold.")
+    return match.group(0).strip()
+
+
+def parse_theme_definition(catalog: str, theme_name: str) -> ThemeDefinition:
+    section = re.search(
+        rf"^##\s+{re.escape(theme_name)}\s+--.*?$(.*?)(?=^##\s|\Z)",
+        catalog,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not section:
+        raise GeneratedHtmlError(
+            f"Theme {theme_name!r} is not defined in the theme catalog."
+        )
+    content = section.group(1)
+    font_link_match = re.search(
+        r'<link href="https://fonts\.googleapis\.com/[^"<>]+" rel="stylesheet">',
+        content,
+    )
+    if not font_link_match:
+        raise GeneratedHtmlError(
+            f"Theme {theme_name!r} has no admissible Google Fonts link."
+        )
+
+    values: dict[str, str] = {}
+    for property_name in (
+        "--font-display",
+        "--font-body",
+        "--font-serif",
+        "--card-radius",
+    ):
+        value_match = re.search(
+            rf"^{re.escape(property_name)}:\s*(.+?);\s*$",
+            content,
+            re.MULTILINE,
+        )
+        if not value_match:
+            raise GeneratedHtmlError(
+                f"Theme {theme_name!r} has no {property_name} override."
+            )
+        value = value_match.group(1).strip()
+        if any(character in value for character in "{}<>"):
+            raise GeneratedHtmlError(
+                f"Theme {theme_name!r} has an unsafe {property_name} override."
+            )
+        values[property_name] = value
+
+    return ThemeDefinition(
+        font_link=font_link_match.group(0),
+        font_display=values["--font-display"],
+        font_body=values["--font-body"],
+        font_serif=values["--font-serif"],
+        card_radius=values["--card-radius"],
+    )
+
+
+def assemble_generated_html(
+    result: GenerationResult,
+    *,
+    base_template: str,
+    theme_catalog: str,
+    theme_name: str,
+    colors: DocumentColors,
+    title: str,
+    body_theme: str,
+    relocate_leading_comment: bool = False,
+) -> str:
+    if body_theme not in {"theme-light", "theme-dark"}:
+        raise GeneratedHtmlError(
+            "Body theme must be theme-light or theme-dark."
+        )
+    style = parse_theme_definition(theme_catalog, theme_name)
+    color_values = {
+        "--accent": _require_hex_color("accent", colors.accent),
+        "--accent-dark": _require_hex_color("accent_dark", colors.accent_dark),
+        "--secondary": _require_hex_color("secondary", colors.secondary),
+    }
+    body = validate_generated_body(result)
+    body = re.sub(
+        r"^<body(?:\s[^>]*)?>",
+        f'<body class="{body_theme}">',
+        body,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+    head_comment = ""
+    if relocate_leading_comment:
+        comment_match = re.match(
+            r'^(<body class="(?:theme-light|theme-dark)">)\s*(<!--.*?-->)\s*',
+            body,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not comment_match:
+            raise GeneratedBodyError(
+                "Generated body is missing its leading deployment comment."
+            )
+        head_comment = comment_match.group(2)
+        body = comment_match.group(1) + body[comment_match.end() :]
+
+    head_close = re.search(r"</head\s*>", base_template, re.IGNORECASE)
+    if not head_close:
+        raise GeneratedHtmlError("Base template has no closing head tag.")
+    head = base_template[: head_close.end()]
+    if not re.match(
+        r"^\s*<!doctype\s+html\s*>\s*<html(?:\s|>)",
+        head,
+        re.IGNORECASE,
+    ):
+        raise GeneratedHtmlError(
+            "Base template must begin with a doctype and html root."
+        )
+    head, title_count = re.subn(
+        r"<title>.*?</title>",
+        lambda _: f"<title>{escape(title, quote=False)}</title>",
+        head,
+        count=1,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if title_count != 1:
+        raise GeneratedHtmlError("Base template must contain exactly one title.")
+    head, font_count = re.subn(
+        r'<link href="https://fonts\.googleapis\.com/[^"<>]+" rel="stylesheet">',
+        lambda _: style.font_link,
+        head,
+        count=1,
+    )
+    if font_count != 1:
+        raise GeneratedHtmlError(
+            "Base template must contain exactly one replaceable Google Fonts link."
+        )
+
+    root_values = {
+        **color_values,
+        "--font-display": style.font_display,
+        "--font-body": style.font_body,
+        "--font-serif": style.font_serif,
+        "--card-radius": style.card_radius,
+    }
+    for property_name, value in root_values.items():
+        head = _replace_root_property(head, property_name, value)
+    if head_comment:
+        head, head_count = re.subn(
+            r"<head>",
+            lambda _: f"<head>\n{head_comment}",
+            head,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if head_count != 1:
+            raise GeneratedHtmlError(
+                "Base template must contain exactly one opening head tag."
+            )
+
+    document = f"{head}\n{body}\n</html>"
+    return validate_generated_html(
+        GenerationResult(
+            provider=result.provider,
+            model=result.model,
+            content=document,
+            finish_reason="stop",
+            usage=result.usage,
+        )
+    )
 
 
 def validate_generated_html(
@@ -368,6 +797,56 @@ def _openrouter_content_part(text: str, cacheable: bool) -> dict[str, Any]:
     if cacheable:
         part["cache_control"] = {"type": "ephemeral"}
     return part
+
+
+def _require_hex_color(name: str, value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+        raise GeneratedHtmlError(
+            f"Document color {name} must be a six-digit hex value."
+        )
+    return value.upper()
+
+
+def _replace_root_property(head: str, property_name: str, value: str) -> str:
+    pattern = rf"(?m)^(\s*{re.escape(property_name)}\s*:)\s*[^;]+;"
+    updated, count = re.subn(
+        pattern,
+        lambda match: f"{match.group(1)} {value};",
+        head,
+        count=1,
+    )
+    if count != 1:
+        raise GeneratedHtmlError(
+            f"Base template must contain exactly one {property_name} root property."
+        )
+    return updated
+
+
+def _native_lm_studio_chat_url(base_url: str) -> str:
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise GenerationConfigurationError(
+            "Local generation base URL must be an absolute HTTP(S) URL."
+        )
+    if parsed.query or parsed.fragment:
+        raise GenerationConfigurationError(
+            "Local generation base URL cannot contain a query or fragment."
+        )
+
+    path = parsed.path.rstrip("/")
+    if path.endswith("/api/v1"):
+        native_path = f"{path}/chat"
+    elif path.endswith("/v1"):
+        native_path = f"{path[:-3]}/api/v1/chat"
+    elif not path:
+        native_path = "/api/v1/chat"
+    else:
+        raise GenerationConfigurationError(
+            "Local generation base URL path must be empty or end in /v1 or /api/v1."
+        )
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, native_path, "", "")
+    )
 
 
 def _usage_dict(usage: Any) -> dict[str, Any]:

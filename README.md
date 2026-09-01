@@ -205,8 +205,11 @@ explicitly selected provider, defaulting to local LM Studio:
 
 Provider configuration and admission checks live in `lib/generation.py`.
 OpenRouter prompt caching (`cache_control: ephemeral`) is enabled only for the
-cloud build request; local requests receive plain OpenAI-compatible text
-content. Every generated page must finish normally and contain a complete HTML
+cloud build request. Local generation uses LM Studio's native chat endpoint,
+sends plain text with reasoning and server-side response storage disabled, and
+never falls back to OpenRouter. For HTML work, the model returns only the
+variable `<body>`; trusted code supplies the base template's head and CSS,
+applies the selected palette and theme, and validates the assembled standalone
 document before it is written or offered to Vercel.
 
 ---

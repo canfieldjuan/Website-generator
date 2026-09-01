@@ -15,12 +15,15 @@ from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
 from lib.generation import (
+    DocumentColors,
     PromptPart,
+    assemble_generated_html,
     atomic_write_text,
+    body_generation_config,
+    extract_template_body_scaffold,
     generate_text,
     preflight_generation_provider,
     resolve_generation_config,
-    validate_generated_html,
 )
 
 # Enrichment pass: fetches priority-1/2 interior pages identified in the
@@ -32,6 +35,62 @@ ENRICHMENT_HTML_TRUNCATE = 120000
 ENRICHMENT_PRIORITY_THRESHOLD = 2
 ENRICHABLE_PAGE_TYPES = {"services", "single-service", "team", "about", "faq", "contact"}
 ENRICHMENT_PROMPT_PATH = "references/05-enrichment-prompt.md"
+BASE_TEMPLATE_PATH = "references/03-base-template.html"
+THEMES_CATALOG_PATH = "references/09-themes.md"
+
+
+def _six_digit_hex(value):
+    return (
+        value
+        if isinstance(value, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", value)
+        else None
+    )
+
+
+def _darken_hex_color(value):
+    channels = [int(value[index : index + 2], 16) for index in (1, 3, 5)]
+    return "#" + "".join(f"{round(channel * 0.75):02X}" for channel in channels)
+
+
+def _resolve_site_document_colors(site_json):
+    brand = site_json.get("brand") if isinstance(site_json.get("brand"), dict) else {}
+    colors = brand.get("colors") if isinstance(brand.get("colors"), dict) else {}
+    raw_colors = colors.get("raw") if isinstance(colors.get("raw"), list) else []
+    primary = next(
+        (
+            color
+            for color in (
+                _six_digit_hex(colors.get("primary")),
+                _six_digit_hex(colors.get("button_bg")),
+                _six_digit_hex(colors.get("link")),
+                *(_six_digit_hex(item) for item in raw_colors),
+            )
+            if color
+        ),
+        "#1D4ED8",
+    )
+    secondary = next(
+        (
+            color
+            for color in (
+                _six_digit_hex(colors.get("secondary")),
+                _six_digit_hex(colors.get("nav_bg")),
+            )
+            if color
+        ),
+        "#1F3A5F",
+    )
+    return DocumentColors(
+        accent=primary,
+        accent_dark=_darken_hex_color(primary),
+        secondary=secondary,
+    )
+
+
+def _site_body_theme(site_json):
+    brand = site_json.get("brand") if isinstance(site_json.get("brand"), dict) else {}
+    return "theme-dark" if brand.get("color_mode") == "dark" else "theme-light"
+
 
 def _fetch_with_playwright(url):
     """Headless browser fetch for JS-rendered sites (Squarespace, Wix, Webflow)."""
@@ -283,8 +342,11 @@ def generate_redesign(
     with open("references/02-redesign-gen-prompt.md", "r") as f:
         system_prompt = f.read()
 
-    with open("references/03-base-template.html", "r") as f:
+    with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
+    with open(THEMES_CATALOG_PATH, "r") as f:
+        theme_catalog = f.read()
+    base_body = extract_template_body_scaffold(base_template)
 
     user_prompt = f"""THEME: {theme}
 COLOR_MODE: {color_mode}
@@ -294,19 +356,29 @@ NOTES: none
 SITE JSON:
 {json.dumps(site_json, indent=2)}
 
-BASE TEMPLATE:
-{base_template}
+BASE BODY TEMPLATE:
+{base_body}
 """
 
     result = generate_text(
-        config,
+        body_generation_config(config),
         system_prompt=system_prompt,
         user_parts=(PromptPart(user_prompt),),
         temperature=0.4,
         client=generation_client,
     )
 
-    return validate_generated_html(result)
+    site_name = site_json.get("site", {}).get("name") or "Website"
+    return assemble_generated_html(
+        result,
+        base_template=base_template,
+        theme_catalog=theme_catalog,
+        theme_name=theme,
+        colors=_resolve_site_document_colors(site_json),
+        title=site_name,
+        body_theme=_site_body_theme(site_json),
+        relocate_leading_comment=True,
+    )
 
 def generate_interior_page(
     site_json,
@@ -321,8 +393,11 @@ def generate_interior_page(
     with open("references/04-interior-page-prompt.md", "r") as f:
         system_prompt = f.read()
         
-    with open("references/03-base-template.html", "r") as f:
+    with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
+    with open(THEMES_CATALOG_PATH, "r") as f:
+        theme_catalog = f.read()
+    base_body = extract_template_body_scaffold(base_template)
         
     if page_url:
         print(f"[*] Fetching interior page content from {page_url}...")
@@ -346,8 +421,8 @@ NOTES: none
 HOMEPAGE DESIGN JSON:
 {json.dumps(site_json, indent=2)}
 
-BASE TEMPLATE:
-{base_template}
+BASE BODY TEMPLATE:
+{base_body}
 
 ---
 SOURCE CONTENT:
@@ -357,14 +432,24 @@ SOURCE CONTENT:
 
     config = generation_config or resolve_generation_config()
     result = generate_text(
-        config,
+        body_generation_config(config),
         system_prompt=system_prompt,
         user_parts=(PromptPart(user_prompt[:120000]),),
         temperature=0.1,
         client=generation_client,
     )
 
-    return validate_generated_html(result)
+    site_name = site_json.get("site", {}).get("name") or "Website"
+    page_label = page_type.replace("-", " ").title()
+    return assemble_generated_html(
+        result,
+        base_template=base_template,
+        theme_catalog=theme_catalog,
+        theme_name=theme,
+        colors=_resolve_site_document_colors(site_json),
+        title=f"{page_label} | {site_name}",
+        body_theme=_site_body_theme(site_json),
+    )
 
 
 def main(
