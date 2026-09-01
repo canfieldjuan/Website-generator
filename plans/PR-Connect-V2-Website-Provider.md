@@ -86,7 +86,7 @@ job or error schemas, or alter provider startup order.
 
 ### Files touched
 
-- `build.py`, `lib/generation.py`
+- `build.py`
 - `connect_provider.py`
 - `lib/connect_v2.py`, `lib/connect_store.py`, `lib/connect_entitlement.py`
 - `tests/test_connect_provider.py`
