@@ -232,6 +232,10 @@ must use exact, case-sensitive membership once per element, and the declared
 direct-child shape of the footer, services grid, service cards, and benefits
 grid must be validated. Tests must cover mixed/CSS boundaries, replacement and
 accessibility text, wrong-case tokens, orphaned children, and valid structures.
+Direct accessibility text remains supported, and indirect ARIA text references
+must resolve unique in-body IDs in declared attribute order. Missing, duplicate,
+or cyclic IDREFs must fail closed so admission cannot construct a different
+accessible exposure from the browser.
 This must not alter trusted CSS, visible copy, component cardinality, page
 ordering, provider/model selection, GPU/runtime behavior, placeholder
 sanitation, or image, email, deployment, and Connect job contracts.
@@ -289,6 +293,8 @@ sanitation, or image, email, deployment, and Connect job contracts.
 23. Match required class names with exact case-sensitive HTML class membership.
 24. Enforce the direct-child component shapes that make the required footer,
     service, and benefits structures functional.
+25. Resolve indirect ARIA text references in declared order and reject missing,
+    duplicate, or cyclic references while retaining direct labels and alt text.
 
 ### Files touched
 

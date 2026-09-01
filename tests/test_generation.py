@@ -1215,6 +1215,61 @@ class BodyAssemblyTests(unittest.TestCase):
             clean_body,
         )
 
+    def test_body_admission_resolves_indirect_accessibility_text_in_order(self):
+        attributes = (
+            "aria-labelledby",
+            "aria-describedby",
+            "aria-details",
+            "aria-errormessage",
+        )
+        for attribute in attributes:
+            with self.subTest(attribute=attribute):
+                body = (
+                    '<body><span id="estimates-id">Estimates</span>'
+                    '<span id="free-id">Free</span>'
+                    f'<button {attribute}="free-id estimates-id">Request</button>'
+                    "</body>"
+                )
+                with self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "unsupported prospect claims",
+                ):
+                    validate_generated_body(
+                        body_result(body),
+                        forbidden_visible_phrases=("Free Estimates",),
+                    )
+
+        direct_body = (
+            '<body><button aria-label="Request service">Request</button></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(direct_body),
+                forbidden_visible_phrases=("Free Estimates",),
+            ),
+            direct_body,
+        )
+
+    def test_body_admission_rejects_invalid_accessibility_text_references(self):
+        invalid_bodies = {
+            "missing": '<body><button aria-labelledby="missing">Request</button></body>',
+            "duplicate": (
+                '<body><span id="label">One</span><span id="label">Two</span>'
+                '<button aria-labelledby="label">Request</button></body>'
+            ),
+            "cycle": (
+                '<body><span id="one" aria-labelledby="two">One</span>'
+                '<span id="two" aria-labelledby="one">Two</span></body>'
+            ),
+        }
+        for label, body in invalid_bodies.items():
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "invalid indirect accessibility text reference",
+                ):
+                    validate_generated_body(body_result(body))
+
     def test_body_admission_rejects_document_wrapper_and_provider_chatter(self):
         invalid_bodies = {
             "full document": COMPLETE_HTML,

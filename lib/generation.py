@@ -619,7 +619,11 @@ def _compact_claim_match_text(value: str) -> str:
 
 def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
     visual_parts: list[str] = []
-    accessible_parts: list[str] = []
+    id_targets: dict[str, list[Tag]] = {}
+    for element in (body_root, *body_root.find_all(True)):
+        identifier = element.get("id")
+        if isinstance(identifier, str) and identifier:
+            id_targets.setdefault(identifier, []).append(element)
 
     def replacement_text(node: Tag) -> str:
         if node.name.casefold() == "img":
@@ -644,27 +648,61 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
         for child in node.children:
             visit_visual(child)
 
-    def visit_accessible(node: Any) -> None:
-        if isinstance(node, Comment):
-            return
-        if isinstance(node, NavigableString):
-            accessible_parts.append(str(node))
-            return
-        if not isinstance(node, Tag):
-            return
-        label = node.get("aria-label")
-        if isinstance(label, str) and label:
-            accessible_parts.append(label)
-            return
-        replacement = replacement_text(node)
-        if replacement:
-            accessible_parts.append(replacement)
-        for child in node.children:
-            visit_accessible(child)
+    def resolve_references(
+        node: Tag,
+        attribute: str,
+        active_references: frozenset[str],
+    ) -> str:
+        value = node.get(attribute)
+        if not isinstance(value, str) or not value.strip():
+            return ""
+        resolved_parts: list[str] = []
+        for reference in value.split():
+            targets = id_targets.get(reference, ())
+            if len(targets) != 1 or reference in active_references:
+                raise GeneratedBodyError(
+                    "Generated body contains an invalid indirect accessibility "
+                    f"text reference in {attribute}: {reference!r}."
+                )
+            resolved_parts.append(
+                accessible_text(targets[0], active_references | {reference})
+            )
+        return " ".join(resolved_parts)
 
+    def accessible_text(node: Any, active_references: frozenset[str]) -> str:
+        if isinstance(node, Comment):
+            return ""
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag):
+            return ""
+
+        labelled_by = node.get("aria-labelledby")
+        label = node.get("aria-label")
+        if isinstance(labelled_by, str) and labelled_by.strip():
+            primary_text = resolve_references(
+                node,
+                "aria-labelledby",
+                active_references,
+            )
+        elif isinstance(label, str) and label:
+            primary_text = label
+        else:
+            primary_text = replacement_text(node) + "".join(
+                accessible_text(child, active_references) for child in node.children
+            )
+
+        descriptions = [
+            resolve_references(node, attribute, active_references)
+            for attribute in ("aria-describedby", "aria-details", "aria-errormessage")
+            if isinstance(node.get(attribute), str) and node.get(attribute).strip()
+        ]
+        return " ".join((primary_text, *descriptions))
+
+    accessible_parts: list[str] = []
     for child in body_root.children:
         visit_visual(child)
-        visit_accessible(child)
+        accessible_parts.append(accessible_text(child, frozenset()))
     return "".join(visual_parts), "".join(accessible_parts)
 
 
