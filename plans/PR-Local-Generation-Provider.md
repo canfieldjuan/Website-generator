@@ -271,6 +271,10 @@ them can change the digits the browser presents. Every phone-shaped value in a
 decoded actionable URL attribute must follow the same verified-phone contract,
 independent of URI scheme or host; the existing required exact `tel:` action
 remains the primary contact-path requirement.
+Generated body fragments must not carry an alternate executable action plane:
+model-authored event-handler attributes, `srcdoc`, and executable script URI
+payloads must fail admission before trusted assembly. This restriction applies
+only to the model-produced body and must not rewrite the trusted template.
 The shared parser must also reject unclosed, unexpectedly closed, or misnested
 non-void descendants before BeautifulSoup repair, while accepting standard void
 elements and valid self-closing SVG content. Finally, each generator must pass
@@ -363,6 +367,8 @@ behavior, or any image, email, deployment, and Connect job contract.
     retaining harmless invisible-separator normalization.
 35. Enforce the verified-phone contract on decoded `href`, `action`,
     `formaction`, and SVG `xlink:href` phone-shaped destinations.
+36. Reject model-authored event handlers, `srcdoc`, and executable script URI
+    attribute payloads before assembly.
 
 ### Files touched
 

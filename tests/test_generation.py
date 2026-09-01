@@ -1322,6 +1322,28 @@ class BodyAssemblyTests(unittest.TestCase):
         body = "<body><svg><title>Service area map</title></svg></body>"
         self.assertEqual(validate_generated_body(body_result(body)), body)
 
+    def test_body_admission_rejects_executable_attributes(self):
+        executable_bodies = (
+            '<body><button oNcLiCk="location.href=\'tel:2175550199\'">'
+            "Call</button></body>",
+            '<body><iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;">'
+            "</iframe></body>",
+            '<body><a href="java&#x09;script:alert(1)">Open</a></body>',
+            '<body><form action="vbscript:alert(1)"></form></body>',
+        )
+        for body in executable_bodies:
+            with self.subTest(body=body), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "executable attribute",
+            ):
+                validate_generated_body(body_result(body))
+
+        valid_body = (
+            '<body><button data-onclick="call" aria-label="Request service">'
+            "Request</button></body>"
+        )
+        self.assertEqual(validate_generated_body(body_result(valid_body)), valid_body)
+
     def test_prompt_defined_square_placeholders_fail_without_rejecting_other_brackets(self):
         prompt = "Use [PROSPECT.phone], [SITE_SLUG], and [N]-MILE RADIUS. - [ ] check"
         placeholders = extract_square_placeholder_tokens(
@@ -2085,6 +2107,18 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                         )
                     ),
                 )
+
+        event_handler_phone = body_without_coverage.replace(
+            "</nav>",
+            '<button onclick="location.href=\'tel:2175550199\'">'
+            "Call</button></nav>",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "executable attribute"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(event_handler_phone)),
+            )
 
         non_exposed_attribute_phones = body_without_coverage.replace(
             "</nav>",

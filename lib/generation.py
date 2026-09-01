@@ -200,6 +200,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.has_content_outside_body = False
         self.visible_text_parts: list[str] = []
         self.decoded_attribute_values: list[str] = []
+        self.executable_attributes: list[str] = []
         self.class_names: set[str] = set()
         self.class_name_counts: dict[str, int] = {}
         self.open_descendants: list[str] = []
@@ -215,7 +216,19 @@ class _GeneratedBodyParser(HTMLParser):
         )
         element_class_names: set[str] = set()
         for name, value in attrs:
-            if name.casefold() != "class" or not value:
+            normalized_name = name.casefold()
+            local_name = normalized_name.rsplit(":", 1)[-1]
+            decoded_value = unquote(value) if value is not None else ""
+            compact_value = re.sub(r"[\x00-\x20\x7f]+", "", decoded_value)
+            if (
+                local_name.startswith("on")
+                or local_name == "srcdoc"
+                or compact_value.casefold().startswith(
+                    ("javascript:", "vbscript:")
+                )
+            ):
+                self.executable_attributes.append(name)
+            if normalized_name != "class" or not value:
                 continue
             for class_name in value.split():
                 self.class_names.add(class_name)
@@ -985,6 +998,11 @@ def validate_generated_body(
         raise GeneratedBodyError(
             "Generated body contains forbidden document, metadata, or "
             f"executable tags: {names}."
+        )
+    if parser.executable_attributes:
+        names = ", ".join(sorted(set(parser.executable_attributes)))
+        raise GeneratedBodyError(
+            f"Generated body contains an executable attribute: {names}."
         )
     if parser.has_content_outside_body:
         raise GeneratedBodyError(
