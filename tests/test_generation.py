@@ -2042,11 +2042,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
 
     def test_build_generator_validates_brand_colors_before_model_request(self):
-        client = FakeLocalClient(
-            local_chat_payload(
-                body_with_markers(build.BUILD_DEPLOYMENT_COMMENT_MARKERS)
-            )
-        )
+        client = FakeLocalClient()
         prospect = {
             "business_name": "Test Business",
             "trade": "plumber",

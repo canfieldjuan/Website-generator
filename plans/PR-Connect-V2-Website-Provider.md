@@ -128,7 +128,8 @@ directions.
 - `build.py`
 - `connect_provider.py`
 - `lib/connect_v2.py`, `lib/connect_store.py`, `lib/connect_entitlement.py`
-- `tests/test_connect_provider.py`
+- `lib/generation.py`
+- `tests/test_connect_provider.py`, `tests/test_generation.py`
 - `requirements.txt`, `requirements-dev.txt`, `.github/workflows/generator-tests.yml`
 - `README.md`
 - `plans/PR-Connect-V2-Website-Provider.md`
@@ -221,8 +222,8 @@ as any other invalid token.
 
 ## Verification
 
-- `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests -v`
-  passed: 123 tests in 3.502 seconds on the updated combined tree, including
+- `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests`
+  passed: 172 tests in 8.319 seconds on the updated combined tree, including
   direct `llama.cpp` preflight, loopback proxy bypass, startup boundaries, and
   the Connect retryable runtime instruction plus the exact-head review
   regressions, including truthy and falsy malformed optional display names.
@@ -233,27 +234,29 @@ as any other invalid token.
 - Endpoint tests for missing/wrong/non-ASCII auth, malformed multipart,
   size/hash/media mismatches, same/conflicting IDs, busy concurrency, completed
   output, provider failure, and interrupted-job restart reconciliation.
-- `bash scripts/local_pr_review.sh` passed, including `git diff --check` and both
-  required plan documents.
-- Exact-head standalone-runtime fixture:
-  `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:18080/v1
-  GENERATION_TIMEOUT_SECONDS=14400 /tmp/website-redesign-connect-venv/bin/python
-  build.py examples/prospect-plumber-template.json --skip-image-gen
-  --skip-email-draft --skip-deploy` completed successfully against the CPU-only
-  `llama.cpp` v0.3.0 build at commit
-  `c1d0e7a004015f23bc0233470b747b596f29b264`, serving the exact
-  `qwen/qwen3.8-27b` alias. The runtime was bound to loopback, performed no
-  deployment or email/image side effect, and was stopped after the fixture;
-  the post-run GPU-process query was empty.
-- The admitted artifact was
-  `outputs/builds/drees-plumbing-inc/index.html` (74,579 bytes, SHA-256
-  `c6ac30df35b5e331c2cedbd84127bc5de5324868454858d45799ed0f57f6e0f9`).
-  The required unresolved-placeholder search returned `0`, and the required
-  fabricated-claim search returned `0`.
+- `bash scripts/local_pr_review.sh origin/codex/pr-local-generation-provider`
+  passed, including the committed diff check and provider plan presence.
+- Exact-head CUDA runtime acceptance: standalone `llama.cpp` from
+  `/home/juan-canfield/.local/build/llama.cpp-v0.3.0-cuda/bin/llama-server`
+  served the exact `qwen/qwen3.8-27b` alias on
+  `http://127.0.0.1:18080/v1`. The process held 19,898 MiB on the NVIDIA
+  GeForce RTX 3090 before inference and reached 96% utilization during the
+  request; the RTX 4060 Ti did not host the model.
+- A direct `generate_website_artifact` invocation used the real Connect input
+  adapter and generated an admitted in-memory artifact from
+  `examples/robert-niebrugge-sons-plumbing-dieterich.json`. llama.cpp processed
+  28,068 prompt tokens and generated 2,314 tokens at 67.89 tokens per second;
+  total model time was 45,225.64 ms. The returned artifact was
+  `robert-niebrugge-sons-plumbing-homepage.html` (70,403 bytes, SHA-256
+  `f89e4f5caff78fc4dac36f294d80a6f0975f872212d89badbf6144a900187be3`)
+  and began with the required doctype. The acceptance command performed no
+  deployment, email, image, or file-write side effect.
+- The llama.cpp server was stopped after acceptance; the post-run GPU query
+  reported 15 MiB used and 0% utilization on the RTX 3090.
 
 ## Final diff size
 
-Measured against the current provider base: 11 files changed, with 3,363
-insertions and 33 deletions across the durable provider and its contract,
+Measured against the current provider base: 13 files changed, with 3,542
+insertions and 53 deletions across the durable provider and its contract,
 concurrency, and restart boundary suite. Removing those tests or persistence
 boundaries would make the advertised asynchronous capability unproved.
