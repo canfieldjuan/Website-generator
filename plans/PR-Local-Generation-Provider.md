@@ -214,6 +214,25 @@ provider-unavailable behavior rather than trigger another request. This must not
 change OpenRouter, retry behavior, endpoint validation, payloads, timeouts,
 provider labels, GPU/runtime behavior, or Connect capability semantics.
 
+### Structural semantics contract revision
+
+The remaining exact-head findings share one root cause: output admission still
+models browser structure as flat token totals and global text joins. That can
+miss a denied phrase containing both a rendered line boundary and inline word
+markup, count differently cased class tokens even though the trusted CSS will
+not select them, and admit required footer or grid components outside the
+parent that gives them their layout and styling.
+
+The correct fix must build denied-claim text using semantic HTML block and line
+boundaries while keeping inline text contiguous; count required classes as
+exact, case-sensitive membership once per element; and validate the declared
+direct-child shape of the footer, services grid, service cards, and benefits
+grid. Tests must cover the mixed-boundary bypass, wrong-case class tokens,
+orphaned children, and valid structures. This must not alter trusted CSS,
+visible copy, component cardinality, page ordering, provider/model selection,
+GPU/runtime behavior, placeholder sanitation, or image, email, deployment, and
+Connect job contracts.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -261,6 +280,11 @@ provider labels, GPU/runtime behavior, or Connect capability semantics.
     leaving every other mandatory build count unchanged.
 21. Disable redirects on every shared loopback llama.cpp request so a local
     response cannot replay prompts or preflight traffic to a remote target.
+22. Derive claim text from semantic block/line boundaries while preserving
+    contiguous inline text.
+23. Match required class names with exact case-sensitive HTML class membership.
+24. Enforce the direct-child component shapes that make the required footer,
+    service, and benefits structures functional.
 
 ### Files touched
 

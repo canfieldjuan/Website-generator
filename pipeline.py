@@ -17,6 +17,7 @@ from lib.email import send_pitch_email
 from lib.generation import (
     DEFAULT_DOCUMENT_ACCENT,
     DEFAULT_DOCUMENT_SECONDARY,
+    REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
     PromptPart,
@@ -500,6 +501,7 @@ text, HTML head metadata, or unresolved template token.
         ),
         forbidden_class_names=interior_only_classes,
         required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+        required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     )
 
 def generate_interior_page(
@@ -576,6 +578,7 @@ SOURCE CONTENT:
             class_catalog,
         ),
         required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+        required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     )
 
 

@@ -15,6 +15,7 @@ from typing import Any, Iterable
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import requests
+from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from openai import DefaultHttpxClient, OpenAI
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
@@ -38,6 +39,54 @@ REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
     ("footer-bottom", 1),
+)
+REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES = (
+    ("site-footer", ("footer-grid", "footer-bottom")),
+)
+_RENDERED_TEXT_BOUNDARY_TAGS = frozenset(
+    (
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "dd",
+        "details",
+        "dialog",
+        "div",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hgroup",
+        "hr",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "summary",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    )
 )
 DEFAULT_DOCUMENT_ACCENT = "#1D4ED8"
 DEFAULT_DOCUMENT_SECONDARY = "#1F3A5F"
@@ -173,10 +222,10 @@ class _GeneratedBodyParser(HTMLParser):
                 continue
             for class_name in value.split():
                 self.class_names.add(class_name)
-                element_class_names.add(class_name.casefold())
-        for folded_class in element_class_names:
-            self.class_name_counts[folded_class] = (
-                self.class_name_counts.get(folded_class, 0) + 1
+                element_class_names.add(class_name)
+        for class_name in element_class_names:
+            self.class_name_counts[class_name] = (
+                self.class_name_counts.get(class_name, 0) + 1
             )
         tag_name = tag.lower()
         if tag_name == "body":
@@ -608,6 +657,73 @@ def _normalize_claim_match_text(value: str) -> str:
     return " ".join(normalized.split()).casefold()
 
 
+def _rendered_claim_text(body_root: Tag) -> str:
+    parts: list[str] = []
+
+    def visit(node: Any) -> None:
+        if isinstance(node, Comment):
+            return
+        if isinstance(node, NavigableString):
+            parts.append(str(node))
+            return
+        if not isinstance(node, Tag):
+            return
+        has_boundary = node.name.casefold() in _RENDERED_TEXT_BOUNDARY_TAGS
+        if has_boundary:
+            parts.append(" ")
+        for child in node.children:
+            visit(child)
+        if has_boundary:
+            parts.append(" ")
+
+    for child in body_root.children:
+        visit(child)
+    return "".join(parts)
+
+
+def _exact_class_names(element: Tag) -> set[str]:
+    classes = element.get("class", ())
+    if isinstance(classes, str):
+        return set(classes.split())
+    return {value for value in classes if isinstance(value, str)}
+
+
+def _required_child_sequence_mismatches(
+    body_root: Tag,
+    requirements: Iterable[tuple[str, tuple[str, ...]]],
+) -> list[str]:
+    mismatches: list[str] = []
+    all_elements = (body_root, *body_root.find_all(True))
+    for parent_class, expected_sequence in requirements:
+        expected_classes = set(expected_sequence)
+        parents = [
+            element
+            for element in all_elements
+            if parent_class in _exact_class_names(element)
+        ]
+        if not parents:
+            mismatches.append(f"{parent_class} parent is missing")
+            continue
+        for index, parent in enumerate(parents, start=1):
+            actual_sequence: list[str] = []
+            for child in parent.find_all(True, recursive=False):
+                matches = sorted(_exact_class_names(child) & expected_classes)
+                if len(matches) == 1:
+                    actual_sequence.append(matches[0])
+                elif not matches:
+                    actual_sequence.append(f"<{child.name}>")
+                else:
+                    actual_sequence.append("|".join(matches))
+            if tuple(actual_sequence) != expected_sequence:
+                expected = ", ".join(expected_sequence)
+                actual = ", ".join(actual_sequence) or "none"
+                mismatches.append(
+                    f"{parent_class}[{index}] direct children expected "
+                    f"{expected}, got {actual}"
+                )
+    return mismatches
+
+
 def validate_generated_body(
     result: GenerationResult,
     *,
@@ -616,6 +732,9 @@ def validate_generated_body(
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
     required_class_counts: Iterable[tuple[str, int]] = (),
+    required_child_class_sequences: Iterable[
+        tuple[str, tuple[str, ...]]
+    ] = (),
 ) -> str:
     body = _strip_outer_code_fence(require_complete_text(result))
     if "```" in body:
@@ -671,7 +790,7 @@ def validate_generated_body(
         )
     class_count_mismatches = []
     for class_name, expected_count in required_class_counts:
-        actual_count = parser.class_name_counts.get(class_name.casefold(), 0)
+        actual_count = parser.class_name_counts.get(class_name, 0)
         if actual_count != expected_count:
             class_count_mismatches.append(
                 f"{class_name} expected {expected_count}, got {actual_count}"
@@ -682,9 +801,22 @@ def validate_generated_body(
             + "; ".join(class_count_mismatches[:3])
         )
 
+    parsed_body = BeautifulSoup(body, "html.parser")
+    body_root = parsed_body.find("body")
+    if not isinstance(body_root, Tag):
+        raise GeneratedBodyError("Generated body root could not be parsed.")
+    child_sequence_mismatches = _required_child_sequence_mismatches(
+        body_root,
+        required_child_class_sequences,
+    )
+    if child_sequence_mismatches:
+        raise GeneratedBodyError(
+            "Generated body has invalid required component structure: "
+            + "; ".join(child_sequence_mismatches[:3])
+        )
+
     claim_surfaces = (
-        "".join(parser.visible_text_parts),
-        " ".join(parser.visible_text_parts),
+        _rendered_claim_text(body_root),
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
@@ -873,6 +1005,9 @@ def assemble_generated_html(
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
     required_class_counts: Iterable[tuple[str, int]] = (),
+    required_child_class_sequences: Iterable[
+        tuple[str, tuple[str, ...]]
+    ] = (),
 ) -> str:
     if body_theme not in {"theme-light", "theme-dark"}:
         raise GeneratedHtmlError(
@@ -890,6 +1025,7 @@ def assemble_generated_html(
         forbidden_visible_phrases=forbidden_visible_phrases,
         forbidden_class_names=forbidden_class_names,
         required_class_counts=required_class_counts,
+        required_child_class_sequences=required_child_class_sequences,
     )
     body = re.sub(
         r"^<body(?:\s[^>]*)?>",

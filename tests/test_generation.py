@@ -1090,6 +1090,18 @@ class BodyAssemblyTests(unittest.TestCase):
                 required_class_counts=(("service-card", 6),),
             )
 
+        wrong_case_body = (
+            "<body>" + '<div class="SERVICE-CARD"></div>' * 6 + "</body>"
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "service-card expected 6, got 0",
+        ):
+            validate_generated_body(
+                body_result(wrong_case_body),
+                required_class_counts=(("service-card", 6),),
+            )
+
         six_element_body = (
             "<body>"
             + '<div class="service-card"></div>' * 6
@@ -1120,6 +1132,8 @@ class BodyAssemblyTests(unittest.TestCase):
         denied_bodies = (
             "<body><p><span>Free</span><br><span>Estimates</span></p></body>",
             "<body><p>Free Esti<span>mates</span></p></body>",
+            "<body><p><span>Free</span><br><span>Esti</span>"
+            "<span>mates</span></p></body>",
         )
         for denied_body in denied_bodies:
             with self.subTest(body=denied_body):
@@ -1139,6 +1153,37 @@ class BodyAssemblyTests(unittest.TestCase):
             ),
             clean_body,
         )
+
+    def test_body_admission_requires_declared_component_children(self):
+        relationships = (
+            ("site-footer", ("footer-grid", "footer-bottom")),
+        )
+        valid_body = (
+            '<body><footer class="site-footer"><div class="footer-grid"></div>'
+            '<div class="footer-bottom"></div></footer></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(valid_body),
+                required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+                required_child_class_sequences=relationships,
+            ),
+            valid_body,
+        )
+
+        orphaned_body = (
+            '<body><footer class="site-footer"></footer>'
+            '<div class="footer-grid"></div><div class="footer-bottom"></div></body>'
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            r"site-footer\[1\].*expected footer-grid, footer-bottom, got none",
+        ):
+            validate_generated_body(
+                body_result(orphaned_body),
+                required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+                required_child_class_sequences=relationships,
+            )
 
     def test_body_admission_rejects_gated_claim_in_decoded_attributes(self):
         denied_bodies = (
@@ -1750,6 +1795,32 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 prospect,
                 config(),
                 FakeLocalClient(local_chat_payload(missing_services)),
+            )
+
+    def test_build_generator_rejects_service_cards_outside_the_grid(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+        service_cards = COMPLETE_SERVICES_GRID.removeprefix(
+            '<div class="services-grid">'
+        ).removesuffix("</div>")
+        orphaned_services = COMPLETE_BUILD_BODY.replace(
+            COMPLETE_SERVICES_GRID,
+            '<div class="services-grid"></div>' + service_cards,
+        )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            r"services-grid\[1\].*got none",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(orphaned_services)),
             )
 
     def test_build_generator_requires_coverage_band_only_with_a_phone(self):

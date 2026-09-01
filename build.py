@@ -28,6 +28,7 @@ from lib.deploy import deploy_to_vercel
 from lib.generation import (
     DEFAULT_DOCUMENT_ACCENT,
     DEFAULT_DOCUMENT_SECONDARY,
+    REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
     PromptPart,
@@ -104,6 +105,12 @@ BUILD_REQUIRED_CLASS_COUNTS = (
     ("benefit-card", 3),
     ("contact-form-wrap", 1),
     *REQUIRED_FOOTER_CLASS_COUNTS,
+)
+BUILD_REQUIRED_CHILD_CLASS_SEQUENCES = (
+    ("services-grid", ("service-card",) * 6),
+    ("service-card", ("service-card-name", "service-card-desc")),
+    ("benefits-grid", ("benefit-card",) * 3),
+    *REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
 )
 
 
@@ -828,6 +835,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
         forbidden_class_names=interior_only_classes,
         required_class_counts=required_class_counts,
+        required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
     )
 
 
