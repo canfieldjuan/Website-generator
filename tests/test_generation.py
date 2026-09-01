@@ -1005,6 +1005,19 @@ class BodyAssemblyTests(unittest.TestCase):
         self.assertIn("reviews-card-grid", class_names)
         self.assertNotIn("{{SITE_NAME}}", class_names)
 
+    def test_mobile_trust_strip_wraps_without_horizontal_scroller(self):
+        responsive_css = self.base_template.split(
+            "@media (max-width: 768px)", 1
+        )[1].split("</style>", 1)[0]
+
+        self.assertIn(
+            ".trust-strip { height: auto; min-height: var(--trust-strip-height); }",
+            responsive_css,
+        )
+        self.assertIn("flex-wrap: wrap", responsive_css)
+        self.assertIn("overflow-x: visible", responsive_css)
+        self.assertNotIn("overflow-x: auto", responsive_css)
+
     def test_homepage_class_catalog_excludes_interior_components(self):
         template = """<style>
         .page-wrap, .page-body, .page-cta-block, .footer-bottom { display: block; }

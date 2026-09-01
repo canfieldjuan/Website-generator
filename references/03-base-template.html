@@ -1243,8 +1243,17 @@ img { display: block; max-width: 100%; }
   :root { --page-pad: 1rem; }
   .nav-links     { display: none; }
   .nav-phone     { display: none; } /* phone visible in dual-cta-hero on mobile */
-  .trust-strip-inner { gap: 1rem; overflow-x: auto; }
-  .trust-item + .trust-item { padding-left: 1rem; }
+  .trust-strip { height: auto; min-height: var(--trust-strip-height); }
+  .trust-strip-inner {
+    gap: 0.5rem 1rem;
+    flex-wrap: wrap;
+    overflow-x: visible;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+  .trust-strip-inner > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .trust-item { flex-shrink: 1; }
+  .trust-item + .trust-item { padding-left: 0; border-left: 0; }
   .dual-cta-hero { padding: 2.5rem 0 2rem; }
   /* Mobile hero overlay override: the desktop left-to-right gradient
      fades to 5% on the right, which is fine when the text column has

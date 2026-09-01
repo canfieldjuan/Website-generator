@@ -315,6 +315,22 @@ This must not change prospect values, phone presentation, visible copy, trusted
 template/CSS, required component counts, provider/model selection, GPU/runtime
 behavior, or any image, email, deployment, and Connect job contract.
 
+### Mobile trust-strip fixture revision
+
+The final phone-width browser proof exposed a release-path defect in the
+trusted template itself: the mobile trust strip remains fixed-height, its
+children do not wrap, and the responsive rule converts overflow into an
+unlabelled horizontal scroller. Verified trust signals can therefore render
+off-canvas even though the generated document passes admission.
+
+The correct fix must touch only the trusted template's phone-width trust-strip
+layout, its focused regression, and this evidence record. At 768px and below,
+the strip must preserve every rendered trust signal, wrap them within the
+viewport, and grow vertically as needed. Desktop trust-strip behavior, trust
+content, model prompts, generation admission, provider selection, runtime,
+and all downstream image, email, deployment, and Connect contracts must remain
+unchanged.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -410,6 +426,9 @@ behavior, or any image, email, deployment, and Connect job contract.
     family rather than one label-specific phrase.
 43. Require the exact verified Formspree action, or the explicit `#` fallback,
     on the generated contact form before assembly.
+44. Keep every trust-strip child within the phone viewport by wrapping the
+    trusted strip and allowing its height to grow at the existing mobile
+    breakpoint.
 
 ### Files touched
 
@@ -417,7 +436,8 @@ behavior, or any image, email, deployment, and Connect job contract.
 - `build.py`, `pipeline.py`
 - `tests/test_generation.py`, `tests/__init__.py`
 - `references/02-redesign-gen-prompt.md`, `references/04-interior-page-prompt.md`,
-  `references/06-build-prompt.md`, `references/07-industry-defaults.md`
+  `references/03-base-template.html`, `references/06-build-prompt.md`,
+  `references/07-industry-defaults.md`
 - `.github/workflows/generator-tests.yml`
 - `scripts/start_llama_server.sh`
 - `README.md`
@@ -539,6 +559,10 @@ claim remains admissible.
   unresolved mandatory page structure.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest
+  tests.test_generation.BodyAssemblyTests.test_mobile_trust_strip_wraps_without_horizontal_scroller`
+  — failed against the fixed-height horizontal-scroller rule, then passed
+  after the scoped mobile template correction.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.BodyAssemblyTests.test_body_admission_rejects_gated_claim_in_decoded_attributes`
   — passed after the Unicode-whitespace review correction; covers ordinary,
   non-breaking, em-space, percent-encoded, and clean-label paths.
@@ -549,8 +573,8 @@ claim remains admissible.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python pipeline.py --help` — passed;
   provider/model and existing skip flags shown.
 - `git diff --check` — passed.
-- Standalone-runtime fixture at generator code head
-  `f94aa759343cca7e63975e862151b0a6c4be5af7`:
+- Final standalone-runtime fixture at generator code head
+  `731289ccdea34acb416cc854a00e0f1551b38db4`:
   `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:18081/v1
   GENERATION_TIMEOUT_SECONDS=14400
   /home/juan-canfield/.cache/website-redesign-connect-venv/bin/python build.py
@@ -560,12 +584,17 @@ claim remains admissible.
   `qwen/qwen3.8-27b` alias. The command produced no deployment, email, or image
   side effect. `CUDA_VISIBLE_DEVICES=0` and the launcher's default
   `LLAMA_CPP_GPU_LAYERS=all` confined inference to the RTX 3090; the live server
-  process held 19,898 MiB there.
+  process held 19,898 MiB there. The server recorded 27,955 prompt tokens and
+  2,850 generated tokens at 67.23 tokens/second, with 53,792.27 ms total task
+  time.
 - The admitted artifact was
-  `outputs/builds/drees-plumbing-inc/index.html` (71,704 bytes, SHA-256
-  `6b6a0ad79134c8717d963e868958513e59aa10714aebf6b9f8e6c05d17daeeb4`).
-  The shared HTML validator accepted it; the required unresolved-placeholder
-  search returned `0`, and the required fabricated-claim search returned `0`.
+  `outputs/builds/drees-plumbing-inc/index.html` (71,870 bytes, SHA-256
+  `7fbedc85221654541b5f6bec447f3730be4732d246e18c6499cbad1bc53c6e1d`).
+  The shared HTML validator accepted it. Its generated body contains zero
+  unresolved curly placeholders and zero same-day claims; the one whole-file
+  `{{TOKEN}}` occurrence is the immutable base-template documentation comment,
+  not model output. It contains exactly one contact form with the verified
+  prospect endpoint.
   It contains one services grid, six service cards, six service names, six
   service descriptions, and every other mandatory class at its exact count.
 - The saved GPU artifact was re-admitted through the final executable-attribute,
@@ -576,9 +605,19 @@ claim remains admissible.
   fixture contains no `img` element, so the fixed post-admission image handler
   is proven separately by the focused trusted-assembly regression rather than
   overstated as fixture evidence.
-- System Chrome screenshots at 1440x900, 1440x3000, 390x844, and 390x5000
-  confirmed the services grid renders as two rows of three on desktop and six
-  stacked cards on mobile without horizontal clipping.
+- The original system-Chrome proof exposed the second trust badge off-canvas
+  at 390x844. The saved, admitted GPU body was then re-admitted through the
+  final validator and deterministically assembled with the corrected trusted
+  template (72,170 bytes). A fresh 390x844 system-Chrome screenshot
+  (`final-mobile.png`, 85,974 bytes) shows both trust signals wrapped within
+  the viewport and the strip growing to contain them. The responsive override
+  is confined to the existing 768px breakpoint, so the desktop layout remains
+  controlled by the unchanged base rules.
+- A second CUDA-backed generation request after the template correction
+  completed model inference but was rejected before output because that sample
+  omitted the single required `form.contact-form-wrap` action owner. This is
+  retained as fail-closed evidence, not reported as a successful fixture and
+  not retried merely to obtain a passing sample.
 - The standalone runtime was stopped after validation. The GPU compute-process
   query was empty.
 - Mocked local transport tests prove the configured request reaches the
