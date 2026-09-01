@@ -34,6 +34,7 @@ unproved admission rule.
 - `lib/generation.py`, `lib/clients.py`, `lib/email.py`, `lib/__init__.py`
 - `build.py`, `pipeline.py`
 - `tests/test_generation.py`, `tests/__init__.py`
+- `references/02-redesign-gen-prompt.md`, `references/06-build-prompt.md`
 - `.github/workflows/generator-tests.yml`
 - `README.md`
 - `plans/PR-Local-Generation-Provider.md`
@@ -51,6 +52,8 @@ admission accepts only a normal `stop` response containing one ordered doctype,
 `html`, `head`, and `body` structure within the byte limit. Writes use a
 same-directory temporary file plus `os.replace`. Non-whitespace text and HTML
 elements outside `head` or `body` are rejected rather than silently admitted.
+Both generation prompts place their required deployment metadata comment inside
+`head`, preserving that metadata without contradicting the doctype-first gate.
 
 ## Intentional
 
@@ -75,7 +78,7 @@ elements outside `head` or `body` are rejected rather than silently admitted.
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 34 tests passed.
+  — 36 tests passed.
 - `python3 -m compileall -q build.py pipeline.py lib tests` — passed.
 - `python3 build.py --help` — passed; provider/model and existing skip flags shown.
 - `python3 pipeline.py --help` — passed; provider/model and existing skip flags shown.

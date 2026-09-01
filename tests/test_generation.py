@@ -343,6 +343,14 @@ class HtmlAdmissionTests(unittest.TestCase):
                 with self.assertRaisesRegex(GeneratedHtmlError, "outside head or body"):
                     validate_generated_html(result(document))
 
+    def test_deployment_comment_inside_head_is_accepted(self):
+        documented = COMPLETE_HTML.replace(
+            "<head>",
+            "<head><!-- deployment metadata -->",
+            1,
+        )
+        self.assertEqual(validate_generated_html(result(documented)), documented)
+
     def test_whitespace_outside_head_and_body_is_accepted(self):
         separated = COMPLETE_HTML.replace(
             '<html lang="en">',
@@ -374,6 +382,30 @@ class HtmlAdmissionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(GeneratedHtmlError, "limit is"):
             validate_generated_html(result(at_limit + "x"))
+
+
+class PromptContractTests(unittest.TestCase):
+    def test_deployment_comments_are_required_inside_document_head(self):
+        for prompt_path in (
+            Path("references/06-build-prompt.md"),
+            Path("references/02-redesign-gen-prompt.md"),
+        ):
+            with self.subTest(prompt=str(prompt_path)):
+                prompt = prompt_path.read_text(encoding="utf-8")
+                self.assertIn("first characters must be `<!DOCTYPE html>`", prompt)
+                self.assertIn(
+                    "immediately after the opening `<head>` tag",
+                    prompt,
+                )
+                self.assertNotIn(
+                    "at the very top of the output, before DOCTYPE",
+                    prompt,
+                )
+                self.assertNotIn(
+                    "at the very top of every HTML file output, before the DOCTYPE",
+                    prompt,
+                )
+                self.assertNotIn("after the comment block", prompt)
 
 
 class AtomicWriteAndCliTests(unittest.TestCase):
