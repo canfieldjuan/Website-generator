@@ -85,6 +85,48 @@ COMPLETE_BUILD_BODY = (
     '<footer class="site-footer"><div class="footer-grid"></div>'
     '<div class="footer-bottom"><p>Copyright</p></div></footer></body>'
 )
+
+
+def build_body_with_review_section(section):
+    return COMPLETE_BUILD_BODY.replace(
+        '<form class="contact-form-wrap"',
+        f'{section}<form class="contact-form-wrap"',
+    )
+
+
+def aggregate_review_section(score, count, url="https://example.com/reviews"):
+    return (
+        '<section><div class="reviews-aggregate">'
+        f'<span class="reviews-stars-lg" style="--score: {score}">Stars</span>'
+        f'<div class="reviews-score">{score}'
+        '<span class="of-five">out of 5</span></div>'
+        f'<div class="reviews-count">Based on {count} reviews on Google</div>'
+        f'<a class="reviews-cta" href="{url}">Read All Reviews on Google</a>'
+        '</div></section>'
+    )
+
+
+def review_card_section(reviews, score, count, url="https://example.com/reviews"):
+    cards = "".join(
+        '<div class="review-card">'
+        f'<span class="review-stars-sm" style="--score: {review["rating"]}">Stars</span>'
+        f'<p class="review-text">{review["text"]}</p>'
+        '<div class="review-meta">'
+        f'<span class="review-author">{review["author"]}'
+        f'<span class="review-date">{review["date"]}</span></span>'
+        f'<span class="review-platform">{review["platform"]}</span>'
+        '</div></div>'
+        for review in reviews
+    )
+    return (
+        '<section><div class="reviews-card-grid">'
+        f'{cards}</div><div class="reviews-summary-row">'
+        f'<span class="reviews-summary-stars" style="--score: {score}">Stars</span>'
+        f'<span class="reviews-summary-text"><strong>{score} out of 5</strong> '
+        f'Based on {count} Google Reviews</span>'
+        f'<a class="reviews-summary-cta" href="{url}">Read All on Google</a>'
+        '</div></section>'
+    )
 class FakeModels:
     def __init__(self, model_ids=None, error=None):
         self.model_ids = model_ids or []
@@ -1036,6 +1078,30 @@ class BodyAssemblyTests(unittest.TestCase):
             'aria-label="Request service">Request service</a></body>'
         )
         self.assertEqual(validate_generated_body(body_result(valid_body)), valid_body)
+
+    def test_body_admission_rejects_nondeterministic_rendering_containers(self):
+        for tag in (
+            "audio",
+            "canvas",
+            "datalist",
+            "details",
+            "dialog",
+            "iframe",
+            "map",
+            "noscript",
+            "object",
+            "template",
+            "video",
+        ):
+            body = f"<body><{tag}>Hidden claim</{tag}></body>"
+            with self.subTest(tag=tag), self.assertRaisesRegex(
+                GeneratedBodyError,
+                f"browser-inert tag: {tag}",
+            ):
+                validate_generated_body(body_result(body))
+
+        rendered = "<body><section><p>Visible claim</p></section></body>"
+        self.assertEqual(validate_generated_body(body_result(rendered)), rendered)
 
     def test_homepage_class_catalog_excludes_interior_components(self):
         template = """<style>
@@ -2316,14 +2382,14 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
         non_phone_numbers = body_without_coverage.replace(
             "</nav>",
-            "<span>Serving since 2011. Rated 4.8 by 12 customers.</span></nav>",
+            "<span>Route 2011 covers 12 service zones.</span></nav>",
         )
         html = build.generate_build_html(
             prospect,
             config(),
             FakeLocalClient(local_chat_payload(non_phone_numbers)),
         )
-        self.assertIn("Serving since 2011", html)
+        self.assertIn("Route 2011 covers 12 service zones", html)
 
         prospect["phone"] = "217-555-0100"
         with self.assertRaisesRegex(
@@ -2335,6 +2401,233 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 config(),
                 FakeLocalClient(local_chat_payload(body_without_coverage)),
             )
+
+    def test_build_generator_rejects_reviews_without_source_evidence(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "reviews": [],
+            "google_review_score": None,
+            "google_review_count": None,
+        }
+        fabricated_reviews = build_body_with_review_section(
+            aggregate_review_section("4.9", "127")
+        )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "reviews-aggregate expected 0, got 1",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(fabricated_reviews)),
+            )
+
+        ambient_claim = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            '<span class="trust-stars" style="--score: 4.9">Stars</span>'
+            "<span>Rated 4.9 by 127 customers</span></nav>",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unsourced ambient review"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(ambient_claim)),
+            )
+
+        unscored_widget = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            '<span class="form-trust-stars">Stars</span></nav>',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "without a scored overlay"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unscored_widget)),
+            )
+
+    def test_build_generator_binds_aggregate_review_claims_to_source(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "reviews": [],
+            "google_review_score": 4.4,
+            "google_review_count": 12,
+            "google_business_url": "https://example.com/reviews",
+        }
+        admitted_body = build_body_with_review_section(
+            aggregate_review_section("4.4", "12")
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(admitted_body)),
+        )
+        self.assertIn(admitted_body, html)
+
+        exact_ambient = admitted_body.replace(
+            "</nav>",
+            '<span class="trust-stars" style="--score: 4.4">Stars</span>'
+            "<span>Rated 4.4 by 12 customers</span></nav>",
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(exact_ambient)),
+        )
+        self.assertIn("Rated 4.4 by 12 customers", html)
+
+        wrong_count = build_body_with_review_section(
+            aggregate_review_section("4.4", "127")
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "review count"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_count)),
+            )
+
+        wrong_score = build_body_with_review_section(
+            aggregate_review_section("4.9", "12")
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "review score"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_score)),
+            )
+
+        wrong_url = build_body_with_review_section(
+            aggregate_review_section("4.4", "12", "https://example.com/invented")
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "reviews URL"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_url)),
+            )
+
+        wrong_ambient = admitted_body.replace(
+            "</nav>",
+            "<span>Rated 4.9 by 127 customers</span></nav>",
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "unexpected ambient review score",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_ambient)),
+            )
+
+    def test_build_generator_binds_review_cards_to_source_entries(self):
+        reviews = [
+            {
+                "author": "Ada A.",
+                "rating": 5,
+                "date": "a month ago",
+                "platform": "Google",
+                "text": "Prompt and careful work.",
+            },
+            {
+                "author": "Ben B.",
+                "rating": 4,
+                "date": "two months ago",
+                "platform": "Google",
+                "text": "Clear communication throughout.",
+            },
+            {
+                "author": "Cora C.",
+                "rating": 5,
+                "date": "three months ago",
+                "platform": "Google",
+                "text": "The repair has held up well.",
+            },
+        ]
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "reviews": reviews,
+            "google_review_score": 4.8,
+            "google_review_count": 31,
+            "google_business_url": "https://example.com/reviews",
+        }
+        admitted_body = build_body_with_review_section(
+            review_card_section(reviews, "4.8", "31")
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(admitted_body)),
+        )
+        self.assertIn(admitted_body, html)
+
+        fabricated = [dict(review) for review in reviews]
+        fabricated[1]["text"] = "Invented review copy."
+        fabricated_body = build_body_with_review_section(
+            review_card_section(fabricated, "4.8", "31")
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "review card"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(fabricated_body)),
+            )
+
+        wrong_rating = [dict(review) for review in reviews]
+        wrong_rating[0]["rating"] = 3
+        wrong_rating_body = build_body_with_review_section(
+            review_card_section(wrong_rating, "4.8", "31")
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "review card"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_rating_body)),
+            )
+
+        duplicate_card_body = build_body_with_review_section(
+            review_card_section([reviews[0], reviews[0], reviews[2]], "4.8", "31")
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "review card"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(duplicate_card_body)),
+            )
+
+    def test_review_sanitizer_drops_entries_that_cannot_render_truthfully(self):
+        valid = {
+            "author": "Ada A.",
+            "rating": 5,
+            "date": "a month ago",
+            "platform": "Google",
+            "text": "Prompt and careful work.",
+        }
+        prospect = {
+            "reviews": [
+                valid,
+                {**valid, "author": None},
+                {**valid, "rating": "5"},
+                {**valid, "rating": 6},
+                {**valid, "text": ""},
+            ]
+        }
+
+        build.sanitize_reviews(prospect)
+
+        self.assertEqual(prospect["reviews"], [valid])
 
     def test_build_generator_enforces_identity_and_phone_substitutions(self):
         prospect = {
@@ -2445,6 +2738,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     'href="tel:2175550199" href="tel:2175550100"',
                 ),
                 "duplicate attribute",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    '<span>Test Business</span>'
+                    '<a href="tel:2175550100">217-555-0100</a>',
+                    '<template><span>Test Business</span>'
+                    '<a href="tel:2175550100">217-555-0100</a></template>',
+                ),
+                "browser-inert tag: template",
             ),
             (
                 COMPLETE_BUILD_BODY.replace(

@@ -390,11 +390,13 @@ The per-section rules:
    contains. Three possible renderings:
 
    **Branch A -- prospect.reviews has 3+ entries**: render the
-   card-grid treatment. Three reviews maximum (use the strongest 3
-   if the array has more). Each review object MUST have the shape
-   `{author, rating, date, platform, text}`. Below the cards, a
-   single inline summary row with the aggregate score and a Google
-   link. Markup:
+   card-grid treatment. Three reviews maximum (use any 3 complete
+   source entries if the array has more). Each review object MUST have the shape
+   `{author, rating, date, platform, text}`. Copy every field exactly;
+   never combine or rewrite entries. If both aggregate score and count
+   are present and valid, add one inline summary row with the aggregate
+   score and Google link. Otherwise omit the summary row. Markup when
+   aggregate evidence is present:
    ```html
    <div class="page-wrap section-gap">
      <div class="sec-hd">
@@ -420,7 +422,8 @@ The per-section rules:
    ```
 
    **Branch B -- prospect.reviews is empty OR has fewer than 3 entries,
-   BUT prospect.google_review_score is a number**: fall back to the
+   BUT prospect.google_review_score is a number AND
+   prospect.google_review_count is a positive integer**: fall back to the
    centered aggregate widget. The card grid is skipped entirely.
    Showing 1 or 2 cards is forbidden -- it reads as "we couldn't find
    a third good one." Markup:
@@ -440,11 +443,12 @@ The per-section rules:
    </div>
    ```
 
-   **Branch C -- both reviews empty AND google_review_score is null**:
+   **Branch C -- fewer than 3 complete reviews AND no complete numeric
+   score/count pair**:
    OMIT the entire Customer Reviews section. Do NOT render the section
    header alone.
 
-   **For `google_reviews_url` in either Branch A or B**: use
+   **For `google_reviews_url` in Branch B or a Branch A summary**: use
    prospect.google_business_url verbatim if present. Otherwise fall
    back to a Google Maps search URL:
    `https://www.google.com/maps/search/?api=1&query=[business_name]+[city]+[state]`
@@ -452,7 +456,8 @@ The per-section rules:
 
    **NEVER fabricate review text, ratings, dates, authors, or
    platforms.** If prospect.reviews has fewer than 3 entries, use
-   Branch B -- do NOT invent additional reviews to fill the grid.
+   Branch B only when its complete aggregate evidence exists; otherwise
+   use Branch C. Do NOT invent additional reviews to fill the grid.
 8. Inline contact form (`.contact-form-wrap`) -- see CONTACT FORM RULE.
 9. Footer (3-col) -- see FOOTER ARCHITECTURE.
 

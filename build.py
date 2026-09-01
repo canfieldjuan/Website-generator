@@ -22,6 +22,7 @@ import json
 import hashlib
 import argparse
 from datetime import date
+from urllib.parse import quote_plus
 
 from lib.images import fetch_unsplash_hero, generate_image_openrouter
 from lib.deploy import deploy_to_vercel
@@ -32,6 +33,8 @@ from lib.generation import (
     REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
     PromptPart,
+    ReviewAdmissionContract,
+    ReviewEvidence,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -140,15 +143,178 @@ BUILD_REQUIRED_CHILD_CLASS_SEQUENCES = (
     *REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
 )
 
+REVIEW_CLASS_NAMES = (
+    "reviews-card-grid",
+    "review-card",
+    "review-stars-sm",
+    "review-text",
+    "review-author",
+    "review-date",
+    "review-platform",
+    "reviews-summary-row",
+    "reviews-summary-stars",
+    "reviews-summary-text",
+    "reviews-summary-cta",
+    "reviews-aggregate",
+    "reviews-stars-lg",
+    "reviews-score",
+    "reviews-count",
+    "reviews-cta",
+)
+
+
+def _usable_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _usable_review_entry(review):
+    if not isinstance(review, dict):
+        return False
+    text_fields = ("author", "text", "date", "platform")
+    rating = review.get("rating")
+    return (
+        all(
+            isinstance(review.get(field), str)
+            and review[field].strip()
+            and not _is_placeholder(review[field])
+            for field in text_fields
+        )
+        and _usable_number(rating)
+        and 1 <= rating <= 5
+    )
+
+
+def _aggregate_review_values(prospect):
+    score = prospect.get("google_review_score")
+    count = prospect.get("google_review_count")
+    if (
+        not _usable_number(score)
+        or not 0 <= score <= 5
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count < 1
+    ):
+        return None, None
+    return score, count
+
+
+def expected_google_reviews_url(prospect):
+    supplied = prospect.get("google_business_url")
+    if isinstance(supplied, str) and supplied.strip():
+        return supplied.strip()
+    query = " ".join(
+        str(prospect.get(field) or "").strip()
+        for field in ("business_name", "city", "state")
+    ).strip()
+    return f"https://www.google.com/maps/search/?api=1&query={quote_plus(query)}"
+
+
+def expected_review_contract(prospect):
+    reviews = tuple(
+        ReviewEvidence(
+            author=review["author"],
+            rating=review["rating"],
+            date=review["date"],
+            platform=review["platform"],
+            text=review["text"],
+        )
+        for review in prospect.get("reviews", ())
+        if _usable_review_entry(review)
+    )
+    score, count = _aggregate_review_values(prospect)
+    reviews_url = expected_google_reviews_url(prospect)
+    if len(reviews) >= 3:
+        return ReviewAdmissionContract(
+            mode="cards",
+            source_reviews=reviews,
+            aggregate_score=score,
+            aggregate_count=count,
+            reviews_url=reviews_url if score is not None else None,
+        )
+    if score is not None:
+        return ReviewAdmissionContract(
+            mode="aggregate",
+            aggregate_score=score,
+            aggregate_count=count,
+            reviews_url=reviews_url,
+        )
+    return ReviewAdmissionContract(mode="omit")
+
+
+def _review_class_counts(contract):
+    counts = dict.fromkeys(REVIEW_CLASS_NAMES, 0)
+    if contract.mode == "cards":
+        counts.update(
+            {
+                "reviews-card-grid": 1,
+                "review-card": 3,
+                "review-stars-sm": 3,
+                "review-text": 3,
+                "review-author": 3,
+                "review-date": 3,
+                "review-platform": 3,
+            }
+        )
+        if contract.aggregate_score is not None:
+            counts.update(
+                {
+                    "reviews-summary-row": 1,
+                    "reviews-summary-stars": 1,
+                    "reviews-summary-text": 1,
+                    "reviews-summary-cta": 1,
+                }
+            )
+    elif contract.mode == "aggregate":
+        counts.update(
+            {
+                "reviews-aggregate": 1,
+                "reviews-stars-lg": 1,
+                "reviews-score": 1,
+                "reviews-count": 1,
+                "reviews-cta": 1,
+            }
+        )
+    return tuple(counts.items())
+
+
+def review_contract_instruction(contract):
+    if contract.mode == "omit":
+        return (
+            "MANDATORY REVIEW MODE: omit. Render no customer-review section, "
+            "review component, score, count, author, or review quotation."
+        )
+    if contract.mode == "aggregate":
+        return (
+            "MANDATORY REVIEW MODE: aggregate. Render the aggregate component "
+            f"with exact score {contract.aggregate_score!r}, exact count "
+            f"{contract.aggregate_count!r}, and exact href "
+            f"{json.dumps(contract.reviews_url)}."
+        )
+    summary = (
+        " Include the sourced aggregate summary with exact score "
+        f"{contract.aggregate_score!r}, exact count {contract.aggregate_count!r}, "
+        f"and exact href {json.dumps(contract.reviews_url)}."
+        if contract.aggregate_score is not None
+        else " Omit the aggregate summary because no complete aggregate exists."
+    )
+    return (
+        "MANDATORY REVIEW MODE: cards. Render exactly three complete review "
+        "objects from prospect.reviews without combining or rewriting fields."
+        f"{summary}"
+    )
+
 
 def required_build_class_counts(prospect):
     """Return the exact page skeleton valid for the sanitized prospect."""
-    if prospect.get("phone"):
-        return BUILD_REQUIRED_CLASS_COUNTS
-    return tuple(
-        (class_name, 0 if class_name == "coverage-band" else expected_count)
-        for class_name, expected_count in BUILD_REQUIRED_CLASS_COUNTS
+    base_counts = (
+        BUILD_REQUIRED_CLASS_COUNTS
+        if prospect.get("phone")
+        else tuple(
+            (class_name, 0 if class_name == "coverage-band" else expected_count)
+            for class_name, expected_count in BUILD_REQUIRED_CLASS_COUNTS
+        )
     )
+    return (*base_counts, *_review_class_counts(expected_review_contract(prospect)))
 
 
 def expected_build_form_action(prospect):
@@ -220,10 +386,7 @@ def sanitize_placeholders(prospect):
 
 
 def sanitize_reviews(prospect):
-    """Drop entries from prospect.reviews that still contain template
-    placeholder markers (EXAMPLE / REPLACE / etc.) in any of their
-    visible string fields. The remaining list is what the build will
-    actually render."""
+    """Keep only complete, source-backed review entries the build can render."""
     reviews = prospect.get("reviews")
     if not isinstance(reviews, list) or not reviews:
         return
@@ -233,16 +396,21 @@ def sanitize_reviews(prospect):
         if not isinstance(r, dict):
             dropped += 1
             continue
-        suspect_fields = ("author", "text", "date", "platform")
-        if any(_is_placeholder(r.get(f)) for f in suspect_fields):
+        if not _usable_review_entry(r):
             text_preview = (r.get("text") or "")[:60]
-            print(f"[*] Dropping placeholder review entry: author={r.get('author')!r}, text={text_preview!r}...")
+            print(
+                "[*] Dropping unusable review entry: "
+                f"author={r.get('author')!r}, text={text_preview!r}..."
+            )
             dropped += 1
             continue
         cleaned.append(r)
+    prospect["reviews"] = cleaned
     if dropped:
-        prospect["reviews"] = cleaned
-        print(f"[*] {dropped} placeholder review(s) removed; {len(cleaned)} real review(s) remain.")
+        print(
+            f"[*] {dropped} unusable review(s) removed; "
+            f"{len(cleaned)} source review(s) remain."
+        )
 
 
 def normalize_years(prospect, build_date):
@@ -850,6 +1018,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             "`.ft-phone`, and `.coverage-band`; render `.cta-planned` as the "
             "sole hero CTA anchored to `#contact`."
         )
+    review_contract = expected_review_contract(prospect)
     required_class_counts = required_build_class_counts(prospect)
     if logo_url:
         logo_instruction = (
@@ -871,6 +1040,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{BUILD_SERVICES_RESPONSE_SCAFFOLD}\n"
         "MANDATORY EXACT SUBSTITUTIONS: "
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
+        f"{review_contract_instruction(review_contract)}\n"
         f"{phone_instruction}\n"
         f"{logo_instruction}"
     )
@@ -936,6 +1106,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         ),
         expected_phone=prospect.get("phone"),
         expected_form_action=expected_build_form_action(prospect),
+        expected_reviews=review_contract,
         required_class_counts=required_class_counts,
         required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
     )

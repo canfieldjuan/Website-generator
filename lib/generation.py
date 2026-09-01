@@ -120,8 +120,24 @@ BIDI_PHONE_CONTROLS = frozenset(
 )
 ACTIONABLE_URL_ATTRIBUTES = ("href", "action", "formaction", "xlink:href")
 TRUSTED_IMAGE_ERROR_HANDLER = "this.style.display='none'"
+NONDETERMINISTIC_RENDERING_TAGS = frozenset(
+    {
+        "audio",
+        "canvas",
+        "datalist",
+        "details",
+        "dialog",
+        "iframe",
+        "map",
+        "noscript",
+        "object",
+        "template",
+        "video",
+    }
+)
 _EXPECTED_PHONE_UNSET = object()
 _EXPECTED_FORM_ACTION_UNSET = object()
+_EXPECTED_REVIEWS_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -188,6 +204,24 @@ class DocumentColors:
 
 
 @dataclass(frozen=True)
+class ReviewEvidence:
+    author: str
+    rating: int | float
+    date: str
+    platform: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ReviewAdmissionContract:
+    mode: str
+    source_reviews: tuple[ReviewEvidence, ...] = ()
+    aggregate_score: int | float | None = None
+    aggregate_count: int | None = None
+    reviews_url: str | None = None
+
+
+@dataclass(frozen=True)
 class ThemeDefinition:
     font_link: str
     font_display: str
@@ -244,6 +278,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.body_depth = 0
         self.body_events: list[str] = []
         self.forbidden_tags: list[str] = []
+        self.nondeterministic_rendering_tags: list[str] = []
         self.has_content_outside_body = False
         self.visible_text_parts: list[str] = []
         self.decoded_attribute_values: list[str] = []
@@ -297,6 +332,8 @@ class _GeneratedBodyParser(HTMLParser):
             self.body_events.append("start")
             self.body_depth += 1
             return
+        if tag_name in NONDETERMINISTIC_RENDERING_TAGS:
+            self.nondeterministic_rendering_tags.append(tag_name)
         if tag_name in {"html", "head", "style", "script", "base", "link", "meta"}:
             self.forbidden_tags.append(tag_name)
         elif tag_name == "title" and self.svg_depth == 0:
@@ -321,6 +358,8 @@ class _GeneratedBodyParser(HTMLParser):
             else:
                 self.has_content_outside_body = True
             return
+        if tag_name in NONDETERMINISTIC_RENDERING_TAGS:
+            self.nondeterministic_rendering_tags.append(tag_name)
         if tag_name in {"html", "head", "style", "script", "base", "link", "meta"}:
             self.forbidden_tags.append(tag_name)
         elif tag_name == "title" and self.svg_depth == 0:
@@ -1015,6 +1054,256 @@ def _exact_class_names(element: Tag) -> set[str]:
     return {value for value in classes if isinstance(value, str)}
 
 
+def _elements_with_class(root: Tag, class_name: str) -> list[Tag]:
+    return [
+        element
+        for element in (root, *root.find_all(True))
+        if class_name in _exact_class_names(element)
+    ]
+
+
+def _single_component(root: Tag, class_name: str, owner: str) -> Tag:
+    matches = _elements_with_class(root, class_name)
+    if len(matches) != 1:
+        raise GeneratedBodyError(
+            f"Generated body {owner} must contain exactly one {class_name}."
+        )
+    return matches[0]
+
+
+def _score_style_value(element: Tag, owner: str) -> float:
+    style = element.get("style")
+    if not isinstance(style, str):
+        raise GeneratedBodyError(f"Generated body {owner} has no review score style.")
+    declarations = re.findall(
+        r"(?:^|;)\s*--score\s*:\s*([^;]+?)\s*(?=;|$)",
+        style,
+        re.IGNORECASE,
+    )
+    if len(declarations) != 1 or not re.fullmatch(
+        r"(?:\d+(?:\.\d*)?|\.\d+)",
+        declarations[0].strip(),
+    ):
+        raise GeneratedBodyError(
+            f"Generated body {owner} has an invalid review score style."
+        )
+    return float(declarations[0])
+
+
+def _direct_text(element: Tag) -> str:
+    return " ".join(
+        str(child)
+        for child in element.children
+        if isinstance(child, NavigableString)
+    )
+
+
+def _normalized_review_evidence(card: Tag) -> ReviewEvidence:
+    stars = _single_component(card, "review-stars-sm", "review card")
+    text = _single_component(card, "review-text", "review card")
+    author = _single_component(card, "review-author", "review card")
+    date = _single_component(card, "review-date", "review card")
+    platform = _single_component(card, "review-platform", "review card")
+    return ReviewEvidence(
+        author=_normalize_claim_match_text(_direct_text(author)),
+        rating=_score_style_value(stars, "review card"),
+        date=_normalize_claim_match_text(date.get_text(" ", strip=True)),
+        platform=_normalize_claim_match_text(platform.get_text(" ", strip=True)),
+        text=_normalize_claim_match_text(text.get_text(" ", strip=True)),
+    )
+
+
+def _normalized_source_review(review: ReviewEvidence) -> ReviewEvidence:
+    return ReviewEvidence(
+        author=_normalize_claim_match_text(review.author),
+        rating=float(review.rating),
+        date=_normalize_claim_match_text(review.date),
+        platform=_normalize_claim_match_text(review.platform),
+        text=_normalize_claim_match_text(review.text),
+    )
+
+
+def _ambient_review_claim_values(body_root: Tag) -> tuple[list[float], list[int]]:
+    review_roots = {"review-card", "reviews-aggregate", "reviews-summary-row"}
+    surfaces: list[str] = []
+    for element in (body_root, *body_root.find_all(True)):
+        if _exact_class_names(element) & review_roots:
+            continue
+        if any(
+            _exact_class_names(parent) & review_roots
+            for parent in element.parents
+            if isinstance(parent, Tag)
+        ):
+            continue
+        surfaces.extend(
+            str(child)
+            for child in element.children
+            if isinstance(child, NavigableString)
+        )
+        surfaces.extend(
+            value
+            for attribute in ("aria-label", "aria-description", "title")
+            for value in (element.get(attribute),)
+            if isinstance(value, str)
+        )
+    text = _normalize_claim_match_text(" ".join(surfaces))
+    score_patterns = (
+        r"\b(?:rated|rating)\s*(?:at\s*)?([0-5](?:\.\d+)?)\b",
+        r"\b([0-5](?:\.\d+)?)\s*(?:/|out\s+of)\s*5\b",
+        r"\b([0-5](?:\.\d+)?)\s*stars?\b",
+        r"\b([0-5](?:\.\d+)?)\s+from\s+\d+\s+(?:google\s+)?reviews?\b",
+    )
+    count_patterns = (
+        r"\b(\d+)\s+(?:google\s+)?reviews?\b",
+        r"\b(?:rated|rating)\s*(?:at\s*)?[0-5](?:\.\d+)?\s+"
+        r"(?:by|from)\s+(\d+)\s+(?:customers?|reviewers?)\b",
+    )
+    scores = [
+        float(match.group(1))
+        for pattern in score_patterns
+        for match in re.finditer(pattern, text)
+    ]
+    counts = [
+        int(match.group(1))
+        for pattern in count_patterns
+        for match in re.finditer(pattern, text)
+    ]
+    return scores, counts
+
+
+def _validate_ambient_review_claims(
+    body_root: Tag,
+    contract: ReviewAdmissionContract,
+) -> None:
+    score = contract.aggregate_score
+    count = contract.aggregate_count
+    scores, counts = _ambient_review_claim_values(body_root)
+    if scores and score is None:
+        raise GeneratedBodyError(
+            "Generated body contains an unsourced ambient review score."
+        )
+    if any(candidate != float(score) for candidate in scores):
+        raise GeneratedBodyError(
+            "Generated body contains an unexpected ambient review score."
+        )
+    if counts and count is None:
+        raise GeneratedBodyError(
+            "Generated body contains an unsourced ambient review count."
+        )
+    if any(candidate != count for candidate in counts):
+        raise GeneratedBodyError(
+            "Generated body contains an unexpected ambient review count."
+        )
+
+    if _elements_with_class(body_root, "form-trust-stars"):
+        raise GeneratedBodyError(
+            "Generated body contains a review star widget without a scored overlay."
+        )
+    for class_name in ("trust-stars", "cta-trust-stars"):
+        for stars in _elements_with_class(body_root, class_name):
+            if score is None:
+                raise GeneratedBodyError(
+                    "Generated body contains an unsourced ambient review star widget."
+                )
+            if _score_style_value(stars, "ambient review widget") != float(score):
+                raise GeneratedBodyError(
+                    "Generated body contains an unexpected ambient review score."
+                )
+
+
+def _validate_review_summary(
+    root: Tag,
+    contract: ReviewAdmissionContract,
+    *,
+    aggregate: bool,
+) -> None:
+    owner = "aggregate review" if aggregate else "review summary"
+    score_class = "reviews-score" if aggregate else "reviews-summary-text"
+    stars_class = "reviews-stars-lg" if aggregate else "reviews-summary-stars"
+    count_class = "reviews-count" if aggregate else "reviews-summary-text"
+    link_class = "reviews-cta" if aggregate else "reviews-summary-cta"
+    score = contract.aggregate_score
+    count = contract.aggregate_count
+    if score is None or count is None or contract.reviews_url is None:
+        raise GeneratedBodyError(
+            f"Generated body {owner} has no complete source review evidence."
+        )
+
+    stars = _single_component(root, stars_class, owner)
+    if _score_style_value(stars, owner) != float(score):
+        raise GeneratedBodyError(f"Generated body {owner} has the wrong review score.")
+    score_text = _single_component(root, score_class, owner).get_text(" ", strip=True)
+    if not _contains_complete_token_sequence(score_text, str(score)):
+        raise GeneratedBodyError(f"Generated body {owner} has the wrong review score.")
+    count_text = _single_component(root, count_class, owner).get_text(" ", strip=True)
+    if not _contains_complete_token_sequence(count_text, str(count)):
+        raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
+    link = _single_component(root, link_class, owner)
+    if link.get("href") != contract.reviews_url:
+        raise GeneratedBodyError(f"Generated body {owner} has the wrong reviews URL.")
+
+
+def _validate_review_contract(
+    body_root: Tag,
+    contract: ReviewAdmissionContract,
+) -> None:
+    if contract.mode == "omit":
+        _validate_ambient_review_claims(body_root, contract)
+        return
+    if contract.mode == "aggregate":
+        aggregate = _single_component(
+            body_root,
+            "reviews-aggregate",
+            "aggregate review",
+        )
+        _validate_review_summary(aggregate, contract, aggregate=True)
+        _validate_ambient_review_claims(body_root, contract)
+        return
+    if contract.mode != "cards" or len(contract.source_reviews) < 3:
+        raise GeneratedBodyError("Expected review admission contract is invalid.")
+
+    grids = _elements_with_class(body_root, "reviews-card-grid")
+    if len(grids) != 1:
+        raise GeneratedBodyError(
+            "Generated body review cards must contain exactly one reviews-card-grid."
+        )
+    cards = _elements_with_class(grids[0], "review-card")
+    if len(cards) != 3:
+        raise GeneratedBodyError(
+            "Generated body review cards must contain exactly three review cards."
+        )
+    available = [
+        _normalized_source_review(review) for review in contract.source_reviews
+    ]
+    for card in cards:
+        rendered = _normalized_review_evidence(card)
+        try:
+            matched_index = available.index(rendered)
+        except ValueError as exc:
+            raise GeneratedBodyError(
+                "Generated body review card does not match a source review entry."
+            ) from exc
+        available.pop(matched_index)
+
+    summaries = _elements_with_class(body_root, "reviews-summary-row")
+    has_aggregate = (
+        contract.aggregate_score is not None
+        and contract.aggregate_count is not None
+        and contract.reviews_url is not None
+    )
+    if has_aggregate:
+        if len(summaries) != 1:
+            raise GeneratedBodyError(
+                "Generated body review cards require one sourced review summary."
+            )
+        _validate_review_summary(summaries[0], contract, aggregate=False)
+    elif summaries:
+        raise GeneratedBodyError(
+            "Generated body review cards contain an unsourced review summary."
+        )
+    _validate_ambient_review_claims(body_root, contract)
+
+
 def _required_child_sequence_mismatches(
     body_root: Tag,
     requirements: Iterable[tuple[str, tuple[str, ...]]],
@@ -1063,6 +1352,7 @@ def validate_generated_body(
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
+    expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -1116,6 +1406,11 @@ def validate_generated_body(
         names = ", ".join(sorted(set(parser.executable_attributes)))
         raise GeneratedBodyError(
             f"Generated body contains an executable attribute: {names}."
+        )
+    if parser.nondeterministic_rendering_tags:
+        names = ", ".join(sorted(set(parser.nondeterministic_rendering_tags)))
+        raise GeneratedBodyError(
+            f"Generated body contains a browser-inert tag: {names}."
         )
     normalized_comments = tuple(
         _normalize_claim_match_text(comment) for comment in parser.comment_values
@@ -1223,6 +1518,11 @@ def validate_generated_body(
             "Generated body has invalid required component structure: "
             + "; ".join(child_sequence_mismatches[:3])
         )
+
+    if expected_reviews is not _EXPECTED_REVIEWS_UNSET:
+        if not isinstance(expected_reviews, ReviewAdmissionContract):
+            raise GeneratedBodyError("Expected review admission contract is invalid.")
+        _validate_review_contract(body_root, expected_reviews)
 
     if expected_form_action is not _EXPECTED_FORM_ACTION_UNSET:
         if not isinstance(expected_form_action, str) or not expected_form_action:
@@ -1537,6 +1837,7 @@ def assemble_generated_html(
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
+    expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -1562,6 +1863,7 @@ def assemble_generated_html(
         required_exposed_values=required_exposed_values,
         expected_phone=expected_phone,
         expected_form_action=expected_form_action,
+        expected_reviews=expected_reviews,
         required_class_counts=required_class_counts,
         required_child_class_sequences=required_child_class_sequences,
     )
