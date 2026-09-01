@@ -43,51 +43,6 @@ REQUIRED_FOOTER_CLASS_COUNTS = (
 REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES = (
     ("site-footer", ("footer-grid", "footer-bottom")),
 )
-_RENDERED_TEXT_BOUNDARY_TAGS = frozenset(
-    (
-        "address",
-        "article",
-        "aside",
-        "blockquote",
-        "br",
-        "dd",
-        "details",
-        "dialog",
-        "div",
-        "dl",
-        "dt",
-        "fieldset",
-        "figcaption",
-        "figure",
-        "footer",
-        "form",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "header",
-        "hgroup",
-        "hr",
-        "li",
-        "main",
-        "nav",
-        "ol",
-        "p",
-        "pre",
-        "section",
-        "summary",
-        "table",
-        "tbody",
-        "td",
-        "tfoot",
-        "th",
-        "thead",
-        "tr",
-        "ul",
-    )
-)
 DEFAULT_DOCUMENT_ACCENT = "#1D4ED8"
 DEFAULT_DOCUMENT_SECONDARY = "#1F3A5F"
 
@@ -657,28 +612,60 @@ def _normalize_claim_match_text(value: str) -> str:
     return " ".join(normalized.split()).casefold()
 
 
-def _rendered_claim_text(body_root: Tag) -> str:
-    parts: list[str] = []
+def _compact_claim_match_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
 
-    def visit(node: Any) -> None:
+
+def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
+    visual_parts: list[str] = []
+    accessible_parts: list[str] = []
+
+    def replacement_text(node: Tag) -> str:
+        if node.name.casefold() == "img":
+            value = node.get("alt")
+            return value if isinstance(value, str) else ""
+        if node.name.casefold() in {"input", "textarea"}:
+            value = node.get("value") or node.get("placeholder")
+            return value if isinstance(value, str) else ""
+        return ""
+
+    def visit_visual(node: Any) -> None:
         if isinstance(node, Comment):
             return
         if isinstance(node, NavigableString):
-            parts.append(str(node))
+            visual_parts.append(str(node))
             return
         if not isinstance(node, Tag):
             return
-        has_boundary = node.name.casefold() in _RENDERED_TEXT_BOUNDARY_TAGS
-        if has_boundary:
-            parts.append(" ")
+        replacement = replacement_text(node)
+        if replacement:
+            visual_parts.append(replacement)
         for child in node.children:
-            visit(child)
-        if has_boundary:
-            parts.append(" ")
+            visit_visual(child)
+
+    def visit_accessible(node: Any) -> None:
+        if isinstance(node, Comment):
+            return
+        if isinstance(node, NavigableString):
+            accessible_parts.append(str(node))
+            return
+        if not isinstance(node, Tag):
+            return
+        label = node.get("aria-label")
+        if isinstance(label, str) and label:
+            accessible_parts.append(label)
+            return
+        replacement = replacement_text(node)
+        if replacement:
+            accessible_parts.append(replacement)
+        for child in node.children:
+            visit_accessible(child)
 
     for child in body_root.children:
-        visit(child)
-    return "".join(parts)
+        visit_visual(child)
+        visit_accessible(child)
+    return "".join(visual_parts), "".join(accessible_parts)
 
 
 def _exact_class_names(element: Tag) -> set[str]:
@@ -816,12 +803,15 @@ def validate_generated_body(
         )
 
     claim_surfaces = (
-        _rendered_claim_text(body_root),
+        *_claim_exposure_texts(body_root),
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
     normalized_claim_surfaces = tuple(
         _normalize_claim_match_text(surface) for surface in claim_surfaces
+    )
+    compact_claim_surfaces = tuple(
+        _compact_claim_match_text(surface) for surface in claim_surfaces
     )
     leaked_phrases = sorted(
         {
@@ -830,9 +820,15 @@ def validate_generated_body(
             if isinstance(phrase, str)
             and phrase
             and _normalize_claim_match_text(phrase)
-            and any(
-                _normalize_claim_match_text(phrase) in surface
-                for surface in normalized_claim_surfaces
+            and (
+                any(
+                    _normalize_claim_match_text(phrase) in surface
+                    for surface in normalized_claim_surfaces
+                )
+                or any(
+                    _compact_claim_match_text(phrase) in surface
+                    for surface in compact_claim_surfaces
+                )
             )
         },
         key=str.casefold,

@@ -223,15 +223,18 @@ markup, count differently cased class tokens even though the trusted CSS will
 not select them, and admit required footer or grid components outside the
 parent that gives them their layout and styling.
 
-The correct fix must build denied-claim text using semantic HTML block and line
-boundaries while keeping inline text contiguous; count required classes as
-exact, case-sensitive membership once per element; and validate the declared
+The correct fix must build ordered visual and accessibility exposure streams,
+including human-facing replacement content such as image alt text, form values,
+placeholders, and accessibility labels at their DOM position. Denied phrases
+must be compared in both whitespace-normalized and compact Unicode-alphanumeric
+forms so markup and CSS cannot change the admission decision. Required classes
+must use exact, case-sensitive membership once per element, and the declared
 direct-child shape of the footer, services grid, service cards, and benefits
-grid. Tests must cover the mixed-boundary bypass, wrong-case class tokens,
-orphaned children, and valid structures. This must not alter trusted CSS,
-visible copy, component cardinality, page ordering, provider/model selection,
-GPU/runtime behavior, placeholder sanitation, or image, email, deployment, and
-Connect job contracts.
+grid must be validated. Tests must cover mixed/CSS boundaries, replacement and
+accessibility text, wrong-case tokens, orphaned children, and valid structures.
+This must not alter trusted CSS, visible copy, component cardinality, page
+ordering, provider/model selection, GPU/runtime behavior, placeholder
+sanitation, or image, email, deployment, and Connect job contracts.
 
 ## Scope (this PR)
 
@@ -280,8 +283,9 @@ Connect job contracts.
     leaving every other mandatory build count unchanged.
 21. Disable redirects on every shared loopback llama.cpp request so a local
     response cannot replay prompts or preflight traffic to a remote target.
-22. Derive claim text from semantic block/line boundaries while preserving
-    contiguous inline text.
+22. Scan ordered visual and accessibility exposure streams in both normalized
+    and compact forms so CSS, replacement text, and markup segmentation cannot
+    hide denied claims.
 23. Match required class names with exact case-sensitive HTML class membership.
 24. Enforce the direct-child component shapes that make the required footer,
     service, and benefits structures functional.

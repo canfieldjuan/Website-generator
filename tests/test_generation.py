@@ -1128,12 +1128,18 @@ class BodyAssemblyTests(unittest.TestCase):
 
         self.assertEqual(validate_generated_body(body_result(body)), body)
 
-    def test_body_admission_preserves_rendered_text_boundaries_for_claims(self):
+    def test_body_admission_rejects_claim_across_exposure_surfaces(self):
         denied_bodies = (
             "<body><p><span>Free</span><br><span>Estimates</span></p></body>",
             "<body><p>Free Esti<span>mates</span></p></body>",
             "<body><p><span>Free</span><br><span>Esti</span>"
             "<span>mates</span></p></body>",
+            '<body><span class="ft-phone-label">Free</span>'
+            "<span>Estimates</span></body>",
+            '<body><span style="display:block">Free</span>'
+            "<span>Estimates</span></body>",
+            '<body><p><img src="missing" alt="Free"> Estimates</p></body>',
+            '<body><p><span aria-label="Free">Request</span> Estimates</p></body>',
         )
         for denied_body in denied_bodies:
             with self.subTest(body=denied_body):
