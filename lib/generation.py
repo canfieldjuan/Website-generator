@@ -6,6 +6,7 @@ import ipaddress
 import os
 import re
 import tempfile
+import unicodedata
 from dataclasses import dataclass, replace
 from html import escape
 from html.parser import HTMLParser
@@ -587,6 +588,12 @@ def make_html_comment(content: str) -> str:
     return f"<!--\n{normalized}\n-->"
 
 
+def _normalize_claim_match_text(value: str) -> str:
+    """Canonicalize browser-equivalent whitespace for claim admission."""
+    normalized = unicodedata.normalize("NFKC", value)
+    return " ".join(normalized.split()).casefold()
+
+
 def validate_generated_body(
     result: GenerationResult,
     *,
@@ -666,15 +673,19 @@ def validate_generated_body(
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
-    folded_claim_surfaces = tuple(surface.casefold() for surface in claim_surfaces)
+    normalized_claim_surfaces = tuple(
+        _normalize_claim_match_text(surface) for surface in claim_surfaces
+    )
     leaked_phrases = sorted(
         {
             phrase
             for phrase in forbidden_visible_phrases
             if isinstance(phrase, str)
             and phrase
+            and _normalize_claim_match_text(phrase)
             and any(
-                phrase.casefold() in surface for surface in folded_claim_surfaces
+                _normalize_claim_match_text(phrase) in surface
+                for surface in normalized_claim_surfaces
             )
         },
         key=str.casefold,

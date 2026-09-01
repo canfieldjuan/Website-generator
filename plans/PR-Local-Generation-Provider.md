@@ -112,6 +112,21 @@ trade-specific palette is available. Explicit brand colors, supported-trade
 palette selection, theme selection, and the accepted prospect schema must not
 change.
 
+### Unicode claim-admission revision
+
+Exact-head review proved that browser-decoded attributes can preserve Unicode
+whitespace such as the non-breaking space in `Free&nbsp;Estimates`. The claim
+gate case-folds text but compares that non-breaking space directly with the
+ordinary space in the denied phrase, so the same unsupported customer-facing
+claim can bypass admission through whitespace representation alone.
+
+The correct fix must compatibility-normalize Unicode and collapse every
+whitespace run before comparing both denied phrases and all visible, decoded,
+and URL-decoded output surfaces. Tests must cover ordinary space, HTML
+non-breaking space, another Unicode whitespace code point, and a clean nearby
+label. This must not broaden the denied-claim catalog, rewrite generated output,
+or change placeholder, provider, assembly, or deployment behavior.
+
 ### GPU-runtime revision
 
 The controlled fixture used `LLAMA_CPP_GPU_LAYERS=all`, but the launcher still
@@ -202,6 +217,8 @@ provider behavior, or affect deployment/email/image or Connect job contracts.
     and the shared footer structure so prompt omissions cannot ship.
 16. Give the mandatory services component an exact markup contract while
     preserving model-owned service selection and code-owned count admission.
+17. Normalize Unicode whitespace at the unsupported-claim comparison boundary
+    so browser-equivalent claim text cannot bypass admission.
 
 ### Files touched
 
@@ -331,6 +348,9 @@ claim remains admissible.
   unresolved mandatory page structure.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.BodyAssemblyTests.test_body_admission_rejects_gated_claim_in_decoded_attributes`
+  — passed after the Unicode-whitespace review correction; covers ordinary,
+  non-breaking, em-space, percent-encoded, and clean-label paths.
 - `bash -n scripts/start_llama_server.sh` — passed.
 - `scripts/start_llama_server.sh --help` — passed without loading a model.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python build.py --help` — passed;

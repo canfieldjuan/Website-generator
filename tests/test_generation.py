@@ -1044,6 +1044,8 @@ class BodyAssemblyTests(unittest.TestCase):
     def test_body_admission_rejects_gated_claim_in_decoded_attributes(self):
         denied_bodies = (
             '<body><button aria-label="Free&#32;Estimates">Request service</button></body>',
+            '<body><button aria-label="Free&nbsp;Estimates">Request service</button></body>',
+            '<body><button aria-label="Free&#x2003;Estimates">Request service</button></body>',
             '<body><a title="Free%20Estimates">Request service</a></body>',
         )
         for body in denied_bodies:
