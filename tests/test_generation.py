@@ -320,6 +320,29 @@ class HtmlAdmissionTests(unittest.TestCase):
                 with self.assertRaisesRegex(GeneratedHtmlError, "outside head or body"):
                     validate_generated_html(result(document))
 
+    def test_elements_outside_head_or_body_are_rejected(self):
+        invalid_documents = {
+            "before head": COMPLETE_HTML.replace(
+                '<html lang="en">',
+                '<html lang="en"><meta name="outside" content="bad">',
+                1,
+            ),
+            "between head and body": COMPLETE_HTML.replace(
+                "</head>",
+                '</head><img src="tracking.gif" alt="">',
+                1,
+            ),
+            "after body": COMPLETE_HTML.replace(
+                "</body>",
+                '</body><input value="Finished">',
+                1,
+            ),
+        }
+        for position, document in invalid_documents.items():
+            with self.subTest(position=position):
+                with self.assertRaisesRegex(GeneratedHtmlError, "outside head or body"):
+                    validate_generated_html(result(document))
+
     def test_whitespace_outside_head_and_body_is_accepted(self):
         separated = COMPLETE_HTML.replace(
             '<html lang="en">',
