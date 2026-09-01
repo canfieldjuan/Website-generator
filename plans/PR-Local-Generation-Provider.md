@@ -49,7 +49,8 @@ and adds cache metadata only for OpenRouter.
 Each response records provider, model, finish reason, content, and usage. HTML
 admission accepts only a normal `stop` response containing one ordered doctype,
 `html`, `head`, and `body` structure within the byte limit. Writes use a
-same-directory temporary file plus `os.replace`.
+same-directory temporary file plus `os.replace`. Non-whitespace text and HTML
+elements outside `head` or `body` are rejected rather than silently admitted.
 
 ## Intentional
 
@@ -74,7 +75,7 @@ same-directory temporary file plus `os.replace`.
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 33 tests passed.
+  — 34 tests passed.
 - `python3 -m compileall -q build.py pipeline.py lib tests` — passed.
 - `python3 build.py --help` — passed; provider/model and existing skip flags shown.
 - `python3 pipeline.py --help` — passed; provider/model and existing skip flags shown.
