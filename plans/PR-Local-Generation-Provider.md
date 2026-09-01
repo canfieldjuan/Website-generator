@@ -27,14 +27,16 @@ unproved admission rule.
    provider/model flags without changing their existing skip/deploy behavior.
 4. Require normal completion and a complete standalone HTML document before
    atomically writing or deploying generated output.
-5. Add focused unit tests, CI enrollment, and operator documentation.
+5. Keep every wired HTML-generation prompt aligned with doctype-first admission.
+6. Add focused unit tests, CI enrollment, and operator documentation.
 
 ### Files touched
 
 - `lib/generation.py`, `lib/clients.py`, `lib/email.py`, `lib/__init__.py`
 - `build.py`, `pipeline.py`
 - `tests/test_generation.py`, `tests/__init__.py`
-- `references/02-redesign-gen-prompt.md`, `references/06-build-prompt.md`
+- `references/02-redesign-gen-prompt.md`, `references/04-interior-page-prompt.md`,
+  `references/06-build-prompt.md`
 - `.github/workflows/generator-tests.yml`
 - `README.md`
 - `plans/PR-Local-Generation-Provider.md`
@@ -54,6 +56,11 @@ Connect generation attempt produces exactly one model request instead of silentl
 restarting an expensive completion after a read timeout. An explicit
 `GENERATION_TIMEOUT_SECONDS` value still overrides either provider default;
 OpenRouter keeps the existing ten-minute default.
+
+The shared output budget is 65,536 tokens so the model can reproduce and
+populate the mandatory 84+ KiB base template before byte-level HTML admission.
+Every wired HTML prompt requires the doctype as the first response content, and
+CI watches `references/**` so a prompt-only contract change runs these tests.
 
 Each response records provider, model, finish reason, content, and usage. HTML
 admission accepts only a normal `stop` response containing one ordered doctype,
@@ -88,7 +95,7 @@ Both generation prompts place their required deployment metadata comment inside
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 40 tests passed.
+  — 42 tests passed after review reconciliation.
 - `python3 -m compileall -q build.py pipeline.py lib tests` — passed.
 - `python3 build.py --help` — passed; provider/model and existing skip flags shown.
 - `python3 pipeline.py --help` — passed; provider/model and existing skip flags shown.

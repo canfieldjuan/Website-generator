@@ -20,7 +20,9 @@ DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:1234/v1"
 DEFAULT_LOCAL_API_KEY = "lm-studio"
 DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
-DEFAULT_MAX_OUTPUT_TOKENS = 16384
+# Generated pages must be able to reproduce the required 84+ KiB base template
+# and populate it before the HTML byte-admission gate runs.
+DEFAULT_MAX_OUTPUT_TOKENS = 65536
 MAX_HTML_BYTES = 2 * 1024 * 1024
 SUPPORTED_PROVIDERS = frozenset(("local", "openrouter"))
 

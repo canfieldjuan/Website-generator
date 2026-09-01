@@ -84,9 +84,9 @@ form fields, images, and contact information present.
 In both modes:
 - Output ONLY raw HTML. No markdown code fences (no ```html, no ```), no
   preamble like "Here is the interior page", no trailing commentary. The
-  first characters of your response must be `<!DOCTYPE html>` (or a leading
-  comment). The last characters must be `</html>`. Anything else causes a
-  parse failure downstream.
+  first characters of your response must be `<!DOCTYPE html>`. Do not place a
+  comment or any other content before the doctype. The last characters must be
+  `</html>`. Anything else causes a parse failure downstream.
 - The nav and footer must match the homepage exactly (same links, same brand treatment)
 - Only the main content area changes per page type
 - Populate the :root token block verbatim from the homepage generation output
