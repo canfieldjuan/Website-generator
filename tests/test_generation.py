@@ -2574,6 +2574,32 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn('action="https://formspree.io/f/verified"', html)
 
+        wrong_override_body = verified_body.replace(
+            "</form>",
+            '<button type="submit" formaction="https://formspree.io/f/wrong">'
+            "Send</button></form>",
+            1,
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "alternate unverified"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_override_body)),
+            )
+
+        verified_override_body = verified_body.replace(
+            "</form>",
+            '<button type="submit" '
+            'formaction="https://formspree.io/f/verified">Send</button></form>',
+            1,
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(verified_override_body)),
+        )
+        self.assertIn('formaction="https://formspree.io/f/verified"', html)
+
         no_endpoint_prospect = dict(prospect)
         no_endpoint_prospect.pop("formspree_endpoint")
         missing_action_body = COMPLETE_BUILD_BODY.replace(' action="#"', "")

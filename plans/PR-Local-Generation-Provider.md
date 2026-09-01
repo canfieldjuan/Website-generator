@@ -563,6 +563,11 @@ claim remains admissible.
   tests.test_generation.BodyAssemblyTests.test_mobile_trust_strip_wraps_without_horizontal_scroller`
   — failed against the fixed-height horizontal-scroller rule, then passed
   after the scoped mobile template correction.
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_requires_exact_contact_form_action`
+  — passed with wrong form action, missing fallback action, and mixed
+  verified-form/unverified-button `formaction` cases rejected; exact verified
+  form and button actions and the explicit `#` fallback remain accepted.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.BodyAssemblyTests.test_body_admission_rejects_gated_claim_in_decoded_attributes`
   — passed after the Unicode-whitespace review correction; covers ordinary,
   non-breaking, em-space, percent-encoded, and clean-label paths.
