@@ -70,6 +70,9 @@ be a non-empty string. The Connect adapter also changes a photo-dependent hero
 selection to the existing gradient shape when the one accepted input artifact
 does not contain a usable hero/background photo URL. This keeps the advertised
 single HTML output self-contained without invoking image acquisition.
+The same adapter measures the exact pretty-serialized prospect prompt block and
+rejects the input when it would cross the generator's limit, so Connect never
+marks a job complete after silently truncating accepted prospect fields.
 
 The HTTP layer checks bearer authentication first and the independently signed
 local entitlement second on every request. Entitlement verification uses an
@@ -115,7 +118,7 @@ builds with no official keyring fail closed as authority-unavailable.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 72 tests in 5.539 seconds on the updated combined head.
+  passed: 76 tests in 3.931 seconds on the updated combined head.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema

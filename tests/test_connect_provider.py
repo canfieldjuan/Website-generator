@@ -564,6 +564,41 @@ class GenerationSeamTests(unittest.TestCase):
             finally:
                 runtime.close()
 
+    def test_connect_rejects_prompt_block_that_would_be_truncated(self):
+        expected = build.prepare_prospect(PROSPECT)
+        build.apply_design_selections(expected, announce=False)
+        expected["_computed_hero_shape"] = "gradient"
+        prompt_length = len(build.format_prospect_prompt_block(expected))
+
+        with patch.object(
+            build, "BUILD_USER_TRUNCATE", prompt_length
+        ), patch.object(
+            build, "generate_build_html", return_value=HTML.decode()
+        ) as generated:
+            output, _ = generate_website_artifact(artifact_bytes())
+            self.assertEqual(output, HTML)
+            generated.assert_called_once()
+
+        with patch.object(
+            build, "BUILD_USER_TRUNCATE", prompt_length - 1
+        ), patch.object(build, "generate_build_html") as generated:
+            with self.assertRaisesRegex(ValueError, "valid prospect"):
+                generate_website_artifact(artifact_bytes())
+            generated.assert_not_called()
+
+    def test_maximum_compact_artifact_cannot_be_silently_truncated(self):
+        source = dict(PROSPECT)
+        source["notes"] = ""
+        compact = json.dumps(source, separators=(",", ":")).encode("utf-8")
+        source["notes"] = "x" * (MAX_INPUT_BYTES - len(compact))
+        data = json.dumps(source, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(len(data), MAX_INPUT_BYTES)
+
+        with patch.object(build, "generate_build_html") as generated:
+            with self.assertRaisesRegex(ValueError, "valid prospect"):
+                generate_website_artifact(data)
+            generated.assert_not_called()
+
     def test_connect_generation_accepts_only_literal_loopback_endpoints(self):
         valid_endpoints = (
             "http://localhost:1234/v1",

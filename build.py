@@ -468,6 +468,11 @@ def build_hero_prompt(prospect):
     )
 
 
+def format_prospect_prompt_block(prospect):
+    """Serialize the variable prospect block exactly as generation sends it."""
+    return f"PROSPECT JSON:\n{json.dumps(prospect, indent=2)}"
+
+
 def generate_build_html(prospect, generation_config=None, client=None):
     config = generation_config or resolve_generation_config()
     print(
@@ -507,7 +512,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"SECTION ORDERS:\n{section_orders}\n\n"
         f"BASE TEMPLATE:\n{base_template}"
     )
-    prospect_block = f"PROSPECT JSON:\n{json.dumps(prospect, indent=2)}"
+    prospect_block = format_prospect_prompt_block(prospect)
     if len(prospect_block) > BUILD_USER_TRUNCATE:
         prospect_block = prospect_block[:BUILD_USER_TRUNCATE]
 
