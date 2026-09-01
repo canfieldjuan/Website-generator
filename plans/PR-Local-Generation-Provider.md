@@ -17,6 +17,29 @@ soft target primarily because the new tests cover both sides of every provider
 and output boundary; splitting those tests from the guard would ship an
 unproved admission rule.
 
+### Runtime replacement contract
+
+The local provider must talk directly to a standalone `llama-server`. The
+current implementation is coupled to LM Studio's model-list client, native chat
+route, request fields, response fields, and startup instructions; changing only
+the displayed runtime name would leave the request contract unusable.
+
+The correct change must move local preflight to `llama.cpp` health and
+OpenAI-compatible model-list routes, move generation to
+`/v1/chat/completions`, preserve the exact `qwen/qwen3.8-27b` alias, disable
+thinking at both the request and documented server-start boundaries, and parse
+the response shape actually returned by `llama-server`. It must provide one
+loopback-only startup path and tests for ready/unready health, exact/missing
+model identity, malformed responses, reasoning/tool output, completion status,
+and request construction.
+
+This runtime replacement must not change the Qwen model choice, prompt content,
+body/document admission, trusted template assembly, explicit OpenRouter path,
+email/image/deployment behavior, or the dependent Connect job/authentication
+contract. A real-model fixture remains required before the Connect slice can
+merge, but it must not be started while the operator has requested that the GPU
+remain unloaded.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -33,6 +56,8 @@ unproved admission rule.
 6. Keep every wired HTML-generation prompt aligned with body-only admission and
    deterministic document composition.
 7. Add focused unit tests, CI enrollment, and operator documentation.
+8. Replace the LM Studio transport with direct loopback `llama.cpp` health,
+   model-discovery, and chat-completion contracts plus a guarded startup script.
 
 ### Files touched
 
@@ -42,18 +67,20 @@ unproved admission rule.
 - `references/02-redesign-gen-prompt.md`, `references/04-interior-page-prompt.md`,
   `references/06-build-prompt.md`
 - `.github/workflows/generator-tests.yml`
+- `scripts/start_llama_server.sh`
 - `README.md`
 - `plans/PR-Local-Generation-Provider.md`
 
 ## Mechanism
 
 The CLI resolves a `GenerationConfig` from explicit arguments and environment
-configuration. Local is the default and preflights LM Studio's loaded-model
-list; OpenRouter requires the operator to select it and provide a model. Local
-generation uses LM Studio's native `/api/v1/chat` contract so the request can
-explicitly disable Qwen reasoning and server-side response storage. OpenRouter
-keeps the OpenAI-compatible request path and receives cache metadata only when
-it was requested by the caller.
+configuration. Local is the default and preflights standalone `llama.cpp`
+`/health` and `/v1/models` responses; OpenRouter requires the operator to select
+it and provide a model. Local generation uses `llama.cpp`'s OpenAI-compatible
+`/v1/chat/completions` contract, sends plain system/user messages, disables Qwen
+thinking through chat-template parameters, and rejects any returned reasoning
+or tool-call surface. OpenRouter keeps its existing request path and receives
+cache metadata only when it was requested by the caller.
 
 Local generation uses a two-hour default request deadline because the exact Qwen
 fixture exceeds the former cloud-oriented ten-minute deadline on supported local
@@ -63,11 +90,11 @@ restarting an expensive completion after a read timeout. An explicit
 `GENERATION_TIMEOUT_SECONDS` value still overrides either provider default;
 OpenRouter keeps the existing ten-minute default.
 
-LM Studio's native response does not expose an OpenAI-style finish reason. The
-adapter therefore requires its token statistics, treats an output count at the
-configured ceiling as `length`, and admits only one text-message output. Any
-reasoning, tool, malformed, or multi-message output fails closed. The existing
-complete-document gate remains the final truncation check for HTML.
+The `llama.cpp` adapter requires exactly one OpenAI-compatible choice, a string
+finish reason, a text message, and an object usage record. Any reasoning, tool,
+malformed, or multi-choice output fails closed. The returned finish reason feeds
+the existing normal-completion gate, and the complete-document gate remains the
+final truncation check for HTML.
 
 ### Full-template timeout correction
 
@@ -106,14 +133,18 @@ static prompt source it actually sends, including catalogs/defaults and the base
 body scaffold, then supplies that set to body admission. Dynamic prospect/site
 data is deliberately excluded so real bracketed customer content remains valid;
 static prompt edits cannot add new placeholder syntax that silently leaks into
-output. Homepage callers also provide their own required
+output. Admission checks the raw body plus browser-decoded, element-spanning
+visible text and decoded attribute values, so character references cannot hide
+either square-bracket or curly-brace placeholders. Homepage callers also provide
+their own required
 deployment-comment marker set; an incidental leading comment cannot impersonate
 the build or redesign metadata contract.
 
 ## Intentional
 
-- The scripts do not auto-load Qwen; a missing model exits with the exact
-  `lms load` instruction.
+- Generation commands do not auto-start or silently fall back from
+  `llama.cpp`; a missing runtime/model exits with the documented standalone
+  startup instruction.
 - OpenRouter is never an automatic fallback because it changes cost and data
   locality.
 - Provider requests are not retried implicitly. A caller or durable job owner must
@@ -138,30 +169,27 @@ the build or redesign metadata contract.
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 60 tests passed after body-only generation, both HTML entry points gained
-  shared-assembly coverage, and every trusted static prompt source was brought
-  under placeholder admission.
+  — 71 tests passed, including the `llama.cpp` health/model/chat contract,
+  browser-decoded placeholder admission, startup-script boundaries, and both
+  HTML entry points' shared assembly.
 - `/tmp/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
+- `bash -n scripts/start_llama_server.sh` — passed.
+- `scripts/start_llama_server.sh --help` — passed without loading a model.
 - `/tmp/website-redesign-connect-venv/bin/python build.py --help` — passed;
   provider/model and existing skip flags shown.
 - `/tmp/website-redesign-connect-venv/bin/python pipeline.py --help` — passed;
   provider/model and existing skip flags shown.
 - `git diff --check` — passed.
-- An authenticated native LM Studio probe against exact model
-  `qwen/qwen3.8-27b` returned one text message with
-  `reasoning_output_tokens: 0`, proving that `reasoning: "off"` reaches the
-  loaded model without prompt-only control.
-- The required fixture command completed against exact model
-  `qwen/qwen3.8-27b` through the native LM Studio path and wrote
-  `outputs/builds/drees-plumbing-inc/index.html`; the cold request reported
-  31,031 prompt tokens.
-- Both required artifact searches returned `0`: no unresolved trust/template
-  tokens and no unsupported `Upfront Flat-Rate`, `Surprise Fees`,
-  `Free Estimates`, or `Owner Answers` claims were emitted.
-- Reconstructing the real generated Qwen body/comment in memory and passing it
-  through the stricter prompt-placeholder and caller-marker admission returned
-  `real artifact stricter-admission probe: PASS`.
+- The earlier LM Studio fixture is historical evidence for the Qwen model and
+  generated-body contract only; it does not verify the replacement
+  `llama.cpp` transport.
+- The exact-model `llama.cpp` fixture and both required artifact searches remain
+  pending because the operator directed that the GPU stay unloaded during this
+  implementation pass.
+- Mocked local transport tests prove the configured request reaches the
+  `llama.cpp` chat route once, disables thinking, preserves finish status, and
+  fails closed on malformed, reasoning, tool, and multi-choice responses.
 
 ## Estimated diff size
 
