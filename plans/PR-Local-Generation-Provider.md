@@ -101,6 +101,13 @@ admitted. Required deployment-metadata placement remains code-owned: the model
 supplies the existing comment as the body's first child, admission verifies that
 boundary, and the assembler moves it into the trusted head exactly once.
 
+Each caller derives its square-bracket placeholder vocabulary from the actual
+wired prompt and supplies that set to body admission, so prompt edits cannot add
+new placeholder syntax that silently leaks into output. Unrelated bracketed real
+content remains admissible. Homepage callers also provide their own required
+deployment-comment marker set; an incidental leading comment cannot impersonate
+the build or redesign metadata contract.
+
 ## Intentional
 
 - The scripts do not auto-load Qwen; a missing model exits with the exact
@@ -129,8 +136,8 @@ boundary, and the assembler moves it into the trusted head exactly once.
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 58 tests passed after body-only generation and both HTML entry points gained
-  shared-assembly coverage.
+  — 59 tests passed after body-only generation, both HTML entry points gained
+  shared-assembly coverage, and prompt/comment boundaries were reconciled.
 - `/tmp/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
 - `/tmp/website-redesign-connect-venv/bin/python build.py --help` — passed;
@@ -149,6 +156,9 @@ boundary, and the assembler moves it into the trusted head exactly once.
 - Both required artifact searches returned `0`: no unresolved trust/template
   tokens and no unsupported `Upfront Flat-Rate`, `Surprise Fees`,
   `Free Estimates`, or `Owner Answers` claims were emitted.
+- Reconstructing the real generated Qwen body/comment in memory and passing it
+  through the stricter prompt-placeholder and caller-marker admission returned
+  `real artifact stricter-admission probe: PASS`.
 
 ## Estimated diff size
 

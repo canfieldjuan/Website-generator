@@ -20,6 +20,7 @@ from lib.generation import (
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
+    extract_square_placeholder_tokens,
     extract_template_body_scaffold,
     generate_text,
     preflight_generation_provider,
@@ -37,6 +38,20 @@ ENRICHABLE_PAGE_TYPES = {"services", "single-service", "team", "about", "faq", "
 ENRICHMENT_PROMPT_PATH = "references/05-enrichment-prompt.md"
 BASE_TEMPLATE_PATH = "references/03-base-template.html"
 THEMES_CATALOG_PATH = "references/09-themes.md"
+REDESIGN_DEPLOYMENT_COMMENT_MARKERS = (
+    "WEBSITE REDESIGN MOCKUP",
+    "Client:",
+    "Source URL:",
+    "Platform:",
+    "Theme applied:",
+    "THEIR CURRENT ANNUAL COST:",
+    "YOUR MODEL:",
+    "5-YEAR SAVINGS:",
+    "Hosting:",
+    "SALES PITCH:",
+    "DEPLOY THIS MOCKUP:",
+    "INTERIOR PAGES REMAINING:",
+)
 
 
 def _six_digit_hex(value):
@@ -377,7 +392,8 @@ BASE BODY TEMPLATE:
         colors=_resolve_site_document_colors(site_json),
         title=site_name,
         body_theme=_site_body_theme(site_json),
-        relocate_leading_comment=True,
+        required_leading_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+        forbidden_square_placeholders=extract_square_placeholder_tokens(system_prompt),
     )
 
 def generate_interior_page(
@@ -449,6 +465,7 @@ SOURCE CONTENT:
         colors=_resolve_site_document_colors(site_json),
         title=f"{page_label} | {site_name}",
         body_theme=_site_body_theme(site_json),
+        forbidden_square_placeholders=extract_square_placeholder_tokens(system_prompt),
     )
 
 
