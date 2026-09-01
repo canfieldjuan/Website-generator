@@ -923,6 +923,26 @@ class BodyAssemblyTests(unittest.TestCase):
             "<body><main>&#91;Saturday&#93;</main></body>",
         )
 
+    def test_placeholder_admission_percent_decodes_attribute_values(self):
+        placeholders = extract_square_placeholder_tokens("Use [PROSPECT.phone].")
+
+        with self.assertRaisesRegex(GeneratedBodyError, "prompt placeholders"):
+            validate_generated_body(
+                body_result(
+                    '<body><a href="tel:%5BPROSPECT.phone%5D">Call</a></body>'
+                ),
+                forbidden_square_placeholders=placeholders,
+            )
+
+        valid_body = '<body><a href="/service%20areas">Areas</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(valid_body),
+                forbidden_square_placeholders=placeholders,
+            ),
+            valid_body,
+        )
+
     def test_body_byte_boundary_accepts_limit_and_rejects_limit_plus_one(self):
         base = "<body></body>"
         at_limit = base.replace(

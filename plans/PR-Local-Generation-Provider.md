@@ -134,8 +134,9 @@ body scaffold, then supplies that set to body admission. Dynamic prospect/site
 data is deliberately excluded so real bracketed customer content remains valid;
 static prompt edits cannot add new placeholder syntax that silently leaks into
 output. Admission checks the raw body plus browser-decoded, element-spanning
-visible text and decoded attribute values, so character references cannot hide
-either square-bracket or curly-brace placeholders. Homepage callers also provide
+visible text and decoded attribute values, including percent-decoded attribute
+surfaces, so character references or URL encoding cannot hide either
+square-bracket or curly-brace placeholders. Homepage callers also provide
 their own required
 deployment-comment marker set; an incidental leading comment cannot impersonate
 the build or redesign metadata contract.
@@ -166,11 +167,11 @@ the build or redesign metadata contract.
 
 ## Verification
 
-- `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 71 tests passed, including the `llama.cpp` health/model/chat contract,
-  browser-decoded placeholder admission, startup-script boundaries, and both
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
+  — 72 tests passed, including the `llama.cpp` health/model/chat contract,
+  browser- and URL-decoded placeholder admission, startup-script boundaries, and both
   HTML entry points' shared assembly.
-- `/tmp/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
 - `bash -n scripts/start_llama_server.sh` — passed.
 - `scripts/start_llama_server.sh --help` — passed without loading a model.

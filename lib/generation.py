@@ -10,7 +10,7 @@ from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import requests
 from openai import DefaultHttpxClient, OpenAI
@@ -580,6 +580,7 @@ def validate_generated_body(
         body,
         "".join(parser.visible_text_parts),
         *parser.decoded_attribute_values,
+        *(unquote(value) for value in parser.decoded_attribute_values),
     )
     if any(re.search(r"{{[^{}]+}}", surface) for surface in placeholder_surfaces):
         raise GeneratedBodyError(
