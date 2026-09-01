@@ -50,6 +50,7 @@ from lib.connect_v2 import (
     write_registration,
 )
 from lib.generation import (
+    GeneratedBodyError,
     GenerationConfigurationError,
     GenerationProviderUnavailable,
     GenerationResponseError,
@@ -544,6 +545,14 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
                 True,
                 None,
             ),
+            (
+                lambda _input: (_ for _ in ()).throw(
+                    GeneratedBodyError("unresolved placeholder")
+                ),
+                "MODEL_RESPONSE_INVALID",
+                True,
+                None,
+            ),
         )
         for generation, expected_code, retryable, message_fragment in failures:
             with self.subTest(expected_code=expected_code), tempfile.TemporaryDirectory() as directory:
@@ -965,6 +974,21 @@ class EntitlementTests(unittest.TestCase):
             path.chmod(0o644)
             self.assertEqual(gate.decision(), EntitlementDecision.MISSING)
 
+    def test_excessive_entitlement_json_nesting_fails_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            parent = Path(root) / "local-connect"
+            parent.mkdir(mode=0o700)
+            path = parent / "entitlement-v1.json"
+            path.write_bytes(b"[" * 1_200 + b"0" + b"]" * 1_200)
+            path.chmod(0o600)
+            gate = EntitlementGate.for_test(
+                path=path,
+                keyring_document=self.keyring,
+                now=self.now,
+            )
+
+            self.assertEqual(gate.decision(), EntitlementDecision.INVALID)
+
     def test_every_route_rechecks_entitlement_and_authentication_stays_first(self):
         with tempfile.TemporaryDirectory() as root:
             store = ConnectStore(Path(root) / "connect.sqlite3")
@@ -1034,6 +1058,23 @@ class RegistrationTests(unittest.TestCase):
             self.assertTrue(path.exists())
             remove_registration_if_owned(path, first_token)
             self.assertFalse(path.exists())
+
+    def test_malformed_registration_never_removes_or_aborts_cleanup(self):
+        malformed_contents = {
+            "array root": b"[]",
+            "invalid auth shape": b'{"auth":"invalid"}',
+            "invalid UTF-8": b"\xff",
+            "excessive nesting": b"[" * 1_200 + b"0" + b"]" * 1_200,
+            "non-ASCII token": '{"auth":{"token":"caf\u00e9"}}'.encode("utf-8"),
+        }
+        for label, content in malformed_contents.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "registration.json"
+                path.write_bytes(content)
+
+                remove_registration_if_owned(path, TOKEN)
+
+                self.assertTrue(path.exists())
 
     def test_registration_boundaries_and_exclusive_lock_fail_closed(self):
         instance_id = str(uuid.uuid4())

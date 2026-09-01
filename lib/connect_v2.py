@@ -40,6 +40,7 @@ from lib.connect_store import (
 from lib.generation import (
     DEFAULT_LOCAL_MODEL,
     MAX_HTML_BYTES,
+    GeneratedBodyError,
     GeneratedHtmlError,
     GenerationConfigurationError,
     GenerationConfig,
@@ -194,7 +195,12 @@ class ProviderRuntime:
                     display_name=sanitize_display_name(display_name),
                     output_bytes=output_bytes,
                 )
-            except (GeneratedHtmlError, GenerationConfigurationError, GenerationResponseError):
+            except (
+                GeneratedBodyError,
+                GeneratedHtmlError,
+                GenerationConfigurationError,
+                GenerationResponseError,
+            ):
                 self._fail_model_response(job_id)
             except GenerationProviderUnavailable:
                 self.store.fail(
@@ -788,10 +794,26 @@ def remove_registration_if_owned(path: str | Path, token: str) -> None:
     registration_path = Path(path)
     try:
         current = json.loads(registration_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+    except (
+        FileNotFoundError,
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        RecursionError,
+    ):
         return
-    current_token = (current.get("auth") or {}).get("token")
-    if isinstance(current_token, str) and hmac.compare_digest(current_token, token):
+    if not isinstance(current, dict):
+        return
+    current_auth = current.get("auth")
+    if not isinstance(current_auth, dict):
+        return
+    current_token = current_auth.get("token")
+    if (
+        isinstance(current_token, str)
+        and current_token.isascii()
+        and token.isascii()
+        and hmac.compare_digest(current_token, token)
+    ):
         try:
             registration_path.unlink()
         except FileNotFoundError:

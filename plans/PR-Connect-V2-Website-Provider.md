@@ -37,6 +37,24 @@ default `127.0.0.1:8080/v1` endpoint, and the exact
 advertised capability, artifact/job schemas, entitlement enforcement, bearer
 authentication, durable job transitions, idempotency, or generated HTML.
 
+### Review-blocker contract revision
+
+Exact-head review exposed three fail-closed gaps in already-declared Connect
+surfaces. `GeneratedBodyError` is a `ValueError` but is absent from the
+model-response exception tuple, so rejected model HTML is mislabeled as invalid
+prospect input. The shared entitlement JSON decoder lets parser recursion escape
+instead of converting it to the existing invalid-entitlement decision. Clean
+shutdown also assumes parsed registration and `auth` values are dictionaries,
+so a replaced or corrupted registration can abort the remaining cleanup.
+
+The correct fix must classify `GeneratedBodyError` with other retryable model
+response failures, translate excessive nesting once inside the shared
+entitlement object decoder, and make registration cleanup treat malformed,
+wrong-shaped, non-UTF-8, or excessively nested content as an ownership mismatch.
+It must add regression coverage for both sides of each boundary. It must not
+broaden accepted entitlement/registration shapes, delete an unowned
+registration, change job or error schemas, or alter provider startup order.
+
 ## Scope (this PR)
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
@@ -54,6 +72,8 @@ authentication, durable job transitions, idempotency, or generated HTML.
    manifest, submission, and status access unless it is active.
 7. Align provider startup, errors, documentation, and loopback tests with the
    direct standalone `llama.cpp` runtime inherited from the core slice.
+8. Close the three exact-head review blockers in model-error classification,
+   entitlement decoding, and registration cleanup without changing schemas.
 
 ### Files touched
 
@@ -153,9 +173,10 @@ as any other invalid token.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 118 tests in 3.084 seconds on the updated combined tree, including
+  passed: 120 tests in 4.098 seconds on the updated combined tree, including
   direct `llama.cpp` preflight, loopback proxy bypass, startup boundaries, and
-  the Connect retryable runtime instruction.
+  the Connect retryable runtime instruction plus the exact-head review
+  regressions.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema

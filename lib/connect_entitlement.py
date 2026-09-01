@@ -292,11 +292,14 @@ def _read_private_entitlement(path: Path) -> bytes | None:
 
 
 def _strict_json_object(content: bytes) -> dict[str, Any]:
-    document = json.loads(
-        content,
-        object_pairs_hook=_reject_duplicate_members,
-        parse_constant=_reject_json_constant,
-    )
+    try:
+        document = json.loads(
+            content,
+            object_pairs_hook=_reject_duplicate_members,
+            parse_constant=_reject_json_constant,
+        )
+    except RecursionError as exc:
+        raise ValueError("Connect entitlement JSON nesting is excessive.") from exc
     if not isinstance(document, dict):
         raise ValueError("Connect entitlement JSON must be an object.")
     return document
