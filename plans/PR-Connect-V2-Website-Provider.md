@@ -64,6 +64,12 @@ worker transitions accepted → processing → completed/failed and stores the
 validated HTML artifact. GET routes project stored state into the canonical v2
 manifest and job-status shapes.
 
+Before generation, the shared prospect preparer requires each required field to
+be a non-empty string. The Connect adapter also changes a photo-dependent hero
+selection to the existing gradient shape when the one accepted input artifact
+does not contain a usable hero/background photo URL. This keeps the advertised
+single HTML output self-contained without invoking image acquisition.
+
 The HTTP layer checks bearer authentication first and the independently signed
 local entitlement second on every request. Entitlement verification uses an
 embedded build-owned public keyring, strict bounded JSON/base64url/claim
@@ -79,6 +85,9 @@ builds with no official keyring fail closed as authority-unavailable.
   wildcard, malformed, and hostname-lookalike generation endpoints.
 - No parameters are declared in v1.0. Theme and section choices remain in the
   prospect JSON's existing deterministic contract.
+- A supplied hero/background photo preserves the deterministic photo layout;
+  absent, partial, or unrelated photo metadata uses the existing photo-free
+  gradient layout because this capability does not produce image artifacts.
 - The provider refuses to register when Qwen is unavailable. It never auto-loads
   a model.
 - Accepted jobs survive restart. Jobs interrupted while processing become a
@@ -103,7 +112,7 @@ builds with no official keyring fail closed as authority-unavailable.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/tmp/connect-contracts-c5405935 /tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  passed: 67 tests in 2.358 seconds on the updated combined head.
+  passed: 71 tests in 4.099 seconds on the updated combined head.
 - `/tmp/website-redesign-connect-venv/bin/pip check` passed with no broken
   requirements.
 - Canonical manifest, registration, job request/status, and HTTP-error schema

@@ -490,6 +490,77 @@ class GenerationSeamTests(unittest.TestCase):
         self.assertIn("_computed_theme", captured["prospect"])
         self.assertIn("build_date", captured["prospect"])
 
+    def test_connect_generation_uses_photo_free_hero_without_supplied_asset(self):
+        generated_prospects = []
+
+        def select_split(prospect, *, announce=True):
+            prospect["_computed_hero_shape"] = "split"
+            return prospect
+
+        def generated(prospect, _config):
+            generated_prospects.append(prospect)
+            return HTML.decode()
+
+        missing_assets = []
+        for photos in (
+            None,
+            [],
+            [{"context": "hero", "url": "   "}],
+            [{"context": "gallery", "url": "https://images.example.test/other.jpg"}],
+        ):
+            source = dict(PROSPECT)
+            if photos is not None:
+                source["photos"] = photos
+            missing_assets.append(source)
+        supplied_asset = dict(PROSPECT)
+        supplied_asset["photos"] = [
+            {
+                "context": "background",
+                "url": "https://images.example.test/hero.jpg",
+            }
+        ]
+        with patch.object(
+            build, "apply_design_selections", side_effect=select_split
+        ), patch.object(
+            build, "generate_build_html", side_effect=generated
+        ):
+            for source in (*missing_assets, supplied_asset):
+                generate_website_artifact(json.dumps(source).encode("utf-8"))
+
+        for prospect in generated_prospects[:-1]:
+            self.assertEqual(prospect["_computed_hero_shape"], "gradient")
+        self.assertEqual(generated_prospects[-1]["_computed_hero_shape"], "split")
+
+    def test_required_prospect_fields_must_be_nonempty_strings(self):
+        for invalid in (123, True, [], "   "):
+            with self.subTest(invalid=invalid):
+                source = dict(PROSPECT)
+                source["business_name"] = invalid
+                with self.assertRaisesRegex(ValueError, "non-empty strings"):
+                    build.prepare_prospect(source)
+
+    def test_malformed_required_field_is_nonretryable_input_failure(self):
+        source = dict(PROSPECT)
+        source["business_name"] = 123
+        data = json.dumps(source).encode("utf-8")
+        document = job_request(data)
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            build, "generate_build_html"
+        ) as generated:
+            runtime = ProviderRuntime(
+                ConnectStore(Path(directory) / "connect.sqlite3"),
+                generate_website_artifact,
+            )
+            try:
+                runtime.accept(document, data)
+                failed = runtime.wait_for_terminal(document["job_id"])
+                self.assertEqual(failed.status, "failed")
+                self.assertEqual(failed.error_code, "INPUT_INVALID")
+                self.assertFalse(failed.error_retryable)
+                generated.assert_not_called()
+            finally:
+                runtime.close()
+
     def test_connect_generation_accepts_only_literal_loopback_endpoints(self):
         valid_endpoints = (
             "http://localhost:1234/v1",

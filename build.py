@@ -159,9 +159,16 @@ def prepare_prospect(prospect, build_date=None):
     if not isinstance(prospect, dict):
         raise ValueError("Prospect JSON must contain one object.")
     prospect = copy.deepcopy(prospect)
-    missing = [k for k in REQUIRED_FIELDS if not prospect.get(k)]
-    if missing:
-        raise ValueError(f"Prospect JSON missing required field(s): {', '.join(missing)}")
+    invalid = [
+        key
+        for key in REQUIRED_FIELDS
+        if not isinstance(prospect.get(key), str) or not prospect[key].strip()
+    ]
+    if invalid:
+        raise ValueError(
+            "Prospect JSON required field(s) must be non-empty strings: "
+            f"{', '.join(invalid)}"
+        )
     sanitize_placeholders(prospect)
     sanitize_reviews(prospect)
     build_date = build_date or date.today()

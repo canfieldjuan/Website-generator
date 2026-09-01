@@ -638,6 +638,28 @@ def resolve_connect_generation_config() -> GenerationConfig:
     return config
 
 
+def _has_usable_hero_photo(prospect: dict[str, Any]) -> bool:
+    photos = prospect.get("photos")
+    if not isinstance(photos, list):
+        return False
+    return any(
+        isinstance(photo, dict)
+        and photo.get("context") in {"hero", "background"}
+        and isinstance(photo.get("url"), str)
+        and bool(photo["url"].strip())
+        for photo in photos
+    )
+
+
+def _select_connect_hero_shape(prospect: dict[str, Any]) -> None:
+    """Keep single-artifact output self-contained when no photo is supplied."""
+    if (
+        prospect.get("_computed_hero_shape") in {"fullbleed", "split"}
+        and not _has_usable_hero_photo(prospect)
+    ):
+        prospect["_computed_hero_shape"] = "gradient"
+
+
 def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
     try:
         prospect_document = json.loads(
@@ -647,6 +669,7 @@ def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
         )
         prospect = build.prepare_prospect(prospect_document)
         build.apply_design_selections(prospect, announce=False)
+        _select_connect_hero_shape(prospect)
         display_name = f"{build.slugify(prospect['business_name'])}-homepage.html"
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise ValueError("The input artifact is not a valid prospect document.") from exc
