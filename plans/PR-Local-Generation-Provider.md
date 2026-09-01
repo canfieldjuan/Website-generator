@@ -80,12 +80,15 @@ elements outside `head` or `body` are rejected rather than silently admitted.
 - `python3 build.py --help` — passed; provider/model and existing skip flags shown.
 - `python3 pipeline.py --help` — passed; provider/model and existing skip flags shown.
 - `git diff --check` — passed.
-- The required real fixture build is not complete. The selected NVIDIA runtime
-  aborted on a CUDA out-of-memory allocation; the isolated CPU runtime then
-  refused the saved value-cache/flash-attention combination before loading; and
-  the existing authenticated local API did not answer the credentialed probe.
-  The original runtime selection was restored and `lms ps` confirmed that no
-  model remained loaded. This remains an acceptance blocker, not passing proof.
+- The required real fixture build is not complete. An authenticated replacement
+  server on loopback port 1235 loaded exact model `qwen/qwen3.8-27b` on the CPU
+  runtime with a 131,072-token context, and the build passed exact-model
+  preflight and began generation. During prompt ingestion, LM Studio attempted
+  to restore its server setting to port 1234; a stale LM Studio listener already
+  owned that port, so the restart failed, disconnected the request, and produced
+  no admitted HTML. The proof model was unloaded and the original NVIDIA runtime
+  restored. The stale server conflict and viable inference performance remain
+  acceptance blockers, not passing proof.
 
 ## Estimated diff size
 
