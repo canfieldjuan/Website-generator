@@ -242,6 +242,28 @@ This must not alter trusted CSS, visible copy, component cardinality, page
 ordering, provider/model selection, GPU/runtime behavior, placeholder
 sanitation, or image, email, deployment, and Connect job contracts.
 
+### Mandatory output truth and markup contract revision
+
+The final exact-head findings expose two remaining prompt-only assertions. The
+build serializes mandatory business-name and phone substitutions for the model,
+but does not pass those values into admission. The body parser also tracks only
+the root body depth, so balanced-body output can still contain unclosed or
+misnested descendants that a browser silently repairs into a different DOM.
+
+The correct fix must enforce every build substitution that affects identity or
+the primary contact path. The normalized business name and, when present, phone
+must occur in visual or accessibility exposure; a present phone must have at
+least one `tel:` target and every `tel:` target must resolve to that same phone;
+when no phone is verified, no `tel:` target may appear. The shared parser must
+also reject unclosed, unexpectedly closed, or misnested non-void descendants
+before BeautifulSoup repair, while accepting standard void elements and valid
+self-closing SVG content. Tests must prove omissions, wrong links, no-phone
+links, both malformed-markup directions, and valid opposites.
+
+This must not change prospect values, phone presentation, visible copy, trusted
+template/CSS, required component counts, provider/model selection, GPU/runtime
+behavior, or any image, email, deployment, and Connect job contract.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -299,6 +321,11 @@ sanitation, or image, email, deployment, and Connect job contracts.
     service, and benefits structures functional.
 25. Resolve indirect ARIA text references in declared order and reject missing,
     duplicate, or cyclic references while retaining direct labels and alt text.
+26. Enforce the build's business-name and phone substitutions in rendered
+    exposure and exact `tel:` destinations, including the explicit no-phone
+    path.
+27. Reject unbalanced or misnested generated descendants before browser repair
+    while preserving standard void elements and valid SVG self-closing tags.
 
 ### Files touched
 

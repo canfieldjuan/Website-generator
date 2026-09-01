@@ -35,6 +35,25 @@ MAX_HTML_BYTES = 2 * 1024 * 1024
 MAX_GENERATED_BODY_BYTES = 512 * 1024
 SUPPORTED_PROVIDERS = frozenset(("local", "openrouter"))
 HOMEPAGE_SHARED_PAGE_CLASSES = frozenset(("page-wrap",))
+HTML_VOID_ELEMENTS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+_EXPECTED_PHONE_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -162,6 +181,8 @@ class _GeneratedBodyParser(HTMLParser):
         self.decoded_attribute_values: list[str] = []
         self.class_names: set[str] = set()
         self.class_name_counts: dict[str, int] = {}
+        self.open_descendants: list[str] = []
+        self.structure_errors: list[str] = []
         self.svg_depth = 0
 
     def handle_decl(self, decl: str) -> None:
@@ -195,11 +216,17 @@ class _GeneratedBodyParser(HTMLParser):
             self.svg_depth += 1
         if self.body_depth == 0:
             self.has_content_outside_body = True
+        elif tag_name not in HTML_VOID_ELEMENTS:
+            self.open_descendants.append(tag_name)
 
     def handle_endtag(self, tag: str) -> None:
         tag_name = tag.lower()
         if tag_name == "body":
             self.body_events.append("end")
+            if self.open_descendants:
+                self.structure_errors.append(
+                    f"unclosed <{self.open_descendants[-1]}> before </body>"
+                )
             if self.body_depth:
                 self.body_depth -= 1
             else:
@@ -211,7 +238,21 @@ class _GeneratedBodyParser(HTMLParser):
             self.forbidden_tags.append(tag_name)
         if tag_name == "svg" and self.svg_depth:
             self.svg_depth -= 1
-        if self.body_depth == 0:
+        if self.body_depth:
+            if tag_name in HTML_VOID_ELEMENTS:
+                self.structure_errors.append(
+                    f"unexpected closing tag </{tag_name}> for a void element"
+                )
+            elif not self.open_descendants:
+                self.structure_errors.append(f"unexpected closing tag </{tag_name}>")
+            elif self.open_descendants[-1] != tag_name:
+                self.structure_errors.append(
+                    f"misnested closing tag </{tag_name}> while "
+                    f"<{self.open_descendants[-1]}> is open"
+                )
+            else:
+                self.open_descendants.pop()
+        else:
             self.has_content_outside_body = True
 
     def handle_startendtag(
@@ -221,9 +262,19 @@ class _GeneratedBodyParser(HTMLParser):
             self.body_events.extend(("start", "end"))
             self.has_content_outside_body = True
             return
+        tag_name = tag.lower()
+        is_svg_content = self.svg_depth > 0 or tag_name == "svg"
         self.handle_starttag(tag, attrs)
-        if tag.lower() == "svg":
-            self.handle_endtag(tag)
+        if tag_name in HTML_VOID_ELEMENTS:
+            return
+        if not is_svg_content:
+            self.structure_errors.append(
+                f"non-void HTML element <{tag_name}> cannot self-close"
+            )
+        if self.open_descendants and self.open_descendants[-1] == tag_name:
+            self.open_descendants.pop()
+        if tag_name == "svg" and self.svg_depth:
+            self.svg_depth -= 1
 
     def handle_data(self, data: str) -> None:
         if self.body_depth:
@@ -625,6 +676,27 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
         if isinstance(identifier, str) and identifier:
             id_targets.setdefault(identifier, []).append(element)
 
+    def is_hidden_input(node: Tag) -> bool:
+        return (
+            node.name.casefold() == "input"
+            and str(node.get("type") or "").casefold() == "hidden"
+        )
+
+    def is_render_suppressed(node: Tag) -> bool:
+        if is_hidden_input(node) or node.has_attr("hidden"):
+            return True
+        style = node.get("style")
+        if not isinstance(style, str):
+            return False
+        return bool(
+            re.search(
+                r"(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|"
+                r"content-visibility\s*:\s*hidden)\s*(?:;|$)",
+                style,
+                re.IGNORECASE,
+            )
+        )
+
     def replacement_text(node: Tag) -> str:
         if node.name.casefold() == "img":
             value = node.get("alt")
@@ -641,6 +713,8 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
             visual_parts.append(str(node))
             return
         if not isinstance(node, Tag):
+            return
+        if is_render_suppressed(node):
             return
         replacement = replacement_text(node)
         if replacement:
@@ -675,6 +749,17 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
         if isinstance(node, NavigableString):
             return str(node)
         if not isinstance(node, Tag):
+            return ""
+        if is_hidden_input(node):
+            return ""
+        aria_hidden = node.get("aria-hidden")
+        if not active_references and (
+            is_render_suppressed(node)
+            or (
+                isinstance(aria_hidden, str)
+                and aria_hidden.strip().casefold() == "true"
+            )
+        ):
             return ""
 
         labelled_by = node.get("aria-labelledby")
@@ -756,6 +841,8 @@ def validate_generated_body(
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
+    required_exposed_values: Iterable[tuple[str, str]] = (),
+    expected_phone: object = _EXPECTED_PHONE_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -784,6 +871,15 @@ def validate_generated_body(
     if parser.body_events != ["start", "end"] or parser.body_depth:
         raise GeneratedBodyError(
             "Generated body must contain exactly one balanced body root."
+        )
+    if parser.structure_errors or parser.open_descendants:
+        detail = (
+            parser.structure_errors[0]
+            if parser.structure_errors
+            else f"unclosed <{parser.open_descendants[-1]}>"
+        )
+        raise GeneratedBodyError(
+            f"Generated body has invalid descendant structure: {detail}."
         )
     if parser.forbidden_tags:
         names = ", ".join(sorted(set(parser.forbidden_tags)))
@@ -851,11 +947,80 @@ def validate_generated_body(
             + "; ".join(child_sequence_mismatches[:3])
         )
 
+    exposure_surfaces = _claim_exposure_texts(body_root)
     claim_surfaces = (
-        *_claim_exposure_texts(body_root),
+        *exposure_surfaces,
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
+    normalized_exposure_surfaces = tuple(
+        _normalize_claim_match_text(surface) for surface in exposure_surfaces
+    )
+    compact_exposure_surfaces = tuple(
+        _compact_claim_match_text(surface) for surface in exposure_surfaces
+    )
+    missing_exposed_values = []
+    for label, value in required_exposed_values:
+        normalized_value = _normalize_claim_match_text(value)
+        compact_value = _compact_claim_match_text(value)
+        if not normalized_value or not (
+            any(
+                normalized_value in surface
+                for surface in normalized_exposure_surfaces
+            )
+            or (
+                compact_value
+                and any(
+                    compact_value in surface
+                    for surface in compact_exposure_surfaces
+                )
+            )
+        ):
+            missing_exposed_values.append(label)
+    if missing_exposed_values:
+        missing = ", ".join(missing_exposed_values[:3])
+        raise GeneratedBodyError(
+            f"Generated body is missing required visible substitution: {missing}."
+        )
+
+    if expected_phone is not _EXPECTED_PHONE_UNSET:
+        tel_targets = []
+        for element in body_root.find_all(href=True):
+            href = element.get("href")
+            if not isinstance(href, str):
+                continue
+            decoded_href = unquote(href).strip()
+            if decoded_href.casefold().startswith("tel:"):
+                tel_targets.append(decoded_href)
+        if expected_phone is None:
+            if tel_targets:
+                raise GeneratedBodyError(
+                    "Generated body contains a tel target with no verified phone."
+                )
+        else:
+            expected_digits = "".join(
+                character
+                for character in unicodedata.normalize("NFKC", str(expected_phone))
+                if character.isdecimal()
+            )
+            if not tel_targets:
+                raise GeneratedBodyError(
+                    "Generated body is missing the required tel target for phone."
+                )
+            unexpected_targets = [
+                target
+                for target in tel_targets
+                if "".join(
+                    character
+                    for character in unicodedata.normalize("NFKC", target[4:])
+                    if character.isdecimal()
+                )
+                != expected_digits
+            ]
+            if unexpected_targets:
+                raise GeneratedBodyError(
+                    "Generated body contains an unexpected tel target for phone."
+                )
     normalized_claim_surfaces = tuple(
         _normalize_claim_match_text(surface) for surface in claim_surfaces
     )
@@ -1049,6 +1214,8 @@ def assemble_generated_html(
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
+    required_exposed_values: Iterable[tuple[str, str]] = (),
+    expected_phone: object = _EXPECTED_PHONE_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -1069,6 +1236,8 @@ def assemble_generated_html(
         forbidden_square_placeholders=forbidden_square_placeholders,
         forbidden_visible_phrases=forbidden_visible_phrases,
         forbidden_class_names=forbidden_class_names,
+        required_exposed_values=required_exposed_values,
+        expected_phone=expected_phone,
         required_class_counts=required_class_counts,
         required_child_class_sequences=required_child_class_sequences,
     )

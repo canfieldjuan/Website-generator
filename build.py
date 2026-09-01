@@ -833,6 +833,12 @@ def generate_build_html(prospect, generation_config=None, client=None):
         ),
         forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
         forbidden_class_names=interior_only_classes,
+        required_exposed_values=tuple(
+            (name, value)
+            for name, value in required_substitutions.items()
+            if isinstance(value, str) and value
+        ),
+        expected_phone=prospect.get("phone"),
         required_class_counts=required_class_counts,
         required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
     )

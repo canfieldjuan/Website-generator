@@ -76,7 +76,8 @@ COMPLETE_BENEFITS_GRID = (
     + "</div>"
 )
 COMPLETE_BUILD_BODY = (
-    '<body class="theme-light"><nav class="site-nav"></nav>'
+    '<body class="theme-light"><nav class="site-nav"><span>Test Business</span>'
+    '<a href="tel:2175550100">217-555-0100</a></nav>'
     '<section class="dual-cta-hero"></section><div class="coverage-band"></div>'
     + COMPLETE_SERVICES_GRID
     + COMPLETE_BENEFITS_GRID
@@ -1118,6 +1119,25 @@ class BodyAssemblyTests(unittest.TestCase):
     def test_body_admission_accepts_one_plain_body(self):
         self.assertEqual(validate_generated_body(body_result()), COMPLETE_BODY)
 
+    def test_body_admission_rejects_malformed_descendant_structure(self):
+        malformed_bodies = (
+            "<body><main><a>Call</main></body>",
+            "<body><main><strong><em>Text</strong></em></main></body>",
+            "<body><main></a></main></body>",
+        )
+        for malformed in malformed_bodies:
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "invalid descendant structure",
+            ):
+                validate_generated_body(body_result(malformed))
+
+        valid = (
+            '<body><main>Ready<br><img src="data:image/png;base64,AA==" alt="">'
+            '<svg><path d="M0 0" /></svg></main></body>'
+        )
+        self.assertEqual(validate_generated_body(body_result(valid)), valid)
+
     def test_body_admission_rejects_gated_claim_across_elements(self):
         body = "<body><p>Upfront <strong>Flat-Rate</strong> pricing.</p></body>"
         with self.assertRaisesRegex(GeneratedBodyError, "Upfront Flat-Rate"):
@@ -1885,7 +1905,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             )
 
     def test_build_generator_requires_coverage_band_only_with_a_phone(self):
-        body_without_coverage = COMPLETE_BUILD_BODY.replace(
+        body_without_phone = COMPLETE_BUILD_BODY.replace(
+            '<a href="tel:2175550100">217-555-0100</a>',
+            "",
+        )
+        body_without_coverage = body_without_phone.replace(
             '<div class="coverage-band"></div>',
             "",
         )
@@ -1921,6 +1945,9 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             )
 
         wrong_case_coverage = COMPLETE_BUILD_BODY.replace(
+            '<a href="tel:2175550100">217-555-0100</a>',
+            "",
+        ).replace(
             'class="coverage-band"',
             'class="Coverage-Band"',
         )
@@ -1934,6 +1961,20 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(wrong_case_coverage)),
             )
 
+        unexpected_phone = body_without_coverage.replace(
+            "</nav>",
+            '<a href="tel:2175550199">217-555-0199</a></nav>',
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "no verified phone",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unexpected_phone)),
+            )
+
         prospect["phone"] = "217-555-0100"
         with self.assertRaisesRegex(
             GeneratedBodyError,
@@ -1944,6 +1985,77 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 config(),
                 FakeLocalClient(local_chat_payload(body_without_coverage)),
             )
+
+    def test_build_generator_enforces_identity_and_phone_substitutions(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+        adverse_bodies = (
+            (
+                COMPLETE_BUILD_BODY.replace("Test Business", "Other Business"),
+                "business_name",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(">217-555-0100</a>", ">Call now</a>"),
+                "phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    ">217-555-0100</a>",
+                    ">Call now</a>",
+                ).replace(
+                    "</nav>",
+                    '<input type="hidden" value="217-555-0100"></nav>',
+                ),
+                "phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    ">217-555-0100</a>",
+                    '>Call now</a><span hidden>217-555-0100</span>',
+                ),
+                "phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    ">217-555-0100</a>",
+                    '>Call now</a><span style="display: none">217-555-0100</span>',
+                ),
+                "phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    '<a href="tel:2175550100">217-555-0100</a>',
+                    "<span>217-555-0100</span>",
+                ),
+                "missing the required tel target",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace("tel:2175550100", "tel:2175550199"),
+                "unexpected tel target",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    "</nav>",
+                    '<a href="tel:2175550199">Other number</a></nav>',
+                ),
+                "unexpected tel target",
+            ),
+        )
+        for adverse_body, message in adverse_bodies:
+            with self.subTest(message=message), self.assertRaisesRegex(
+                GeneratedBodyError,
+                message,
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(adverse_body)),
+                )
 
     def test_build_generator_rejects_claim_without_matching_promise(self):
         unsupported = COMPLETE_BUILD_BODY.replace(
