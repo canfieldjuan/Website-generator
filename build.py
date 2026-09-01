@@ -38,6 +38,7 @@ from lib.generation import (
     preflight_generation_provider,
     require_complete_text,
     resolve_generation_config,
+    validate_document_colors,
 )
 # lib.email.send_pitch_email is intentionally NOT imported here. The
 # from-scratch build flow uses the manual email_draft.md workflow
@@ -413,7 +414,7 @@ def _darken_hex_color(value):
     return "#" + "".join(f"{round(channel * 0.75):02X}" for channel in channels)
 
 
-def _resolve_build_document_colors(prospect):
+def resolve_build_document_colors(prospect):
     brand_colors = prospect.get("brand_colors")
     trade_secondary = _extract_trade_secondary(prospect.get("trade", ""))
     if brand_colors:
@@ -435,10 +436,12 @@ def _resolve_build_document_colors(prospect):
             )
         if not accent:
             raise ValueError("brand_colors does not contain a primary color.")
-        return DocumentColors(
-            accent=accent,
-            accent_dark=accent_dark or _darken_hex_color(accent),
-            secondary=secondary or trade_secondary or "#1F3A5F",
+        return validate_document_colors(
+            DocumentColors(
+                accent=accent,
+                accent_dark=accent_dark or _darken_hex_color(accent),
+                secondary=secondary or trade_secondary or "#1F3A5F",
+            )
         )
 
     palette = prospect.get("_computed_palette") or select_palette(prospect)
@@ -446,10 +449,12 @@ def _resolve_build_document_colors(prospect):
         raise ValueError(
             "No document palette is available; supply brand_colors or a supported trade."
         )
-    return DocumentColors(
-        accent=palette.get("accent"),
-        accent_dark=palette.get("accent_dark"),
-        secondary=palette.get("secondary") or trade_secondary or "#1F3A5F",
+    return validate_document_colors(
+        DocumentColors(
+            accent=palette.get("accent"),
+            accent_dark=palette.get("accent_dark"),
+            secondary=palette.get("secondary") or trade_secondary or "#1F3A5F",
+        )
     )
 
 
@@ -576,6 +581,7 @@ def format_prospect_prompt_block(prospect):
 
 
 def generate_build_html(prospect, generation_config=None, client=None):
+    document_colors = resolve_build_document_colors(prospect)
     config = generation_config or resolve_generation_config()
     print(
         f"[*] Generating site for {prospect['business_name']} using "
@@ -659,7 +665,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         base_template=base_template,
         theme_catalog=themes_catalog,
         theme_name=prospect.get("_computed_theme") or DEFAULT_THEME,
-        colors=_resolve_build_document_colors(prospect),
+        colors=document_colors,
         title=prospect.get("display_name") or prospect["business_name"],
         body_theme="theme-light",
         required_leading_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,

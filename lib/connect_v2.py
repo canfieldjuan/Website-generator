@@ -684,6 +684,7 @@ def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
         prospect = build.prepare_prospect(prospect_document)
         build.apply_design_selections(prospect, announce=False)
         _select_connect_hero_shape(prospect)
+        build.resolve_build_document_colors(prospect)
         if len(build.format_prospect_prompt_block(prospect)) > build.BUILD_USER_TRUNCATE:
             raise ValueError("The prospect document exceeds the generation prompt limit.")
         display_name = f"{build.slugify(prospect['business_name'])}-homepage.html"

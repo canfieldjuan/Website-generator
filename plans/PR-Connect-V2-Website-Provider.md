@@ -63,6 +63,22 @@ broaden accepted entitlement/registration shapes, delete an unowned
 registration, broadly reclassify internal exceptions as input failures, change
 job or error schemas, or alter provider startup order.
 
+### Pre-generation color validation contract
+
+Exact-head review also exposed a deterministic input failure on the expensive
+side of the model boundary. Prospect `brand_colors` are resolved only during
+final HTML assembly, so a malformed truthy accent, dark accent, or secondary
+value can occupy the local model and then surface as a retryable model-response
+failure. The root cause is validation order, not worker retry behavior.
+
+The correct fix must keep one document-color validation authority, validate the
+fully resolved build palette before any generation request, and make Connect
+perform that same validation inside its non-retryable input-preparation block.
+Tests must prove malformed supplied colors never call generation and valid
+supplied colors still reach it. This must not change deterministic palette
+selection, default colors, rendered CSS values, model/provider selection, job
+or error schemas, or any capability contract.
+
 ## Scope (this PR)
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
@@ -83,6 +99,9 @@ job or error schemas, or alter provider startup order.
 8. Close the four exact-head review blockers in model-error classification,
    entitlement decoding, registration cleanup, and pre-generation optional-field
    validation without changing schemas.
+9. Validate the resolved document palette before generation and classify
+   malformed prospect colors as non-retryable input without duplicating color
+   rules.
 
 ### Files touched
 

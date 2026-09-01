@@ -694,6 +694,57 @@ class GenerationSeamTests(unittest.TestCase):
                     finally:
                         runtime.close()
 
+    def test_malformed_brand_colors_are_nonretryable_before_generation(self):
+        invalid_palettes = (
+            "red",
+            ["#123456", "blue"],
+            {"accent": "#123456", "accent_dark": "dark"},
+            {"accent": "#123456", "secondary": "red"},
+        )
+        for invalid in invalid_palettes:
+            with self.subTest(invalid=invalid):
+                source = {**PROSPECT, "brand_colors": invalid}
+                data = json.dumps(source).encode("utf-8")
+                document = job_request(data)
+                with tempfile.TemporaryDirectory() as directory, patch.object(
+                    build,
+                    "generate_build_html",
+                    return_value=HTML.decode("utf-8"),
+                ) as generated:
+                    runtime = ProviderRuntime(
+                        ConnectStore(Path(directory) / "connect.sqlite3"),
+                        generate_website_artifact,
+                    )
+                    try:
+                        runtime.accept(document, data)
+                        failed = runtime.wait_for_terminal(document["job_id"])
+                        self.assertEqual(failed.status, "failed")
+                        self.assertEqual(failed.error_code, "INPUT_INVALID")
+                        self.assertFalse(failed.error_retryable)
+                        generated.assert_not_called()
+                    finally:
+                        runtime.close()
+
+    def test_valid_brand_colors_reach_generation(self):
+        source = {
+            **PROSPECT,
+            "brand_colors": {
+                "accent": "#123456",
+                "accent_dark": "#102030",
+                "secondary": "#abcdef",
+            },
+        }
+        with patch.object(
+            build,
+            "generate_build_html",
+            return_value=HTML.decode("utf-8"),
+        ) as generated:
+            output, _ = generate_website_artifact(
+                json.dumps(source).encode("utf-8")
+            )
+        self.assertEqual(output, HTML)
+        generated.assert_called_once()
+
     def test_malformed_required_field_is_nonretryable_input_failure(self):
         source = dict(PROSPECT)
         source["business_name"] = 123

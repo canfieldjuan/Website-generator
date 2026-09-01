@@ -688,10 +688,11 @@ def assemble_generated_html(
             "Body theme must be theme-light or theme-dark."
         )
     style = parse_theme_definition(theme_catalog, theme_name)
+    colors = validate_document_colors(colors)
     color_values = {
-        "--accent": _require_hex_color("accent", colors.accent),
-        "--accent-dark": _require_hex_color("accent_dark", colors.accent_dark),
-        "--secondary": _require_hex_color("secondary", colors.secondary),
+        "--accent": colors.accent,
+        "--accent-dark": colors.accent_dark,
+        "--secondary": colors.secondary,
     }
     body = validate_generated_body(
         result,
@@ -896,6 +897,15 @@ def _require_hex_color(name: str, value: str) -> str:
             f"Document color {name} must be a six-digit hex value."
         )
     return value.upper()
+
+
+def validate_document_colors(colors: DocumentColors) -> DocumentColors:
+    """Return the canonical palette after validating every rendered color."""
+    return DocumentColors(
+        accent=_require_hex_color("accent", colors.accent),
+        accent_dark=_require_hex_color("accent_dark", colors.accent_dark),
+        secondary=_require_hex_color("secondary", colors.secondary),
+    )
 
 
 def _replace_root_property(head: str, property_name: str, value: str) -> str:

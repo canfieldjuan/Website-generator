@@ -1272,6 +1272,29 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("<head>\n<!--\nNEW WEBSITE BUILD -- FROM SCRATCH", html)
         self.assertIn('<body class="theme-light"><main>Ready</main></body>', html)
 
+    def test_build_generator_validates_brand_colors_before_model_request(self):
+        client = FakeLocalClient(
+            local_chat_payload(
+                body_with_markers(build.BUILD_DEPLOYMENT_COMMENT_MARKERS)
+            )
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "brand_colors": {
+                "accent": "#123456",
+                "secondary": "red",
+            },
+        }
+
+        with self.assertRaisesRegex(GeneratedHtmlError, "secondary.*six-digit"):
+            build.generate_build_html(prospect, config(), client)
+
+        self.assertEqual(client.calls, [])
+
     def test_build_generator_rejects_placeholder_from_static_industry_defaults(self):
         leaked_body = body_with_markers(
             build.BUILD_DEPLOYMENT_COMMENT_MARKERS
