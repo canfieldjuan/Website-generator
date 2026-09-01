@@ -32,6 +32,9 @@ MAX_GENERATED_BODY_TOKENS = 8192
 MAX_HTML_BYTES = 2 * 1024 * 1024
 MAX_GENERATED_BODY_BYTES = 512 * 1024
 SUPPORTED_PROVIDERS = frozenset(("local", "openrouter"))
+HOMEPAGE_SHARED_PAGE_CLASSES = frozenset(("page-wrap",))
+DEFAULT_DOCUMENT_ACCENT = "#1D4ED8"
+DEFAULT_DOCUMENT_SECONDARY = "#1F3A5F"
 
 
 class GenerationConfigurationError(ValueError):
@@ -147,6 +150,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.has_content_outside_body = False
         self.visible_text_parts: list[str] = []
         self.decoded_attribute_values: list[str] = []
+        self.class_names: set[str] = set()
         self.svg_depth = 0
 
     def handle_decl(self, decl: str) -> None:
@@ -155,6 +159,12 @@ class _GeneratedBodyParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.decoded_attribute_values.extend(
             value for _name, value in attrs if value is not None
+        )
+        self.class_names.update(
+            class_name
+            for name, value in attrs
+            if name.casefold() == "class" and value
+            for class_name in value.split()
         )
         tag_name = tag.lower()
         if tag_name == "body":
@@ -574,6 +584,7 @@ def validate_generated_body(
     max_bytes: int = MAX_GENERATED_BODY_BYTES,
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
+    forbidden_class_names: Iterable[str] = (),
 ) -> str:
     body = _strip_outer_code_fence(require_complete_text(result))
     if "```" in body:
@@ -609,15 +620,40 @@ def validate_generated_body(
         raise GeneratedBodyError(
             "Generated body contains content outside its body root."
         )
+    forbidden_class_folds = {
+        class_name.casefold()
+        for class_name in forbidden_class_names
+        if isinstance(class_name, str) and class_name
+    }
+    leaked_class_names = sorted(
+        {
+            class_name
+            for class_name in parser.class_names
+            if class_name.casefold() in forbidden_class_folds
+        },
+        key=str.casefold,
+    )
+    if leaked_class_names:
+        leaked = ", ".join(leaked_class_names[:3])
+        raise GeneratedBodyError(
+            f"Generated body contains classes unavailable to this page type: {leaked}."
+        )
 
-    visible_text = "".join(parser.visible_text_parts).casefold()
+    claim_surfaces = (
+        "".join(parser.visible_text_parts),
+        *parser.decoded_attribute_values,
+        *(unquote(value) for value in parser.decoded_attribute_values),
+    )
+    folded_claim_surfaces = tuple(surface.casefold() for surface in claim_surfaces)
     leaked_phrases = sorted(
         {
             phrase
             for phrase in forbidden_visible_phrases
             if isinstance(phrase, str)
             and phrase
-            and phrase.casefold() in visible_text
+            and any(
+                phrase.casefold() in surface for surface in folded_claim_surfaces
+            )
         },
         key=str.casefold,
     )
@@ -703,6 +739,26 @@ def extract_template_class_names(template_html: str) -> tuple[str, ...]:
     return tuple(sorted(class_names, key=str.casefold))
 
 
+def extract_interior_only_class_names(template_html: str) -> tuple[str, ...]:
+    """Return page-prefixed components that homepage generation must not use."""
+    return tuple(
+        class_name
+        for class_name in extract_template_class_names(template_html)
+        if class_name.startswith("page-")
+        and class_name not in HOMEPAGE_SHARED_PAGE_CLASSES
+    )
+
+
+def extract_homepage_class_names(template_html: str) -> tuple[str, ...]:
+    """Return the template vocabulary without interior-only page components."""
+    interior_only = set(extract_interior_only_class_names(template_html))
+    return tuple(
+        class_name
+        for class_name in extract_template_class_names(template_html)
+        if class_name not in interior_only
+    )
+
+
 def parse_theme_definition(catalog: str, theme_name: str) -> ThemeDefinition:
     section = re.search(
         rf"^##\s+{re.escape(theme_name)}\s+--.*?$(.*?)(?=^##\s|\Z)",
@@ -767,6 +823,7 @@ def assemble_generated_html(
     trusted_head_comment: str | None = None,
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
+    forbidden_class_names: Iterable[str] = (),
 ) -> str:
     if body_theme not in {"theme-light", "theme-dark"}:
         raise GeneratedHtmlError(
@@ -782,6 +839,7 @@ def assemble_generated_html(
         result,
         forbidden_square_placeholders=forbidden_square_placeholders,
         forbidden_visible_phrases=forbidden_visible_phrases,
+        forbidden_class_names=forbidden_class_names,
     )
     body = re.sub(
         r"^<body(?:\s[^>]*)?>",

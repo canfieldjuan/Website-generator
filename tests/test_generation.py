@@ -11,6 +11,8 @@ import build
 import pipeline
 import lib.clients
 from lib.generation import (
+    DEFAULT_DOCUMENT_ACCENT,
+    DEFAULT_DOCUMENT_SECONDARY,
     DEFAULT_LOCAL_BASE_URL,
     DEFAULT_LOCAL_MODEL,
     DEFAULT_LOCAL_TIMEOUT_SECONDS,
@@ -33,6 +35,8 @@ from lib.generation import (
     body_generation_config,
     create_generation_client,
     create_local_generation_client,
+    extract_homepage_class_names,
+    extract_interior_only_class_names,
     extract_square_placeholder_tokens,
     extract_template_body_scaffold,
     extract_template_class_names,
@@ -887,6 +891,39 @@ class BodyAssemblyTests(unittest.TestCase):
         self.assertIn("reviews-card-grid", class_names)
         self.assertNotIn("{{SITE_NAME}}", class_names)
 
+    def test_homepage_class_catalog_excludes_interior_components(self):
+        template = """<style>
+        .page-wrap, .page-body, .page-cta-block, .footer-bottom { display: block; }
+        </style><body class="theme-light"><div class="page-wrap"></div></body>"""
+
+        self.assertEqual(
+            extract_interior_only_class_names(template),
+            ("page-body", "page-cta-block"),
+        )
+        self.assertEqual(
+            extract_homepage_class_names(template),
+            ("footer-bottom", "page-wrap", "theme-light"),
+        )
+
+    def test_body_admission_rejects_interior_class_on_homepage(self):
+        forbidden = ("page-body", "page-cta-block")
+        with self.assertRaisesRegex(GeneratedBodyError, "unavailable to this page type"):
+            validate_generated_body(
+                body_result(
+                    '<body><footer class="footer-bottom page-body">Ready</footer></body>'
+                ),
+                forbidden_class_names=forbidden,
+            )
+
+        body = '<body><main class="page-wrap">Ready</main></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(body),
+                forbidden_class_names=forbidden,
+            ),
+            body,
+        )
+
     def test_body_admission_accepts_one_plain_body(self):
         self.assertEqual(validate_generated_body(body_result()), COMPLETE_BODY)
 
@@ -899,6 +936,28 @@ class BodyAssemblyTests(unittest.TestCase):
             )
 
         self.assertEqual(validate_generated_body(body_result(body)), body)
+
+    def test_body_admission_rejects_gated_claim_in_decoded_attributes(self):
+        denied_bodies = (
+            '<body><button aria-label="Free&#32;Estimates">Request service</button></body>',
+            '<body><a title="Free%20Estimates">Request service</a></body>',
+        )
+        for body in denied_bodies:
+            with self.subTest(body=body):
+                with self.assertRaisesRegex(GeneratedBodyError, "Free Estimates"):
+                    validate_generated_body(
+                        body_result(body),
+                        forbidden_visible_phrases=("Free Estimates",),
+                    )
+
+        clean_body = '<body><button aria-label="Request service">Request service</button></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(clean_body),
+                forbidden_visible_phrases=("Free Estimates",),
+            ),
+            clean_body,
+        )
 
     def test_body_admission_rejects_document_wrapper_and_provider_chatter(self):
         invalid_bodies = {
@@ -1338,6 +1397,25 @@ class PromptContractTests(unittest.TestCase):
 
 
 class AtomicWriteAndCliTests(unittest.TestCase):
+    def test_uncatalogued_trade_uses_generic_document_colors(self):
+        colors = build._resolve_build_document_colors(
+            {"business_name": "Test Business", "trade": "roofer"}
+        )
+
+        self.assertEqual(colors.accent, DEFAULT_DOCUMENT_ACCENT)
+        self.assertEqual(colors.accent_dark, build._darken_hex_color(DEFAULT_DOCUMENT_ACCENT))
+        self.assertEqual(colors.secondary, DEFAULT_DOCUMENT_SECONDARY)
+
+    def test_malformed_computed_palette_does_not_use_generic_fallback(self):
+        with self.assertRaisesRegex(ValueError, "_computed_palette"):
+            build._resolve_build_document_colors(
+                {
+                    "business_name": "Test Business",
+                    "trade": "roofer",
+                    "_computed_palette": "not-a-palette",
+                }
+            )
+
     def test_atomic_write_replaces_destination(self):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "nested" / "index.html"

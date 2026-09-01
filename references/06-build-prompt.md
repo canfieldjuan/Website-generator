@@ -645,6 +645,18 @@ lists. Typical content: middle column = Hours OR Services list, right
 column = Service Area list OR Social links. Tailor to what the prospect
 data supports.
 
+Close the footer with exactly one compact copyright row after `.footer-grid`:
+
+```html
+<div class="footer-bottom">
+  <p>&copy; [PROSPECT.build_date year] [legal business name]. All rights reserved.</p>
+</div>
+```
+
+Never place `.page-body`, `.page-cta-block`, or any `.page-cta-*` component in
+the footer. Those are interior-page components and are unavailable to homepage
+generation. Do not add a second call-to-action to `.footer-bottom`.
+
 When the right column is "Service Area", render a small `.ft-coverage-map`
 SVG above the `.ft-links` list. The SVG visualises the coverage radius
 as concentric dashed/solid circles with a center pin in --accent. The

@@ -26,13 +26,16 @@ from datetime import date
 from lib.images import fetch_unsplash_hero, generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.generation import (
+    DEFAULT_DOCUMENT_ACCENT,
+    DEFAULT_DOCUMENT_SECONDARY,
     DocumentColors,
     PromptPart,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
+    extract_homepage_class_names,
+    extract_interior_only_class_names,
     extract_square_placeholder_tokens,
-    extract_template_class_names,
     generate_text,
     make_html_comment,
     preflight_generation_provider,
@@ -499,18 +502,28 @@ def _resolve_build_document_colors(prospect):
         return DocumentColors(
             accent=accent,
             accent_dark=accent_dark or _darken_hex_color(accent),
-            secondary=secondary or trade_secondary or "#1F3A5F",
+            secondary=secondary or trade_secondary or DEFAULT_DOCUMENT_SECONDARY,
         )
 
-    palette = prospect.get("_computed_palette") or select_palette(prospect)
-    if not isinstance(palette, dict):
-        raise ValueError(
-            "No document palette is available; supply brand_colors or a supported trade."
+    palette = prospect.get("_computed_palette")
+    if palette is None:
+        palette = select_palette(prospect)
+    if palette is None:
+        return DocumentColors(
+            accent=DEFAULT_DOCUMENT_ACCENT,
+            accent_dark=_darken_hex_color(DEFAULT_DOCUMENT_ACCENT),
+            secondary=DEFAULT_DOCUMENT_SECONDARY,
         )
+    if not isinstance(palette, dict):
+        raise ValueError("_computed_palette must be a palette object.")
     return DocumentColors(
         accent=palette.get("accent"),
         accent_dark=palette.get("accent_dark"),
-        secondary=palette.get("secondary") or trade_secondary or "#1F3A5F",
+        secondary=(
+            palette.get("secondary")
+            or trade_secondary
+            or DEFAULT_DOCUMENT_SECONDARY
+        ),
     )
 
 
@@ -647,7 +660,8 @@ def generate_build_html(prospect, generation_config=None, client=None):
         section_orders = f.read()
     with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
-    class_catalog = "\n".join(extract_template_class_names(base_template))
+    class_catalog = "\n".join(extract_homepage_class_names(base_template))
+    interior_only_classes = extract_interior_only_class_names(base_template)
 
     # Static block -- same bytes for every plumber/HVAC/electrician build.
     # Cache marker on the end of this lets consecutive builds within the
@@ -760,6 +774,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             static_block,
         ),
         forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
+        forbidden_class_names=interior_only_classes,
     )
 
 

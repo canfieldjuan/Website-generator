@@ -77,6 +77,41 @@ chatter. This revision must not
 change visible page copy/layout rules, prospect facts, provider selection,
 OpenRouter behavior, deployment/email/image effects, or the Connect job contract.
 
+### Mobile fixture revision
+
+The exact-model visual fixture exposed a class-ownership leak rather than a CSS
+defect: the generic class catalog gives homepage generation interior-only
+`.page-body` and `.page-cta-*` components. Qwen combined those valid class names
+inside `.footer-bottom`; the trusted footer CSS expects a compact copyright row,
+so the three interior wrappers collapsed into unreadably narrow mobile columns.
+
+The correct fix must give homepage generation only the shared/homepage class
+vocabulary, while preserving `.page-wrap` and leaving the complete catalog
+available to interior-page generation. Homepage admission must reject the
+interior-only class set even if a provider invents or recalls one. Both homepage
+prompts must define the existing compact `.footer-bottom` structure explicitly.
+This revision must not edit the base template CSS, redesign the footer, remove
+interior-page components, or otherwise change the intended desktop/mobile
+product shape.
+
+### Exact-head review revision
+
+The generated-claim admission gate currently compares denied prospect claims
+only with visible character data even though the parser already retains decoded
+attribute values. A provider can therefore move the same unsupported promise
+into an accessibility label, title, or another attribute and bypass the gate.
+The correct fix must compare the denied phrases with both joined visible text
+and each decoded and URL-decoded attribute value. It must not broaden the claim
+catalog or reject an otherwise clean body.
+
+Trusted document-color assembly also treats a missing trade palette as fatal,
+although prospect intake accepts uncatalogued trades and the redesign path
+already has a deterministic generic blue/navy fallback. The correct fix must
+use that same code-owned fallback only when neither explicit brand colors nor a
+trade-specific palette is available. Explicit brand colors, supported-trade
+palette selection, theme selection, and the accepted prospect schema must not
+change.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -101,6 +136,13 @@ OpenRouter behavior, deployment/email/image effects, or the Connect job contract
 10. Remove cross-industry scaffold placeholders and deployment metadata from
     model context; expose the template class catalog and insert sanitized,
     code-owned head comments instead.
+11. Keep interior-only component classes out of homepage context and admission,
+    while retaining the shared `.page-wrap` class and the full interior-page
+    catalog.
+12. Apply unsupported-claim admission to decoded attribute values as well as
+    visible text.
+13. Preserve uncatalogued-trade builds with the existing generic document-color
+    fallback while retaining explicit-brand and supported-trade precedence.
 
 ### Files touched
 
@@ -220,11 +262,13 @@ claim remains admissible.
 ## Verification
 
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 80 tests passed, including the `llama.cpp` health/model/chat contract,
+  — 85 tests passed, including the `llama.cpp` health/model/chat contract,
   browser- and URL-decoded placeholder admission, startup-script boundaries, and both
   HTML entry points' shared assembly. The suite also proves this slice cannot
   reconfigure the pre-existing extraction or image model roles through new
-  environment variables.
+  environment variables, keeps interior-page components out of homepage
+  generation, checks claim-bearing attributes, and preserves a deterministic
+  document palette for uncatalogued trades.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
 - `bash -n scripts/start_llama_server.sh` — passed.
@@ -245,10 +289,14 @@ claim remains admissible.
   side effect. `CUDA_VISIBLE_DEVICES=0` and `LLAMA_CPP_GPU_LAYERS=all` confined
   inference to the RTX 3090; the live server process held 19,898 MiB there.
 - The admitted artifact was
-  `outputs/builds/drees-plumbing-inc/index.html` (70,764 bytes, SHA-256
-  `94dae79380445b9696cede8e94a4c78c9c7afd0669c532f690ca24405353660c`).
+  `outputs/builds/drees-plumbing-inc/index.html` (71,864 bytes, SHA-256
+  `8a275a80208b1542272846096bfcc954e8396b04ff0d4261ef03ed5e8c488690`).
   The shared HTML validator accepted it; the required unresolved-placeholder
   search returned `0`, and the required fabricated-claim search returned `0`.
+- System Chrome screenshots at 1440x900 and 390x844 confirmed the generated
+  desktop layout remains coherent and the mobile footer now stacks normally
+  with a readable one-line copyright row. The artifact contains no interior
+  `.page-body` or `.page-cta-*` class in generated markup.
 - The standalone runtime was stopped after validation. The GPU compute-process
   query was empty and RTX 3090 usage returned to 15 MiB.
 - Mocked local transport tests prove the configured request reaches the

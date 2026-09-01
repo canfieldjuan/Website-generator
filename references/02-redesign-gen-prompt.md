@@ -549,6 +549,11 @@ Gradient overlays only when text is placed over images.
 3-col: brand+contact | nav links | secondary/misc links.
 Brand name in --font-display at large size (36-42px).
 All real contact data from JSON.
+Close the footer with one compact `.footer-bottom` containing only a copyright
+`<p>` and, when the JSON supplies one, an `.ft-aux-link`. Never put
+`.page-body`, `.page-cta-block`, or any `.page-cta-*` component inside the
+footer; those are interior-page components and are unavailable to homepage
+generation.
 
 ---
 

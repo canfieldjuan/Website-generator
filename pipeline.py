@@ -15,11 +15,15 @@ from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
 from lib.generation import (
+    DEFAULT_DOCUMENT_ACCENT,
+    DEFAULT_DOCUMENT_SECONDARY,
     DocumentColors,
     PromptPart,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
+    extract_homepage_class_names,
+    extract_interior_only_class_names,
     extract_square_placeholder_tokens,
     extract_template_class_names,
     generate_text,
@@ -83,7 +87,7 @@ def _resolve_site_document_colors(site_json):
             )
             if color
         ),
-        "#1D4ED8",
+        DEFAULT_DOCUMENT_ACCENT,
     )
     secondary = next(
         (
@@ -94,7 +98,7 @@ def _resolve_site_document_colors(site_json):
             )
             if color
         ),
-        "#1F3A5F",
+        DEFAULT_DOCUMENT_SECONDARY,
     )
     return DocumentColors(
         accent=primary,
@@ -447,7 +451,8 @@ def generate_redesign(
         base_template = f.read()
     with open(THEMES_CATALOG_PATH, "r") as f:
         theme_catalog = f.read()
-    class_catalog = "\n".join(extract_template_class_names(base_template))
+    class_catalog = "\n".join(extract_homepage_class_names(base_template))
+    interior_only_classes = extract_interior_only_class_names(base_template)
 
     user_prompt = f"""THEME: {theme}
 COLOR_MODE: {color_mode}
@@ -492,6 +497,7 @@ text, HTML head metadata, or unresolved template token.
             system_prompt,
             class_catalog,
         ),
+        forbidden_class_names=interior_only_classes,
     )
 
 def generate_interior_page(
