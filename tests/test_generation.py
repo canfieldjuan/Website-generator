@@ -548,11 +548,15 @@ class BodyAssemblyTests(unittest.TestCase):
 
     def test_prompt_defined_square_placeholders_fail_without_rejecting_other_brackets(self):
         prompt = "Use [PROSPECT.phone], [SITE_SLUG], and [N]-MILE RADIUS. - [ ] check"
-        placeholders = extract_square_placeholder_tokens(prompt)
+        placeholders = extract_square_placeholder_tokens(
+            prompt,
+            "Industry defaults also define [YEAR] and - [ ] checklist syntax.",
+        )
 
         self.assertIn("[PROSPECT.phone]", placeholders)
         self.assertIn("[SITE_SLUG]", placeholders)
         self.assertIn("[N]", placeholders)
+        self.assertIn("[YEAR]", placeholders)
         self.assertNotIn("[ ]", placeholders)
         with self.assertRaisesRegex(GeneratedBodyError, "prompt placeholders"):
             validate_generated_body(
@@ -903,6 +907,27 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertTrue(html.startswith("<!DOCTYPE html>"))
         self.assertIn("<head>\n<!--\nNEW WEBSITE BUILD -- FROM SCRATCH", html)
         self.assertIn('<body class="theme-light"><main>Ready</main></body>', html)
+
+    def test_build_generator_rejects_placeholder_from_static_industry_defaults(self):
+        leaked_body = body_with_markers(
+            build.BUILD_DEPLOYMENT_COMMENT_MARKERS
+        ).replace("Ready", "Serving Effingham since [YEAR]")
+        client = FakeNativeClient(
+            {
+                "output": [{"type": "message", "content": leaked_body}],
+                "stats": {"total_output_tokens": 8},
+            }
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+
+        with self.assertRaisesRegex(GeneratedBodyError, r"\[YEAR\]"):
+            build.generate_build_html(prospect, config(), client)
 
     def test_redesign_generator_assembles_body_with_site_brand_contract(self):
         client = FakeNativeClient(

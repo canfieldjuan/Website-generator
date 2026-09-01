@@ -101,10 +101,12 @@ admitted. Required deployment-metadata placement remains code-owned: the model
 supplies the existing comment as the body's first child, admission verifies that
 boundary, and the assembler moves it into the trusted head exactly once.
 
-Each caller derives its square-bracket placeholder vocabulary from the actual
-wired prompt and supplies that set to body admission, so prompt edits cannot add
-new placeholder syntax that silently leaks into output. Unrelated bracketed real
-content remains admissible. Homepage callers also provide their own required
+Each caller derives its square-bracket placeholder vocabulary from every trusted
+static prompt source it actually sends, including catalogs/defaults and the base
+body scaffold, then supplies that set to body admission. Dynamic prospect/site
+data is deliberately excluded so real bracketed customer content remains valid;
+static prompt edits cannot add new placeholder syntax that silently leaks into
+output. Homepage callers also provide their own required
 deployment-comment marker set; an incidental leading comment cannot impersonate
 the build or redesign metadata contract.
 
@@ -136,8 +138,9 @@ the build or redesign metadata contract.
 ## Verification
 
 - `/tmp/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 59 tests passed after body-only generation, both HTML entry points gained
-  shared-assembly coverage, and prompt/comment boundaries were reconciled.
+  — 60 tests passed after body-only generation, both HTML entry points gained
+  shared-assembly coverage, and every trusted static prompt source was brought
+  under placeholder admission.
 - `/tmp/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
 - `/tmp/website-redesign-connect-venv/bin/python build.py --help` — passed;
