@@ -331,6 +331,28 @@ content, model prompts, generation admission, provider selection, runtime,
 and all downstream image, email, deployment, and Connect contracts must remain
 unchanged.
 
+### Raw-attribute and no-phone contract revision
+
+The exact-head review exposed two remaining model/browser boundary mismatches.
+First, the raw HTML parser preserves duplicate attributes while BeautifulSoup
+repairs them to one value; validating only the repaired DOM can therefore
+approve a different actionable value than a browser uses. Duplicate attributes
+are invalid generated HTML and have no supported use here. The correct fix must
+reject every case-insensitive duplicate attribute on an element in raw body
+admission before the repaired DOM controls claims, links, classes, IDs, or
+accessibility semantics.
+
+Second, a sanitized missing business phone changes backend admission and the
+coverage-band count, but three static prompt requirements still demand nav and
+hero phone actions and a global nav/hero/footer `tel:` checklist. The correct
+fix must make every business-phone rendering instruction conditional and add a
+final caller-owned no-phone instruction: omit business phone values and phone
+actions, omit the emergency/or hero controls, and use the existing `#contact`
+request-service action as the sole hero CTA. The visitor phone input inside the
+lead form is unrelated and must remain required. The verified-phone path,
+contact form routing, trust content, design system, providers, runtime, and all
+image, email, deployment, and Connect contracts must remain unchanged.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -429,6 +451,10 @@ unchanged.
 44. Keep every trust-strip child within the phone viewport by wrapping the
     trusted strip and allowing its height to grow at the existing mobile
     breakpoint.
+45. Reject duplicate raw attribute names before any repaired DOM can decide
+    generated-body admission.
+46. Make every business-phone output instruction conditional and give a
+    sanitized no-phone prospect one consistent request-service CTA path.
 
 ### Files touched
 
@@ -568,6 +594,15 @@ claim remains admissible.
   — passed with wrong form action, missing fallback action, and mixed
   verified-form/unverified-button `formaction` cases rejected; exact verified
   form and button actions and the explicit `#` fallback remain accepted.
+- The duplicate-attribute and no-phone probes failed against the prior head,
+  then `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m
+  unittest tests.test_generation.BodyAssemblyTests.test_body_admission_rejects_duplicate_raw_attributes
+  tests.test_generation.PromptContractTests.test_build_prompt_conditions_every_business_phone_action
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_requires_coverage_band_only_with_a_phone
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_enforces_identity_and_phone_substitutions`
+  passed. The boundary set covers duplicate link, ARIA, and class attributes;
+  a distinct valid attribute set; verified and sanitized-missing phone prompt
+  branches; and the real caller's conflicting duplicate `href` case.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.BodyAssemblyTests.test_body_admission_rejects_gated_claim_in_decoded_attributes`
   — passed after the Unicode-whitespace review correction; covers ordinary,
   non-breaking, em-space, percent-encoded, and clean-label paths.
@@ -578,7 +613,7 @@ claim remains admissible.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python pipeline.py --help` — passed;
   provider/model and existing skip flags shown.
 - `git diff --check` — passed.
-- Final standalone-runtime fixture at generator code head
+- Last admitted standalone-runtime fixture at generator code head
   `731289ccdea34acb416cc854a00e0f1551b38db4`:
   `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:18081/v1
   GENERATION_TIMEOUT_SECONDS=14400
@@ -623,6 +658,15 @@ claim remains admissible.
   omitted the single required `form.contact-form-wrap` action owner. This is
   retained as fail-closed evidence, not reported as a successful fixture and
   not retried merely to obtain a passing sample.
+- A final CUDA-backed request after the duplicate-attribute and no-phone prompt
+  corrections also completed inference but was rejected before output because
+  Qwen emitted the unsupported `Not a Franchise` claim. The server recorded
+  28,263 prompt tokens and 2,833 generated tokens at 66.81 tokens/second, with
+  53,722.82 ms total task time. The prior admitted GPU body still passes the
+  final executable parser and prompt-caller path (`saved-gpu-body-final-admission:
+  PASS`, 72,170 bytes). The two rejected samples establish that one-shot local
+  generation is not reliably admissible; a bounded retry policy remains a
+  separate product decision because the OpenRouter path can incur cost.
 - The standalone runtime was stopped after validation. The GPU compute-process
   query was empty.
 - Mocked local transport tests prove the configured request reaches the

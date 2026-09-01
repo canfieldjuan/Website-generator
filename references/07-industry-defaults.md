@@ -120,13 +120,17 @@ A plumbing prospect's site visitor falls into two segments:
 
 1. **Emergency** (~70% of inbound traffic for plumbers) -- pipe burst,
    water heater failed, sewage backup, no water, no hot water. Decision
-   in minutes. They will call the first credible result. Phone CTA dominates.
+   in minutes. They will call the first credible result when a verified phone
+   is available; otherwise the request-service form must carry that intent.
 2. **Planned** (~30%) -- water heater replacement, repipe quote,
    bathroom remodel rough-in, recurring drain maintenance. Decision in
    days. Form CTA acceptable.
 
-A plumber site MUST serve emergency first. Phone visible in nav, sticky
-on mobile, "Available 24/7" badge if applicable. Form is secondary.
+A plumber site MUST serve emergency intent first. When `prospect.phone` is set,
+render that exact phone in the nav and hero and keep the form secondary. When
+`prospect.phone` is null or empty, do not invent a phone action; make the
+request-service form the primary path. Render an "Available 24/7" badge only
+when the corresponding prospect field is verified.
 
 ### Canonical service catalog
 
@@ -423,7 +427,8 @@ two plumber prospects could share a theme and still get different
 palette variants, or share a palette and get different themes.
 
 Apply the COLOR DISCIPLINE rule from `02-redesign-gen-prompt.md`: accent
-appears on AT MOST 3-4 elements (primary CTA, sticky phone, one badge).
+appears on AT MOST 3-4 elements (primary CTA, verified-phone CTA when present,
+one badge).
 
 ---
 
@@ -436,8 +441,8 @@ An HVAC prospect's site visitor falls into two segments:
 1. **Emergency** (~60% of inbound traffic) -- AC failure in summer,
    no heat in winter, furnace making concerning noises before it
    quits. Decision in hours rather than minutes (unlike a burst
-   pipe). They will call the first credible result. Phone CTA
-   dominates.
+   pipe). They will call the first credible result when a verified phone is
+   available; otherwise the request-service form must carry that intent.
 2. **Planned** (~40%) -- end-of-life system replacement (15-25 year
    cycle), new-construction install, ductwork upgrade, seasonal
    tune-up, indoor air quality improvements. Decision in days to
@@ -445,10 +450,12 @@ An HVAC prospect's site visitor falls into two segments:
 
 Compared to plumbing, HVAC emergencies have slightly more grace
 period and a higher proportion of planned high-ticket work
-(~$5-15K full system installs). The site should still serve
-emergency first -- phone visible in nav, sticky on mobile, "24/7"
-badge if applicable -- but the planned-work pitch carries more
-weight here than for plumber.
+(~$5-15K full system installs). The site should still serve emergency intent
+first. When `prospect.phone` is set, render that exact phone in the nav and
+hero; when it is null or empty, do not invent a phone action and make the
+request-service form primary. A "24/7" badge still requires the corresponding
+verified field. The planned-work pitch carries more weight here than for
+plumber.
 
 ### Canonical service catalog
 
@@ -705,8 +712,8 @@ in hue and weight to fingerprint two HVAC contractors in the
 same service area.
 
 Apply the COLOR DISCIPLINE rule from `02-redesign-gen-prompt.md`:
-accent appears on AT MOST 3-4 elements (primary CTA, sticky phone,
-one badge). The secondary emergency red is reserved for emergency
+accent appears on AT MOST 3-4 elements (primary CTA, verified-phone CTA when
+present, one badge). The secondary emergency red is reserved for emergency
 CTAs only -- not used as a general accent.
 
 ---
@@ -1007,7 +1014,7 @@ giving same-trade prospects in the same area visibly different
 accents.
 
 Apply the COLOR DISCIPLINE rule from `02-redesign-gen-prompt.md`:
-accent appears on AT MOST 3-4 elements (primary CTA, sticky phone,
-one badge). The secondary navy is reserved for emergency CTAs and
+accent appears on AT MOST 3-4 elements (primary CTA, verified-phone CTA when
+present, one badge). The secondary navy is reserved for emergency CTAs and
 high-ticket-install CTAs (panel upgrade, generator) -- not used
 as a general accent.

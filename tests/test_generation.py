@@ -1018,6 +1018,25 @@ class BodyAssemblyTests(unittest.TestCase):
         self.assertIn("overflow-x: visible", responsive_css)
         self.assertNotIn("overflow-x: auto", responsive_css)
 
+    def test_body_admission_rejects_duplicate_raw_attributes(self):
+        duplicate_bodies = (
+            '<body><a href="/wrong" href="/right">Right</a></body>',
+            '<body><div aria-label="Wrong" ARIA-LABEL="Right">Right</div></body>',
+            '<body><div class="trust-item" class="trust-item">Trust</div></body>',
+        )
+        for body in duplicate_bodies:
+            with self.subTest(body=body), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "duplicate attribute",
+            ):
+                validate_generated_body(body_result(body))
+
+        valid_body = (
+            '<body><a class="cta-planned" href="#contact" '
+            'aria-label="Request service">Request service</a></body>'
+        )
+        self.assertEqual(validate_generated_body(body_result(valid_body)), valid_body)
+
     def test_homepage_class_catalog_excludes_interior_components(self):
         template = """<style>
         .page-wrap, .page-body, .page-cta-block, .footer-bottom { display: block; }
@@ -1833,6 +1852,34 @@ class PromptContractTests(unittest.TestCase):
         self.assertNotIn("same-day replacement available", prompt)
         self.assertNotIn("same-day repair, multi-day install", prompt)
 
+    def test_build_prompt_conditions_every_business_phone_action(self):
+        prompt = Path("references/06-build-prompt.md").read_text(encoding="utf-8")
+        defaults = Path("references/07-industry-defaults.md").read_text(
+            encoding="utf-8"
+        )
+        normalized_defaults = " ".join(defaults.split())
+
+        self.assertNotIn("phone number with `tel:` link, single CTA", prompt)
+        self.assertNotIn(
+            'Plumbers default to urgency_type = "emergency". Render',
+            prompt,
+        )
+        self.assertNotIn(
+            "Phone number is a `tel:` link in nav, hero, and footer",
+            prompt,
+        )
+        self.assertIn("If `prospect.phone` is set", prompt)
+        self.assertIn("When `prospect.phone` is null or empty", prompt)
+        self.assertIn("otherwise no business phone value or phone action", prompt)
+        self.assertNotIn("Phone visible in nav, sticky", defaults)
+        self.assertNotIn("emergency first -- phone visible", defaults)
+        self.assertNotIn("sticky phone", defaults.casefold())
+        self.assertIn("When `prospect.phone` is set", normalized_defaults)
+        self.assertIn(
+            "When `prospect.phone` is null or empty",
+            normalized_defaults,
+        )
+
 
 class AtomicWriteAndCliTests(unittest.TestCase):
     def test_uncatalogued_trade_uses_generic_document_colors(self):
@@ -2019,6 +2066,10 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         body_without_coverage = body_without_phone.replace(
             '<div class="coverage-band"></div>',
             "",
+        ).replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero"><a class="cta-planned" '
+            'href="#contact">Request Service</a></section>',
         )
         prospect = {
             "business_name": "Test Business",
@@ -2040,6 +2091,25 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         request = next(call for call in client.calls if call[0] == "POST")
         user_content = request[2]["json"]["messages"][1]["content"]
         self.assertIn('"coverage-band": 0', user_content)
+        self.assertIn("NO VERIFIED BUSINESS PHONE", user_content)
+        self.assertIn(
+            "omit `.nav-phone`, `.cta-emergency`, `.cta-or`",
+            user_content.casefold(),
+        )
+        self.assertIn("Keep the visitor phone input", user_content)
+
+        verified_client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
+        build.generate_build_html(
+            {**prospect, "phone": "217-555-0100"},
+            config(),
+            verified_client,
+        )
+        verified_request = next(
+            call for call in verified_client.calls if call[0] == "POST"
+        )
+        verified_user_content = verified_request[2]["json"]["messages"][1]["content"]
+        self.assertIn("VERIFIED BUSINESS PHONE", verified_user_content)
+        self.assertNotIn("NO VERIFIED BUSINESS PHONE", verified_user_content)
 
         with self.assertRaisesRegex(
             GeneratedBodyError,
@@ -2368,6 +2438,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     '<a href="sms:2175550199">Text us</a></nav>',
                 ),
                 "unexpected actionable phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    'href="tel:2175550100"',
+                    'href="tel:2175550199" href="tel:2175550100"',
+                ),
+                "duplicate attribute",
             ),
             (
                 COMPLETE_BUILD_BODY.replace(

@@ -249,6 +249,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.decoded_attribute_values: list[str] = []
         self.comment_values: list[str] = []
         self.executable_attributes: list[str] = []
+        self.duplicate_attributes: list[str] = []
         self.class_names: set[str] = set()
         self.class_name_counts: dict[str, int] = {}
         self.open_descendants: list[str] = []
@@ -259,6 +260,12 @@ class _GeneratedBodyParser(HTMLParser):
         self.has_content_outside_body = True
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        seen_attribute_names: set[str] = set()
+        for name, _value in attrs:
+            normalized_name = name.casefold()
+            if normalized_name in seen_attribute_names:
+                self.duplicate_attributes.append(normalized_name)
+            seen_attribute_names.add(normalized_name)
         self.decoded_attribute_values.extend(
             value for _name, value in attrs if value is not None
         )
@@ -1099,6 +1106,11 @@ def validate_generated_body(
         raise GeneratedBodyError(
             "Generated body contains forbidden document, metadata, or "
             f"executable tags: {names}."
+        )
+    if parser.duplicate_attributes:
+        names = ", ".join(sorted(set(parser.duplicate_attributes)))
+        raise GeneratedBodyError(
+            f"Generated body contains a duplicate attribute name: {names}."
         )
     if parser.executable_attributes:
         names = ", ".join(sorted(set(parser.executable_attributes)))

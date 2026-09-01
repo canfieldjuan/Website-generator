@@ -833,10 +833,23 @@ def generate_build_html(prospect, generation_config=None, client=None):
             ),
             None,
         )
-    required_substitutions = {
-        "business_name": prospect["business_name"],
-        "phone": prospect.get("phone"),
-    }
+    required_substitutions = {"business_name": prospect["business_name"]}
+    if prospect.get("phone"):
+        required_substitutions["phone"] = prospect["phone"]
+        phone_instruction = (
+            "VERIFIED BUSINESS PHONE: Render only the exact phone from "
+            "MANDATORY EXACT SUBSTITUTIONS as the business phone in the nav, "
+            "hero, and footer, with matching tel links."
+        )
+    else:
+        phone_instruction = (
+            "NO VERIFIED BUSINESS PHONE: Emit no business phone-like contact "
+            "value and no `tel:`, `sms:`, or phone-number messaging destination. "
+            "Keep the visitor phone input in the contact form. Omit "
+            "`.nav-phone`, `.cta-emergency`, `.cta-or`, `.ft-phone-label`, "
+            "`.ft-phone`, and `.coverage-band`; render `.cta-planned` as the "
+            "sole hero CTA anchored to `#contact`."
+        )
     required_class_counts = required_build_class_counts(prospect)
     if logo_url:
         logo_instruction = (
@@ -858,6 +871,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{BUILD_SERVICES_RESPONSE_SCAFFOLD}\n"
         "MANDATORY EXACT SUBSTITUTIONS: "
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
+        f"{phone_instruction}\n"
         f"{logo_instruction}"
     )
 

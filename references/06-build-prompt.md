@@ -185,7 +185,9 @@ before injecting; this fallback shouldn't fire in practice).
 The per-section rules:
 
 1. Sticky nav -- business name (no logo unless prospect provided one),
-   phone number with `tel:` link, single CTA button anchored to `#contact`.
+   single CTA button anchored to `#contact`. If `prospect.phone` is set,
+   also render that exact phone with a matching `tel:` link; otherwise omit
+   the nav phone and every business-phone action.
 2. Trust strip (placement varies by `_computed_section_order`; the
    `default` ordering places it directly under the nav, `services-led`
    places it AFTER the services grid, `reviews-led` places it after
@@ -558,7 +560,8 @@ Rules:
 
 ## HERO CTA ARCHITECTURE
 
-Plumbers default to urgency_type = "emergency". Render the dual CTA as:
+Plumbers default to urgency_type = "emergency" when `prospect.phone` is set.
+In that case, render the dual CTA as:
 
 - PRIMARY (`.cta-emergency`): large click-to-call button. Phone number
   visible in the button. Badge logic, in this order:
@@ -570,6 +573,10 @@ Plumbers default to urgency_type = "emergency". Render the dual CTA as:
        button content.
   `href="tel:[PROSPECT.phone with digits only]"`.
 - SECONDARY (`.cta-planned`): "Request Service" anchored to `#contact`.
+
+When `prospect.phone` is null or empty, omit `.cta-emergency` and `.cta-or`
+entirely. Render `.cta-planned` as the sole hero CTA anchored to `#contact`;
+do not invent a phone value or any `tel:`, `sms:`, or messaging-phone action.
 
 Never claim 24/7 availability the prospect didn't promise, and never
 default to a `Same-Day Service` badge without a verified
@@ -780,7 +787,9 @@ Before outputting, verify:
 - [ ] All section IDs / classes come from the base template, no inventions
 - [ ] Contact form action == prospect.formspree_endpoint verbatim (or
       action="#" with the TODO comment if endpoint not provided)
-- [ ] Phone number is a `tel:` link in nav, hero, and footer
+- [ ] If prospect.phone is set, that exact phone is a matching `tel:` link in
+      nav, hero, and footer; otherwise no business phone value or phone action
+      is emitted and the hero uses only "Request Service" anchored to `#contact`
 - [ ] No fabricated reviews, awards, or year claims
 - [ ] No mission-statement copy ("We believe", "Our mission", "Dedicated")
 - [ ] Headline follows one of the INDUSTRY_DEFAULTS templates
