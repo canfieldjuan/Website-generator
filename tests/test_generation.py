@@ -1,5 +1,6 @@
 import os
 import importlib
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -107,7 +108,10 @@ class FakeClient:
         self.chat = SimpleNamespace(completions=self.completions)
 
 
-class FakeNativeResponse:
+_UNSET = object()
+
+
+class FakeLocalResponse:
     def __init__(self, payload=None, *, json_error=None, status_error=None):
         self.payload = payload
         self.json_error = json_error
@@ -123,27 +127,86 @@ class FakeNativeResponse:
         return self.payload
 
 
-class FakeNativeClient:
-    def __init__(self, payload=None, *, json_error=None, status_error=None):
+class FakeLocalClient:
+    def __init__(
+        self,
+        chat_payload=_UNSET,
+        *,
+        health_payload=_UNSET,
+        models_payload=_UNSET,
+        health_status_error=None,
+        models_status_error=None,
+        chat_status_error=None,
+        chat_json_error=None,
+    ):
         self.calls = []
-        self.response = FakeNativeResponse(
-            payload
-            if payload is not None
-            else {
-                "output": [{"type": "message", "content": COMPLETE_HTML}],
-                "stats": {
-                    "input_tokens": 12,
-                    "total_output_tokens": 8,
-                    "reasoning_output_tokens": 0,
+        self.health_response = FakeLocalResponse(
+            {"status": "ok"} if health_payload is _UNSET else health_payload,
+            status_error=health_status_error,
+        )
+        self.models_response = FakeLocalResponse(
+            {
+                "object": "list",
+                "data": [{"id": DEFAULT_LOCAL_MODEL, "object": "model"}],
+            }
+            if models_payload is _UNSET
+            else models_payload,
+            status_error=models_status_error,
+        )
+        self.chat_response = FakeLocalResponse(
+            {
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "model": DEFAULT_LOCAL_MODEL,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": COMPLETE_HTML,
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 8,
+                    "total_tokens": 20,
                 },
-            },
-            json_error=json_error,
-            status_error=status_error,
+            }
+            if chat_payload is _UNSET
+            else chat_payload,
+            json_error=chat_json_error,
+            status_error=chat_status_error,
         )
 
+    def get(self, url, **kwargs):
+        self.calls.append(("GET", url, kwargs))
+        if url.endswith("/health"):
+            return self.health_response
+        if url.endswith("/v1/models"):
+            return self.models_response
+        raise AssertionError(f"unexpected local GET URL: {url}")
+
     def post(self, url, **kwargs):
-        self.calls.append((url, kwargs))
-        return self.response
+        self.calls.append(("POST", url, kwargs))
+        return self.chat_response
+
+
+def local_chat_payload(content=COMPLETE_HTML, finish_reason="stop", **message_fields):
+    return {
+        "choices": [
+            {
+                "message": {"content": content, **message_fields},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 12,
+            "completion_tokens": 8,
+            "total_tokens": 20,
+        },
+    }
 
 
 def config(provider="local", model=DEFAULT_LOCAL_MODEL):
@@ -216,7 +279,21 @@ class GenerationConfigTests(unittest.TestCase):
 
         self.assertEqual(selected.model, "local/from-cli")
 
-    def test_legacy_lm_studio_endpoint_alias_remains_supported(self):
+    def test_llama_cpp_endpoint_aliases_are_supported(self):
+        with patch.dict(
+            os.environ,
+            {
+                "LLAMA_CPP_BASE_URL": "http://127.0.0.1:4321/v1",
+                "LLAMA_CPP_API_KEY": "local-key",
+            },
+            clear=True,
+        ):
+            selected = resolve_generation_config()
+
+        self.assertEqual(selected.base_url, "http://127.0.0.1:4321/v1")
+        self.assertEqual(selected.api_key, "local-key")
+
+    def test_lm_studio_aliases_no_longer_select_the_local_runtime(self):
         with patch.dict(
             os.environ,
             {
@@ -227,8 +304,8 @@ class GenerationConfigTests(unittest.TestCase):
         ):
             selected = resolve_generation_config()
 
-        self.assertEqual(selected.base_url, "http://127.0.0.1:4321/v1")
-        self.assertEqual(selected.api_key, "legacy-key")
+        self.assertEqual(selected.base_url, DEFAULT_LOCAL_BASE_URL)
+        self.assertNotEqual(selected.api_key, "legacy-key")
 
     def test_openrouter_requires_model_even_when_selected(self):
         with patch("lib.generation.OPENROUTER_API_KEY", "configured"):
@@ -261,6 +338,122 @@ class GenerationConfigTests(unittest.TestCase):
             selected = resolve_generation_config()
 
         self.assertEqual(selected.max_output_tokens, 32768)
+
+
+class LlamaCppStartupScriptTests(unittest.TestCase):
+    script = Path(__file__).resolve().parents[1] / "scripts/start_llama_server.sh"
+
+    def test_help_does_not_require_or_load_a_model(self):
+        completed = subprocess.run(
+            [str(self.script), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("LLAMA_CPP_MODEL_PATH", completed.stdout)
+
+    def test_non_loopback_host_is_rejected_before_launch(self):
+        completed = subprocess.run(
+            [str(self.script)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "LLAMA_CPP_SERVER_BIN": "/bin/true",
+                "LLAMA_CPP_MODEL_PATH": str(Path(__file__).resolve()),
+                "LLAMA_CPP_HOST": "0.0.0.0",
+            },
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("loopback", completed.stderr)
+
+    def test_missing_model_path_is_rejected_before_launch(self):
+        completed = subprocess.run(
+            [str(self.script)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "LLAMA_CPP_SERVER_BIN": "/bin/true",
+                "LLAMA_CPP_MODEL_PATH": "",
+            },
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("LLAMA_CPP_MODEL_PATH", completed.stderr)
+
+    def test_numeric_boundaries_reject_values_outside_the_contract(self):
+        invalid_values = {
+            "port below minimum": {"LLAMA_CPP_PORT": "0"},
+            "port above maximum": {"LLAMA_CPP_PORT": "65536"},
+            "empty context": {"LLAMA_CPP_CONTEXT_SIZE": "0"},
+            "negative GPU layers": {"LLAMA_CPP_GPU_LAYERS": "-1"},
+            "empty server timeout": {"LLAMA_CPP_SERVER_TIMEOUT": "0"},
+        }
+        for label, overrides in invalid_values.items():
+            with self.subTest(label=label):
+                completed = subprocess.run(
+                    [str(self.script)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **os.environ,
+                        "LLAMA_CPP_SERVER_BIN": "/bin/true",
+                        "LLAMA_CPP_MODEL_PATH": str(Path(__file__).resolve()),
+                        **overrides,
+                    },
+                )
+
+                self.assertEqual(completed.returncode, 2)
+
+    def test_safe_runtime_contract_is_forwarded_without_word_splitting(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fake_server = root / "fake llama-server"
+            fake_server.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n',
+                encoding="utf-8",
+            )
+            fake_server.chmod(0o755)
+            model = root / "Qwen model.gguf"
+            model.write_bytes(b"")
+            completed = subprocess.run(
+                [str(self.script)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "LLAMA_CPP_SERVER_BIN": str(fake_server),
+                    "LLAMA_CPP_MODEL_PATH": str(model),
+                    "LLAMA_CPP_HOST": "127.0.0.1",
+                    "LLAMA_CPP_PORT": "18080",
+                    "LLAMA_CPP_CONTEXT_SIZE": "1024",
+                    "LLAMA_CPP_GPU_LAYERS": "0",
+                    "LLAMA_CPP_CACHE_TYPE_K": "f16",
+                    "LLAMA_CPP_CACHE_TYPE_V": "f16",
+                    "LLAMA_CPP_SERVER_TIMEOUT": "60",
+                    "LOCAL_GENERATION_MODEL": "local/test-model",
+                    "LOCAL_GENERATION_API_KEY": "test-key",
+                },
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        arguments = completed.stdout.splitlines()
+        self.assertEqual(arguments[arguments.index("--model") + 1], str(model))
+        self.assertEqual(arguments[arguments.index("--alias") + 1], "local/test-model")
+        self.assertEqual(arguments[arguments.index("--host") + 1], "127.0.0.1")
+        self.assertEqual(arguments[arguments.index("--port") + 1], "18080")
+        self.assertEqual(arguments[arguments.index("--reasoning") + 1], "off")
+        self.assertEqual(arguments[arguments.index("--reasoning-budget") + 1], "0")
+        self.assertIn("--no-webui", arguments)
+        self.assertEqual(arguments[arguments.index("--api-key") + 1], "test-key")
 
 
 class ProviderBoundaryTests(unittest.TestCase):
@@ -308,30 +501,65 @@ class ProviderBoundaryTests(unittest.TestCase):
 
     def test_local_preflight_accepts_exact_loaded_model(self):
         selected = config()
-        client = FakeClient(model_ids=[selected.model])
+        client = FakeLocalClient(
+            models_payload={"data": [{"id": selected.model}]},
+        )
 
         preflight_generation_provider(selected, client=client)
 
-    def test_local_preflight_rejects_missing_model_with_load_instruction(self):
+        self.assertEqual(
+            [call[:2] for call in client.calls],
+            [
+                ("GET", "http://127.0.0.1:8080/health"),
+                ("GET", "http://127.0.0.1:8080/v1/models"),
+            ],
+        )
+
+    def test_local_preflight_rejects_missing_model_with_start_instruction(self):
         selected = config()
-        client = FakeClient(model_ids=["some/other-model"])
+        client = FakeLocalClient(
+            models_payload={"data": [{"id": "some/other-model"}]},
+        )
 
         with self.assertRaisesRegex(
-            GenerationProviderUnavailable, f"lms load {selected.model}"
+            GenerationProviderUnavailable, "scripts/start_llama_server.sh"
         ):
             preflight_generation_provider(selected, client=client)
 
     def test_local_preflight_translates_connection_failure(self):
         selected = config()
-        client = FakeClient(model_error=ConnectionError("offline"))
+        client = FakeLocalClient(health_status_error=ConnectionError("offline"))
 
         with self.assertRaisesRegex(
-            GenerationProviderUnavailable, "Start LM Studio"
+            GenerationProviderUnavailable, "standalone llama.cpp"
+        ):
+            preflight_generation_provider(selected, client=client)
+
+    def test_local_preflight_rejects_non_ready_health_without_model_lookup(self):
+        selected = config()
+        client = FakeLocalClient(health_payload={"status": "loading"})
+
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable, "standalone llama.cpp"
+        ):
+            preflight_generation_provider(selected, client=client)
+
+        self.assertEqual(
+            [call[:2] for call in client.calls],
+            [("GET", "http://127.0.0.1:8080/health")],
+        )
+
+    def test_local_preflight_rejects_malformed_model_identity(self):
+        selected = config()
+        client = FakeLocalClient(models_payload={"data": [{"id": None}]})
+
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable, "standalone llama.cpp"
         ):
             preflight_generation_provider(selected, client=client)
 
     def test_local_request_uses_plain_content_without_cloud_cache_metadata(self):
-        client = FakeNativeClient()
+        client = FakeLocalClient()
 
         generated = generate_text(
             config(),
@@ -345,16 +573,26 @@ class ProviderBoundaryTests(unittest.TestCase):
             client=client,
         )
 
-        url, call = client.calls[0]
-        self.assertEqual(url, "http://127.0.0.1:1234/api/v1/chat")
-        self.assertEqual(call["json"]["system_prompt"], "system")
-        self.assertEqual(call["json"]["input"], "static\n\nvariable")
-        self.assertEqual(call["json"]["reasoning"], "off")
-        self.assertIs(call["json"]["store"], False)
+        method, url, call = client.calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(url, "http://127.0.0.1:8080/v1/chat/completions")
+        self.assertEqual(
+            call["json"]["messages"],
+            [
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "static\n\nvariable"},
+            ],
+        )
+        self.assertEqual(
+            call["json"]["chat_template_kwargs"],
+            {"enable_thinking": False},
+        )
+        self.assertEqual(call["json"]["reasoning_format"], "deepseek")
+        self.assertIs(call["json"]["stream"], False)
         self.assertEqual(call["timeout"], config().timeout_seconds)
         self.assertNotIn("cache_control", str(call["json"]))
         self.assertEqual(generated.finish_reason, "stop")
-        self.assertEqual(generated.usage["reasoning_output_tokens"], 0)
+        self.assertEqual(generated.usage["completion_tokens"], 8)
 
     def test_local_request_marks_output_limit_as_incomplete(self):
         selected = GenerationConfig(
@@ -364,10 +602,15 @@ class ProviderBoundaryTests(unittest.TestCase):
             api_key="test-key",
             max_output_tokens=8,
         )
-        client = FakeNativeClient(
+        client = FakeLocalClient(
             {
-                "output": [{"type": "message", "content": COMPLETE_HTML}],
-                "stats": {"total_output_tokens": 8},
+                "choices": [
+                    {
+                        "message": {"content": COMPLETE_HTML},
+                        "finish_reason": "length",
+                    }
+                ],
+                "usage": {"completion_tokens": 8},
             }
         )
 
@@ -383,18 +626,24 @@ class ProviderBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(GenerationResponseError, "finish_reason=length"):
             validate_generated_html(generated)
 
-    def test_local_request_rejects_reasoning_or_tool_output(self):
-        client = FakeNativeClient(
+    def test_local_request_rejects_multiple_choices(self):
+        client = FakeLocalClient(
             {
-                "output": [
-                    {"type": "reasoning", "content": "hidden work"},
-                    {"type": "message", "content": COMPLETE_HTML},
+                "choices": [
+                    {
+                        "message": {"content": COMPLETE_HTML},
+                        "finish_reason": "stop",
+                    },
+                    {
+                        "message": {"content": COMPLETE_HTML},
+                        "finish_reason": "stop",
+                    },
                 ],
-                "stats": {"total_output_tokens": 8},
+                "usage": {"completion_tokens": 8},
             }
         )
 
-        with self.assertRaisesRegex(GenerationResponseError, "non-message output"):
+        with self.assertRaisesRegex(GenerationResponseError, "exactly one choice"):
             generate_text(
                 config(),
                 system_prompt="system",
@@ -403,15 +652,49 @@ class ProviderBoundaryTests(unittest.TestCase):
                 client=client,
             )
 
-    def test_local_request_rejects_missing_token_statistics(self):
-        client = FakeNativeClient(
+    def test_local_request_rejects_reasoning_or_tool_output(self):
+        invalid_messages = {
+            "reasoning": {
+                "content": COMPLETE_HTML,
+                "reasoning_content": "hidden work",
+            },
+            "tool call": {
+                "content": COMPLETE_HTML,
+                "tool_calls": [{"id": "call-1", "type": "function"}],
+            },
+        }
+        for label, message in invalid_messages.items():
+            with self.subTest(label=label):
+                client = FakeLocalClient(
+                    {
+                        "choices": [
+                            {"message": message, "finish_reason": "stop"}
+                        ],
+                        "usage": {"completion_tokens": 8},
+                    }
+                )
+                with self.assertRaises(GenerationResponseError):
+                    generate_text(
+                        config(),
+                        system_prompt="system",
+                        user_parts=(PromptPart("input"),),
+                        temperature=0.4,
+                        client=client,
+                    )
+
+    def test_local_request_rejects_missing_usage_object(self):
+        client = FakeLocalClient(
             {
-                "output": [{"type": "message", "content": COMPLETE_HTML}],
-                "stats": {},
+                "choices": [
+                    {
+                        "message": {"content": COMPLETE_HTML},
+                        "finish_reason": "stop",
+                    }
+                ]
             }
         )
 
-        with self.assertRaisesRegex(GenerationResponseError, "output-token statistics"):
+        with self.assertRaisesRegex(GenerationResponseError, "usage object"):
             generate_text(
                 config(),
                 system_prompt="system",
@@ -420,28 +703,65 @@ class ProviderBoundaryTests(unittest.TestCase):
                 client=client,
             )
 
-    def test_local_request_rejects_invalid_native_base_url_before_dispatch(self):
-        selected = GenerationConfig(
-            provider="local",
-            model=DEFAULT_LOCAL_MODEL,
-            base_url="http://127.0.0.1:1234/not-v1",
-            api_key="test-key",
-        )
-        client = FakeNativeClient()
+    def test_local_request_rejects_invalid_llama_cpp_base_url_before_dispatch(self):
+        invalid_urls = {
+            "wrong path": "http://127.0.0.1:8080/not-v1",
+            "LM Studio native path": "http://127.0.0.1:8080/api/v1",
+            "query": "http://127.0.0.1:8080/v1?mode=local",
+            "fragment": "http://127.0.0.1:8080/v1#local",
+            "wrong scheme": "ftp://127.0.0.1:8080/v1",
+        }
+        for label, base_url in invalid_urls.items():
+            with self.subTest(label=label):
+                selected = GenerationConfig(
+                    provider="local",
+                    model=DEFAULT_LOCAL_MODEL,
+                    base_url=base_url,
+                    api_key="test-key",
+                )
+                client = FakeLocalClient()
 
-        with self.assertRaisesRegex(GenerationConfigurationError, "path must"):
-            generate_text(
-                selected,
-                system_prompt="system",
-                user_parts=(PromptPart("input"),),
-                temperature=0.4,
-                client=client,
-            )
+                with self.assertRaises(GenerationConfigurationError):
+                    generate_text(
+                        selected,
+                        system_prompt="system",
+                        user_parts=(PromptPart("input"),),
+                        temperature=0.4,
+                        client=client,
+                    )
 
-        self.assertEqual(client.calls, [])
+                self.assertEqual(client.calls, [])
+
+    def test_local_request_accepts_root_or_v1_base_url(self):
+        valid_urls = {
+            "root": "http://127.0.0.1:8080",
+            "versioned": "http://127.0.0.1:8080/v1/",
+        }
+        for label, base_url in valid_urls.items():
+            with self.subTest(label=label):
+                selected = GenerationConfig(
+                    provider="local",
+                    model=DEFAULT_LOCAL_MODEL,
+                    base_url=base_url,
+                    api_key="test-key",
+                )
+                client = FakeLocalClient()
+
+                generate_text(
+                    selected,
+                    system_prompt="system",
+                    user_parts=(PromptPart("input"),),
+                    temperature=0.4,
+                    client=client,
+                )
+
+                self.assertEqual(
+                    client.calls[0][1],
+                    "http://127.0.0.1:8080/v1/chat/completions",
+                )
 
     def test_local_request_translates_http_failure_without_retry(self):
-        client = FakeNativeClient(status_error=ConnectionError("offline"))
+        client = FakeLocalClient(chat_status_error=ConnectionError("offline"))
 
         with self.assertRaisesRegex(GenerationProviderUnavailable, "offline"):
             generate_text(
@@ -569,6 +889,38 @@ class BodyAssemblyTests(unittest.TestCase):
                 forbidden_square_placeholders=placeholders,
             ),
             "<body><main>Open [Saturday]</main></body>",
+        )
+
+    def test_placeholder_admission_uses_browser_decoded_text_and_attributes(self):
+        placeholders = extract_square_placeholder_tokens("Use [YEAR].")
+        invalid_bodies = {
+            "decimal character references": (
+                "<body><main>Serving since &#91;YEAR&#93;</main></body>"
+            ),
+            "hex character references in an attribute": (
+                '<body><main aria-label="Serving since &#x5b;YEAR&#x5d;">Ready</main></body>'
+            ),
+            "token split across elements": (
+                "<body><main>[YE<strong>AR]</strong></main></body>"
+            ),
+            "encoded curly placeholder": (
+                "<body><main>&#123;&#123;SITE_NAME&#125;&#125;</main></body>"
+            ),
+        }
+        for label, content in invalid_bodies.items():
+            with self.subTest(label=label):
+                with self.assertRaises(GeneratedBodyError):
+                    validate_generated_body(
+                        body_result(content),
+                        forbidden_square_placeholders=placeholders,
+                    )
+
+        self.assertEqual(
+            validate_generated_body(
+                body_result("<body><main>&#91;Saturday&#93;</main></body>"),
+                forbidden_square_placeholders=placeholders,
+            ),
+            "<body><main>&#91;Saturday&#93;</main></body>",
         )
 
     def test_body_byte_boundary_accepts_limit_and_rejects_limit_plus_one(self):
@@ -881,18 +1233,10 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIsNone(args.generation_model)
 
     def test_build_generator_uses_shared_admission_gate(self):
-        client = FakeNativeClient(
-            {
-                "output": [
-                    {
-                        "type": "message",
-                        "content": body_with_markers(
-                            build.BUILD_DEPLOYMENT_COMMENT_MARKERS
-                        ),
-                    }
-                ],
-                "stats": {"total_output_tokens": 8},
-            }
+        client = FakeLocalClient(
+            local_chat_payload(
+                body_with_markers(build.BUILD_DEPLOYMENT_COMMENT_MARKERS)
+            )
         )
         prospect = {
             "business_name": "Test Business",
@@ -912,12 +1256,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         leaked_body = body_with_markers(
             build.BUILD_DEPLOYMENT_COMMENT_MARKERS
         ).replace("Ready", "Serving Effingham since [YEAR]")
-        client = FakeNativeClient(
-            {
-                "output": [{"type": "message", "content": leaked_body}],
-                "stats": {"total_output_tokens": 8},
-            }
-        )
+        client = FakeLocalClient(local_chat_payload(leaked_body))
         prospect = {
             "business_name": "Test Business",
             "trade": "plumber",
@@ -930,18 +1269,10 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             build.generate_build_html(prospect, config(), client)
 
     def test_redesign_generator_assembles_body_with_site_brand_contract(self):
-        client = FakeNativeClient(
-            {
-                "output": [
-                    {
-                        "type": "message",
-                        "content": body_with_markers(
-                            pipeline.REDESIGN_DEPLOYMENT_COMMENT_MARKERS
-                        ),
-                    }
-                ],
-                "stats": {"total_output_tokens": 8},
-            }
+        client = FakeLocalClient(
+            local_chat_payload(
+                body_with_markers(pipeline.REDESIGN_DEPLOYMENT_COMMENT_MARKERS)
+            )
         )
         site_json = {
             "site": {"name": "Current Business"},
@@ -968,12 +1299,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn('<body class="theme-dark"><main>Ready</main></body>', html)
 
     def test_interior_generator_assembles_body_without_deployment_comment(self):
-        client = FakeNativeClient(
-            {
-                "output": [{"type": "message", "content": COMPLETE_BODY}],
-                "stats": {"total_output_tokens": 8},
-            }
-        )
+        client = FakeLocalClient(local_chat_payload(COMPLETE_BODY))
         site_json = {"site": {"name": "Current Business"}}
 
         html = pipeline.generate_interior_page(

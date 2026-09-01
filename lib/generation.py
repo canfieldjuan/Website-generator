@@ -19,10 +19,11 @@ from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 
 
 DEFAULT_LOCAL_MODEL = "qwen/qwen3.8-27b"
-DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:1234/v1"
-DEFAULT_LOCAL_API_KEY = "lm-studio"
+DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8080/v1"
+DEFAULT_LOCAL_API_KEY = "no-key"
 DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
+LOCAL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
 # Non-HTML generation keeps the historical ceiling. HTML callers apply the
 # tighter body-only ceiling before trusted code assembles the final document.
 DEFAULT_MAX_OUTPUT_TOKENS = 65536
@@ -143,11 +144,16 @@ class _GeneratedBodyParser(HTMLParser):
         self.body_events: list[str] = []
         self.forbidden_tags: list[str] = []
         self.has_content_outside_body = False
+        self.visible_text_parts: list[str] = []
+        self.decoded_attribute_values: list[str] = []
 
     def handle_decl(self, decl: str) -> None:
         self.has_content_outside_body = True
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.decoded_attribute_values.extend(
+            value for _name, value in attrs if value is not None
+        )
         tag_name = tag.lower()
         if tag_name == "body":
             self.body_events.append("start")
@@ -182,7 +188,9 @@ class _GeneratedBodyParser(HTMLParser):
         self.handle_starttag(tag, attrs)
 
     def handle_data(self, data: str) -> None:
-        if data.strip() and self.body_depth == 0:
+        if self.body_depth:
+            self.visible_text_parts.append(data)
+        elif data.strip():
             self.has_content_outside_body = True
 
     def handle_pi(self, data: str) -> None:
@@ -226,12 +234,12 @@ def resolve_generation_config(
             model=local_model,
             base_url=(
                 os.environ.get("LOCAL_GENERATION_BASE_URL")
-                or os.environ.get("LM_STUDIO_BASE_URL")
+                or os.environ.get("LLAMA_CPP_BASE_URL")
                 or DEFAULT_LOCAL_BASE_URL
             ),
             api_key=(
                 os.environ.get("LOCAL_GENERATION_API_KEY")
-                or os.environ.get("LM_STUDIO_API_KEY")
+                or os.environ.get("LLAMA_CPP_API_KEY")
                 or DEFAULT_LOCAL_API_KEY
             ),
             timeout_seconds=timeout_seconds,
@@ -317,19 +325,46 @@ def preflight_generation_provider(
     """
     if config.provider != "local":
         return
-    selected_client = client or create_generation_client(config)
+    selected_client = client or create_local_generation_client(config)
+    health_url, models_url, _chat_url = _llama_cpp_urls(config.base_url)
+    preflight_timeout = min(config.timeout_seconds, LOCAL_PREFLIGHT_TIMEOUT_SECONDS)
     try:
-        response = selected_client.models.list()
-        available = {item.id for item in response.data}
+        health_response = selected_client.get(
+            health_url,
+            timeout=preflight_timeout,
+        )
+        health_response.raise_for_status()
+        health_payload = health_response.json()
+        if not isinstance(health_payload, dict) or health_payload.get("status") != "ok":
+            raise ValueError("health endpoint did not report status=ok")
+
+        models_response = selected_client.get(
+            models_url,
+            timeout=preflight_timeout,
+        )
+        models_response.raise_for_status()
+        models_payload = models_response.json()
+        model_items = (
+            models_payload.get("data") if isinstance(models_payload, dict) else None
+        )
+        if not isinstance(model_items, list):
+            raise ValueError("model endpoint did not return a data list")
+        available: set[str] = set()
+        for item in model_items:
+            model_id = item.get("id") if isinstance(item, dict) else None
+            if not isinstance(model_id, str) or not model_id:
+                raise ValueError("model endpoint returned an invalid model id")
+            available.add(model_id)
     except Exception as exc:
         raise GenerationProviderUnavailable(
             "Local generation is unavailable at "
-            f"{config.base_url}. Start LM Studio and load the model with: "
-            f"lms load {config.model}"
+            f"{config.base_url}. Start standalone llama.cpp with: "
+            "scripts/start_llama_server.sh"
         ) from exc
     if config.model not in available:
         raise GenerationProviderUnavailable(
-            f"Local model {config.model!r} is not loaded. Run: lms load {config.model}"
+            f"Local model alias {config.model!r} is not served by llama.cpp. "
+            "Start it with: scripts/start_llama_server.sh"
         )
 
 
@@ -402,15 +437,18 @@ def _generate_local_text(
     client: Any | None,
 ) -> GenerationResult:
     selected_client = client or create_local_generation_client(config)
-    endpoint = _native_lm_studio_chat_url(config.base_url)
+    _health_url, _models_url, endpoint = _llama_cpp_urls(config.base_url)
     request_body = {
         "model": config.model,
-        "system_prompt": system_prompt,
-        "input": user_content,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
         "temperature": temperature,
-        "max_output_tokens": config.max_output_tokens,
-        "reasoning": "off",
-        "store": False,
+        "max_tokens": config.max_output_tokens,
+        "stream": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+        "reasoning_format": "deepseek",
     }
     try:
         response = selected_client.post(
@@ -435,54 +473,54 @@ def _generate_local_text(
             "Local generation provider returned a non-object response."
         )
 
-    output = payload.get("output")
-    if not isinstance(output, list):
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
         raise GenerationResponseError(
-            "Local generation provider returned no output collection."
+            "Local generation provider returned no choices collection."
         )
-    messages: list[str] = []
-    for item in output:
-        if not isinstance(item, dict) or item.get("type") != "message":
-            raise GenerationResponseError(
-                "Local generation provider returned non-message output while "
-                "reasoning and tools were disabled."
-            )
-        content = item.get("content")
-        if not isinstance(content, str):
-            raise GenerationResponseError(
-                "Local generation provider returned a message without text content."
-            )
-        messages.append(content)
-    if len(messages) != 1:
+    if len(choices) != 1:
         raise GenerationResponseError(
-            "Local generation provider must return exactly one text message."
+            "Local generation provider must return exactly one choice."
         )
-
-    stats = payload.get("stats")
-    if not isinstance(stats, dict):
+    choice = choices[0]
+    if not isinstance(choice, dict):
         raise GenerationResponseError(
-            "Local generation provider returned no token statistics."
+            "Local generation provider returned an invalid choice."
         )
-    total_output_tokens = stats.get("total_output_tokens")
-    if (
-        isinstance(total_output_tokens, bool)
-        or not isinstance(total_output_tokens, int)
-        or total_output_tokens < 0
-    ):
+    finish_reason = choice.get("finish_reason")
+    if not isinstance(finish_reason, str) or not finish_reason:
         raise GenerationResponseError(
-            "Local generation provider returned invalid output-token statistics."
+            "Local generation provider returned no finish reason."
         )
-    finish_reason = (
-        "length"
-        if total_output_tokens >= config.max_output_tokens
-        else "stop"
-    )
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        raise GenerationResponseError(
+            "Local generation provider returned no message."
+        )
+    if message.get("reasoning_content") not in (None, ""):
+        raise GenerationResponseError(
+            "Local generation provider returned reasoning despite thinking being disabled."
+        )
+    if message.get("tool_calls") not in (None, []):
+        raise GenerationResponseError(
+            "Local generation provider returned tool calls when none were requested."
+        )
+    content = message.get("content")
+    if not isinstance(content, str):
+        raise GenerationResponseError(
+            "Local generation provider returned a message without text content."
+        )
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        raise GenerationResponseError(
+            "Local generation provider returned no usage object."
+        )
     return GenerationResult(
         provider=config.provider,
         model=config.model,
-        content=messages[0],
+        content=content,
         finish_reason=finish_reason,
-        usage=dict(stats),
+        usage=dict(usage),
     )
 
 
@@ -521,25 +559,6 @@ def validate_generated_body(
         raise GeneratedBodyError(
             f"Generated body exceeds the {max_bytes}-byte limit."
         )
-    if re.search(r"{{[^{}]+}}", body):
-        raise GeneratedBodyError(
-            "Generated body contains unresolved template placeholders."
-        )
-    folded_body = body.casefold()
-    leaked_square_placeholders = sorted(
-        {
-            token
-            for token in forbidden_square_placeholders
-            if isinstance(token, str) and token and token.casefold() in folded_body
-        },
-        key=str.casefold,
-    )
-    if leaked_square_placeholders:
-        leaked = ", ".join(leaked_square_placeholders[:3])
-        raise GeneratedBodyError(
-            f"Generated body contains unresolved prompt placeholders: {leaked}."
-        )
-
     parser = _GeneratedBodyParser()
     parser.feed(body)
     parser.close()
@@ -555,6 +574,32 @@ def validate_generated_body(
     if parser.has_content_outside_body:
         raise GeneratedBodyError(
             "Generated body contains content outside its body root."
+        )
+
+    placeholder_surfaces = (
+        body,
+        "".join(parser.visible_text_parts),
+        *parser.decoded_attribute_values,
+    )
+    if any(re.search(r"{{[^{}]+}}", surface) for surface in placeholder_surfaces):
+        raise GeneratedBodyError(
+            "Generated body contains unresolved template placeholders."
+        )
+    folded_surfaces = tuple(surface.casefold() for surface in placeholder_surfaces)
+    leaked_square_placeholders = sorted(
+        {
+            token
+            for token in forbidden_square_placeholders
+            if isinstance(token, str)
+            and token
+            and any(token.casefold() in surface for surface in folded_surfaces)
+        },
+        key=str.casefold,
+    )
+    if leaked_square_placeholders:
+        leaked = ", ".join(leaked_square_placeholders[:3])
+        raise GeneratedBodyError(
+            f"Generated body contains unresolved prompt placeholders: {leaked}."
         )
     return body
 
@@ -867,7 +912,7 @@ def _replace_root_property(head: str, property_name: str, value: str) -> str:
     return updated
 
 
-def _native_lm_studio_chat_url(base_url: str) -> str:
+def _llama_cpp_urls(base_url: str) -> tuple[str, str, str]:
     parsed = urlsplit(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise GenerationConfigurationError(
@@ -879,18 +924,15 @@ def _native_lm_studio_chat_url(base_url: str) -> str:
         )
 
     path = parsed.path.rstrip("/")
-    if path.endswith("/api/v1"):
-        native_path = f"{path}/chat"
-    elif path.endswith("/v1"):
-        native_path = f"{path[:-3]}/api/v1/chat"
-    elif not path:
-        native_path = "/api/v1/chat"
-    else:
+    if path not in {"", "/v1"}:
         raise GenerationConfigurationError(
-            "Local generation base URL path must be empty or end in /v1 or /api/v1."
+            "Local generation base URL path must be empty or /v1."
         )
-    return urlunsplit(
-        (parsed.scheme, parsed.netloc, native_path, "", "")
+    root = urlunsplit((parsed.scheme, parsed.netloc, "", "", "")).rstrip("/")
+    return (
+        f"{root}/health",
+        f"{root}/v1/models",
+        f"{root}/v1/chat/completions",
     )
 
 
