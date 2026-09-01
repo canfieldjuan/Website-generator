@@ -3,10 +3,13 @@ existing online presence. Sibling pipeline to pipeline.py (which redesigns
 existing sites).
 
 Usage:
-  python build.py <prospect.json> [--skip-deploy] [--skip-image-gen] [--skip-email-draft]
+  python build.py <prospect.json> [--generation-provider local|openrouter]
+      [--generation-model MODEL] [--skip-deploy] [--skip-image-gen]
+      [--skip-email-draft]
 
 Reads a small prospect JSON, optionally generates a hero image, generates
-a single-page site via Sonnet, writes to outputs/builds/<slug>/, writes
+a single-page site via the explicitly selected provider, writes to
+outputs/builds/<slug>/, writes
 a pitch email draft to outputs/email_drafts/<slug>.md (siblings -- the
 draft is NOT in the Vercel deploy root and never published), and
 optionally deploys the site to Vercel. The salesperson sends the pitch
@@ -15,14 +18,22 @@ email manually from their own email client AFTER replacing the
 """
 import os
 import re
-import sys
 import json
 import hashlib
+import argparse
 from datetime import date
 
-from lib.clients import openai_client as client, GENERATION_MODEL
 from lib.images import fetch_unsplash_hero, generate_image_openrouter
 from lib.deploy import deploy_to_vercel
+from lib.generation import (
+    PromptPart,
+    atomic_write_text,
+    generate_text,
+    preflight_generation_provider,
+    require_complete_text,
+    resolve_generation_config,
+    validate_generated_html,
+)
 # lib.email.send_pitch_email is intentionally NOT imported here. The
 # from-scratch build flow uses the manual email_draft.md workflow
 # instead -- the salesperson sends from their own client after
@@ -441,8 +452,12 @@ def build_hero_prompt(prospect):
     )
 
 
-def generate_build_html(prospect):
-    print(f"[*] Generating site for {prospect['business_name']} using {GENERATION_MODEL}...")
+def generate_build_html(prospect, generation_config=None, client=None):
+    config = generation_config or resolve_generation_config()
+    print(
+        f"[*] Generating site for {prospect['business_name']} using "
+        f"{config.provider}:{config.model}..."
+    )
     with open(BUILD_PROMPT_PATH, "r") as f:
         system_prompt = f.read()
     with open(INDUSTRY_DEFAULTS_PATH, "r") as f:
@@ -480,33 +495,16 @@ def generate_build_html(prospect):
     if len(prospect_block) > BUILD_USER_TRUNCATE:
         prospect_block = prospect_block[:BUILD_USER_TRUNCATE]
 
-    response = client.chat.completions.create(
-        model=GENERATION_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": [{
-                    "type": "text",
-                    "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
-                }],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": static_block,
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                    {
-                        "type": "text",
-                        "text": prospect_block,
-                    },
-                ],
-            },
-        ],
+    result = generate_text(
+        config,
+        system_prompt=system_prompt,
+        user_parts=(
+            PromptPart(static_block, cacheable=True),
+            PromptPart(prospect_block),
+        ),
         temperature=BUILD_TEMPERATURE,
+        cache_system_prompt=True,
+        client=client,
     )
 
     # Cache observability. OpenRouter passes through both the Anthropic
@@ -515,10 +513,7 @@ def generate_build_html(prospect):
     # whichever surface populated so the operator can verify the cache is
     # actually doing work -- a zero-read counter across consecutive builds
     # signals a silent invalidator in the static block.
-    try:
-        usage = response.usage.model_dump()
-    except AttributeError:
-        usage = dict(response.usage) if response.usage else {}
+    usage = result.usage
     cache_read = (
         usage.get("cache_read_input_tokens")
         or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
@@ -535,15 +530,10 @@ def generate_build_html(prospect):
     else:
         print(f"[*] Cache: no hits (cold or invalidated). total_prompt={prompt_total} tokens")
 
-    html = response.choices[0].message.content
-    # Belt-and-suspenders in case the LLM leaks fences despite the prompt rule.
-    html = re.sub(r"^```html\n?", "", html)
-    html = re.sub(r"^```\n?", "", html)
-    html = re.sub(r"```$", "", html)
-    return html.strip()
+    return validate_generated_html(result)
 
 
-def generate_email_draft(prospect):
+def generate_email_draft(prospect, generation_config=None, client=None):
     """Generate the Day-1 pitch email draft for this prospect. Returns the
     markdown content that gets written to email_draft.md alongside the
     site. The VERCEL_URL_PLACEHOLDER token is intentionally left in --
@@ -561,16 +551,16 @@ def generate_email_draft(prospect):
         f"Leave the [VERCEL_URL_PLACEHOLDER] token in the body verbatim."
     )
 
-    response = client.chat.completions.create(
-        model=GENERATION_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=EMAIL_TEMPERATURE
+    config = generation_config or resolve_generation_config()
+    result = generate_text(
+        config,
+        system_prompt=system_prompt,
+        user_parts=(PromptPart(user_prompt),),
+        temperature=EMAIL_TEMPERATURE,
+        client=client,
     )
 
-    draft = response.choices[0].message.content
+    draft = require_complete_text(result)
     # Strip any markdown fences the LLM might have leaked.
     draft = re.sub(r"^```markdown\n?", "", draft)
     draft = re.sub(r"^```\n?", "", draft)
@@ -578,8 +568,21 @@ def generate_email_draft(prospect):
     return draft.strip()
 
 
-def main(prospect_json_path):
+def main(
+    prospect_json_path,
+    *,
+    generation_provider="local",
+    generation_model=None,
+    skip_deploy=False,
+    skip_image_gen=False,
+    skip_email_draft=False,
+):
     prospect = load_prospect(prospect_json_path)
+    generation_config = resolve_generation_config(
+        generation_provider,
+        generation_model,
+    )
+    preflight_generation_provider(generation_config)
     slug = prospect.get("slug") or slugify(prospect["business_name"])
     output_dir = os.path.join(BUILD_OUTPUT_ROOT, slug)
     os.makedirs(output_dir, exist_ok=True)
@@ -625,7 +628,7 @@ def main(prospect_json_path):
     # is the paid fallback when Unsplash has no key, no results, or
     # otherwise fails. Both paths mirror the image locally to
     # output_dir/images/ so the deployed bundle is self-contained.
-    if "--skip-image-gen" in sys.argv:
+    if skip_image_gen:
         print("[*] Skipping hero image generation due to --skip-image-gen flag.")
     elif prospect.get("_computed_hero_shape") == "gradient":
         # The harness selected a hero shape that renders no photo
@@ -664,11 +667,10 @@ def main(prospect_json_path):
                         "source": "flux",
                     })
 
-    html = generate_build_html(prospect)
+    html = generate_build_html(prospect, generation_config)
 
     index_path = os.path.join(output_dir, "index.html")
-    with open(index_path, "w") as f:
-        f.write(html)
+    atomic_write_text(index_path, html)
 
     print(f"\n[+] Build complete: {index_path}")
     print(f"[+] Review locally before deploying.")
@@ -685,14 +687,14 @@ def main(prospect_json_path):
     # The pitch draft is internal-only.
     os.makedirs(EMAIL_DRAFT_ROOT, exist_ok=True)
     email_path = os.path.join(EMAIL_DRAFT_ROOT, f"{slug}.md")
-    if "--skip-email-draft" in sys.argv:
+    if skip_email_draft:
         print("[*] Skipping pitch email draft due to --skip-email-draft flag.")
         if os.path.isfile(email_path):
             os.remove(email_path)
             print(f"[*] Removed stale draft from prior build: {email_path}")
     else:
         try:
-            email_md = generate_email_draft(prospect)
+            email_md = generate_email_draft(prospect, generation_config)
             # Verify the [VERCEL_URL_PLACEHOLDER] token survived in the BODY
             # (not just in the "Before sending" checklist, which always
             # contains it because the prompt template instructs the model
@@ -707,8 +709,7 @@ def main(prospect_json_path):
                     "in the email body (the checklist alone does not count). "
                     "Salesperson would have no place to insert the deployed URL."
                 )
-            with open(email_path, "w") as f:
-                f.write(email_md)
+            atomic_write_text(email_path, email_md)
             print(f"[+] Pitch email draft: {email_path}")
             print(f"[*] Replace [VERCEL_URL_PLACEHOLDER] with the deployed URL before sending.")
         except Exception as e:
@@ -718,7 +719,7 @@ def main(prospect_json_path):
                 print(f"[*] Removed stale draft from prior build: {email_path}")
             print(f"[*] Site build still complete; rerun with --skip-email-draft if this keeps failing.")
 
-    if "--skip-deploy" in sys.argv:
+    if skip_deploy:
         print("\n[*] Skipping Vercel deployment due to --skip-deploy flag.")
         return
 
@@ -739,8 +740,30 @@ def main(prospect_json_path):
         print(f"[*] Send from your own email client. Do NOT use any automated sender.")
 
 
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Generate one local-business website from prospect JSON."
+    )
+    parser.add_argument("prospect_json")
+    parser.add_argument(
+        "--generation-provider",
+        choices=("local", "openrouter"),
+        default="local",
+    )
+    parser.add_argument("--generation-model")
+    parser.add_argument("--skip-deploy", action="store_true")
+    parser.add_argument("--skip-image-gen", action="store_true")
+    parser.add_argument("--skip-email-draft", action="store_true")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1].startswith("--"):
-        print("Usage: python build.py <prospect.json> [--skip-deploy] [--skip-image-gen] [--skip-email-draft]")
-    else:
-        main(sys.argv[1])
+    args = parse_args()
+    main(
+        args.prospect_json,
+        generation_provider=args.generation_provider,
+        generation_model=args.generation_model,
+        skip_deploy=args.skip_deploy,
+        skip_image_gen=args.skip_image_gen,
+        skip_email_draft=args.skip_email_draft,
+    )

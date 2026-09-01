@@ -37,7 +37,7 @@ URL → fetch_and_clean_html → analyze_site → enrich_site_json
 
 5. **Hero image** — Flux-only via `generate_image_openrouter` (OpenRouter, `black-forest-labs/flux.2-max`). Fires when analysis JSON contains `image_generation_prompt` or when no hero/background image was extracted. `UNSPLASH_ACCESS_KEY` has no effect here — the Unsplash-first path is `build.py`-only. Base64 responses are decoded to disk to avoid blowing up the LLM context on the next call.
 
-6. **Generate HTML** — `GENERATION_MODEL` (`claude-sonnet-4.5`) with `references/02-redesign-gen-prompt.md` + full `references/03-base-template.html` (the CSS component library). Theme is auto-selected in `pipeline.py` via a `site.type → theme` map. Contact page generated separately using `references/04-interior-page-prompt.md`.
+6. **Generate HTML** — local `qwen/qwen3.8-27b` by default, with `references/02-redesign-gen-prompt.md` + full `references/03-base-template.html` (the CSS component library). An OpenRouter text model can be selected explicitly for a run. Theme is auto-selected in `pipeline.py` via a `site.type → theme` map. Contact page generated separately using `references/04-interior-page-prompt.md`.
 
 7. **Deploy** — `vercel --prod --yes --name <slug>` in the output directory. Runs `vercel whoami` as a preflight; returns the `*.vercel.app` URL parsed from stdout/stderr.
 
@@ -75,6 +75,9 @@ The pitch email is generated as a Markdown draft with `[VERCEL_URL_PLACEHOLDER]`
 # Python deps
 pip install -r requirements.txt
 
+# Local HTML generation (load manually; the scripts never consume GPU automatically)
+lms load qwen/qwen3.8-27b
+
 # Headless browser (only needed for JS-rendered sites in pipeline.py)
 playwright install chromium
 
@@ -85,9 +88,16 @@ npm install -g vercel && vercel login
 ### `.env` required keys
 
 ```
-OPENROUTER_API_KEY=...   # Required — all LLM and image calls route through OpenRouter
+OPENROUTER_API_KEY=...   # Extraction/images and explicitly selected cloud generation
 RESEND_API_KEY=...       # Required for pipeline.py email send; optional for build.py
 UNSPLASH_ACCESS_KEY=...  # Optional — free hero photos; falls back to Flux generation
+
+# Optional local overrides; these defaults already target LM Studio + Qwen.
+LOCAL_GENERATION_BASE_URL=http://127.0.0.1:1234/v1
+LOCAL_GENERATION_MODEL=qwen/qwen3.8-27b
+
+# Optional default after --generation-provider openrouter is explicitly selected.
+OPENROUTER_GENERATION_MODEL=anthropic/claude-sonnet-4.5
 ```
 
 ### Redesign an existing site
@@ -97,6 +107,7 @@ python pipeline.py https://example-plumber.com
 python pipeline.py https://example-plumber.com --skip-deploy
 python pipeline.py https://example-plumber.com --skip-deploy --skip-email
 python pipeline.py https://example-plumber.com --skip-deploy --skip-image-gen
+python pipeline.py https://example-plumber.com --generation-provider openrouter --generation-model anthropic/claude-sonnet-4.5
 ```
 
 Output lands in `outputs/<site-slug>/`.
@@ -111,6 +122,7 @@ cp examples/prospect-plumber-template.json examples/my-prospect.json
 python build.py examples/my-prospect.json
 python build.py examples/my-prospect.json --skip-deploy
 python build.py examples/my-prospect.json --skip-deploy --skip-image-gen --skip-email-draft
+python build.py examples/my-prospect.json --generation-provider openrouter --generation-model anthropic/claude-sonnet-4.5
 ```
 
 Output site: `outputs/builds/<slug>/index.html`
@@ -177,15 +189,21 @@ Six themes are defined in `references/09-themes.md` and `references/02-redesign-
 
 ## Models
 
-Both scripts call OpenRouter using the OpenAI-compatible client:
+Extraction remains on OpenRouter. HTML and pitch-draft generation use the
+explicitly selected provider, defaulting to local LM Studio:
 
-| Role | Model constant | Current value |
+| Role | Provider | Default model |
 |---|---|---|
-| Extraction / enrichment | `EXTRACTION_MODEL` | `anthropic/claude-haiku-4.5` |
-| HTML generation / email draft | `GENERATION_MODEL` | `anthropic/claude-sonnet-4.5` |
-| Hero image (Flux) | `IMAGE_MODEL` | `black-forest-labs/flux.2-max` |
+| Extraction / enrichment | OpenRouter | `anthropic/claude-haiku-4.5` |
+| HTML generation / email draft | Local LM Studio | `qwen/qwen3.8-27b` |
+| Explicit cloud generation | OpenRouter | `--generation-model` / `OPENROUTER_GENERATION_MODEL` |
+| Hero image (Flux) | OpenRouter | `black-forest-labs/flux.2-max` |
 
-Constants live in `lib/clients.py`. Prompt caching (`cache_control: ephemeral`) is enabled in `build.py` for the large static context block (industry defaults + themes + section orders + base template). Cache hit/miss counts are logged to stdout.
+Provider configuration and admission checks live in `lib/generation.py`.
+OpenRouter prompt caching (`cache_control: ephemeral`) is enabled only for the
+cloud build request; local requests receive plain OpenAI-compatible text
+content. Every generated page must finish normally and contain a complete HTML
+document before it is written or offered to Vercel.
 
 ---
 

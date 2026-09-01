@@ -2,18 +2,26 @@ import os
 import json
 import re
 import urllib.parse
+import argparse
 import requests
 from bs4 import BeautifulSoup
 
 from lib.clients import (
-    openai_client as client,
     EXTRACTION_MODEL,
-    GENERATION_MODEL,
     extract_json_object as _extract_json_object,
+    get_openrouter_client,
 )
 from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
+from lib.generation import (
+    PromptPart,
+    atomic_write_text,
+    generate_text,
+    preflight_generation_provider,
+    resolve_generation_config,
+    validate_generated_html,
+)
 
 # Enrichment pass: fetches priority-1/2 interior pages identified in the
 # homepage analysis and merges their extracted JSON back into site_json so
@@ -141,7 +149,7 @@ def analyze_site(html_content):
     with open("references/01-site-analysis-prompt.md", "r") as f:
         system_prompt = f.read()
 
-    response = client.chat.completions.create(
+    response = get_openrouter_client().chat.completions.create(
         model=EXTRACTION_MODEL,
         response_format={ "type": "json_object" },
         messages=[
@@ -215,7 +223,7 @@ def enrich_site_json(site_json):
         )
 
         try:
-            response = client.chat.completions.create(
+            response = get_openrouter_client().chat.completions.create(
                 model=EXTRACTION_MODEL,
                 response_format={"type": "json_object"},
                 messages=[
@@ -260,8 +268,18 @@ def enrich_site_json(site_json):
 
     return site_json
 
-def generate_redesign(site_json, theme="minimal", color_mode="brand"):
-    print(f"[*] Generating modernized HTML with theme '{theme}' using {GENERATION_MODEL}...")
+def generate_redesign(
+    site_json,
+    theme="minimal",
+    color_mode="brand",
+    generation_config=None,
+    generation_client=None,
+):
+    config = generation_config or resolve_generation_config()
+    print(
+        f"[*] Generating modernized HTML with theme '{theme}' using "
+        f"{config.provider}:{config.model}..."
+    )
     with open("references/02-redesign-gen-prompt.md", "r") as f:
         system_prompt = f.read()
 
@@ -280,23 +298,25 @@ BASE TEMPLATE:
 {base_template}
 """
 
-    response = client.chat.completions.create(
-        model=GENERATION_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.4
+    result = generate_text(
+        config,
+        system_prompt=system_prompt,
+        user_parts=(PromptPart(user_prompt),),
+        temperature=0.4,
+        client=generation_client,
     )
-    
-    html = response.choices[0].message.content
-    # Strip markdown code blocks if the LLM output them
-    html = re.sub(r"^```html\n?", "", html)
-    html = re.sub(r"^```\n?", "", html)
-    html = re.sub(r"```$", "", html)
-    return html.strip()
 
-def generate_interior_page(site_json, page_type, page_url=None, theme="warm", color_mode="brand"):
+    return validate_generated_html(result)
+
+def generate_interior_page(
+    site_json,
+    page_type,
+    page_url=None,
+    theme="warm",
+    color_mode="brand",
+    generation_config=None,
+    generation_client=None,
+):
     print(f"[*] Generating interior page '{page_type}'...")
     with open("references/04-interior-page-prompt.md", "r") as f:
         system_prompt = f.read()
@@ -335,23 +355,32 @@ SOURCE CONTENT:
 ---
 """
 
-    response = client.chat.completions.create(
-        model=GENERATION_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt[:120000]}
-        ],
-        temperature=0.1
+    config = generation_config or resolve_generation_config()
+    result = generate_text(
+        config,
+        system_prompt=system_prompt,
+        user_parts=(PromptPart(user_prompt[:120000]),),
+        temperature=0.1,
+        client=generation_client,
     )
-    
-    html = response.choices[0].message.content
-    html = re.sub(r"^```html\n?", "", html)
-    html = re.sub(r"^```\n?", "", html)
-    html = re.sub(r"```$", "", html)
-    return html.strip()
+
+    return validate_generated_html(result)
 
 
-def main(url):
+def main(
+    url,
+    *,
+    generation_provider="local",
+    generation_model=None,
+    skip_deploy=False,
+    skip_email=False,
+    skip_image_gen=False,
+):
+    generation_config = resolve_generation_config(
+        generation_provider,
+        generation_model,
+    )
+    preflight_generation_provider(generation_config)
     # Determine a slug to use for the output folder and Vercel project
     domain = urllib.parse.urlparse(url).netloc.replace("www.", "")
     if not domain:
@@ -387,7 +416,7 @@ def main(url):
     # hero images. Force image generation if no good hero image is in the JSON.
     img_prompt = site_json.get("image_generation_prompt")
     hero_images = [img for img in site_json.get("images", []) if img.get("context") in ["hero", "background"]]
-    if "--skip-image-gen" in sys.argv:
+    if skip_image_gen:
         print("[*] Skipping hero image generation due to --skip-image-gen flag.")
     elif img_prompt or not hero_images:
         if not img_prompt:
@@ -422,7 +451,11 @@ def main(url):
     }
     theme = theme_map.get(site_type, "minimal")
     print(f"[*] Auto-selected theme '{theme}' for site type '{site_type}'")
-    redesign_html = generate_redesign(site_json, theme=theme)
+    redesign_html = generate_redesign(
+        site_json,
+        theme=theme,
+        generation_config=generation_config,
+    )
     pages_to_deploy = {"index.html": redesign_html}
     
     # 3.5 Generate Contact Page if available. Fail-soft: if the fetch 404s
@@ -436,25 +469,35 @@ def main(url):
         contact_html = None
         if contact_fetchable and contact_url:
             try:
-                contact_html = generate_interior_page(site_json, "contact", page_url=contact_url, theme=theme)
+                contact_html = generate_interior_page(
+                    site_json,
+                    "contact",
+                    page_url=contact_url,
+                    theme=theme,
+                    generation_config=generation_config,
+                )
             except Exception as e:
                 print(f"[!] Contact page fetch/generation failed for {contact_url}: {e}")
                 print("[*] Falling back to homepage-section content for contact page.")
         if contact_html is None:
-            contact_html = generate_interior_page(site_json, "contact", theme=theme)
+            contact_html = generate_interior_page(
+                site_json,
+                "contact",
+                theme=theme,
+                generation_config=generation_config,
+            )
         pages_to_deploy["contact.html"] = contact_html
 
     # Save files locally first so they can be reviewed
     for filename, html_content in pages_to_deploy.items():
-        with open(os.path.join(output_dir, filename), "w") as f:
-            f.write(html_content)
+        atomic_write_text(os.path.join(output_dir, filename), html_content)
             
     print(f"\n[+] Redesign generation complete!")
     print(f"[+] Files saved locally to: {output_dir}/")
     print(f"[+] Review them before deploying.")
     
     # Check flags for skipping
-    if "--skip-deploy" in sys.argv:
+    if skip_deploy:
         print("\n[*] Skipping Vercel deployment due to --skip-deploy flag.")
         return
         
@@ -469,7 +512,7 @@ def main(url):
     # 5. Send Email
     if vercel_url:
         if contact_email:
-            if "--skip-email" in sys.argv:
+            if skip_email:
                 print(f"\n[*] Skipping pitch email to {contact_email} due to --skip-email flag.")
                 print(f"[*] You can manually email the business at this link: {vercel_url}")
             else:
@@ -483,9 +526,30 @@ def main(url):
             print("\n[!] No email address found on the website. Skipping email step.")
             print(f"[*] You can manually email the business at this link: {vercel_url}")
 
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Analyze an existing site and generate a redesigned preview."
+    )
+    parser.add_argument("url")
+    parser.add_argument(
+        "--generation-provider",
+        choices=("local", "openrouter"),
+        default="local",
+    )
+    parser.add_argument("--generation-model")
+    parser.add_argument("--skip-deploy", action="store_true")
+    parser.add_argument("--skip-email", action="store_true")
+    parser.add_argument("--skip-image-gen", action="store_true")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2 or sys.argv[1].startswith("--"):
-        print("Usage: python pipeline.py <url> [--skip-deploy] [--skip-email] [--skip-image-gen]")
-    else:
-        main(sys.argv[1])
+    args = parse_args()
+    main(
+        args.url,
+        generation_provider=args.generation_provider,
+        generation_model=args.generation_model,
+        skip_deploy=args.skip_deploy,
+        skip_email=args.skip_email,
+        skip_image_gen=args.skip_image_gen,
+    )
