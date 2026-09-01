@@ -227,9 +227,9 @@ claim remains admissible.
   — passed.
 - `bash -n scripts/start_llama_server.sh` — passed.
 - `scripts/start_llama_server.sh --help` — passed without loading a model.
-- `/tmp/website-redesign-connect-venv/bin/python build.py --help` — passed;
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python build.py --help` — passed;
   provider/model and existing skip flags shown.
-- `/tmp/website-redesign-connect-venv/bin/python pipeline.py --help` — passed;
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python pipeline.py --help` — passed;
   provider/model and existing skip flags shown.
 - `git diff --check` — passed.
 - Exact-head standalone-runtime fixture:
@@ -240,15 +240,15 @@ claim remains admissible.
   --skip-deploy` completed successfully against `llama.cpp` v0.3.0 at commit
   `c1d0e7a004015f23bc0233470b747b596f29b264`, serving the exact
   `qwen/qwen3.8-27b` alias. The command produced no deployment, email, or image
-  side effect.
+  side effect. `CUDA_VISIBLE_DEVICES=0` and `LLAMA_CPP_GPU_LAYERS=all` confined
+  inference to the RTX 3090; the live server process held 19,898 MiB there.
 - The admitted artifact was
-  `outputs/builds/drees-plumbing-inc/index.html` (71,594 bytes, SHA-256
-  `df6d7cf5c4fccb3c0146f94db68aeac84a5189d4a973e1d864941382f9f7ccfa`).
+  `outputs/builds/drees-plumbing-inc/index.html` (70,764 bytes, SHA-256
+  `94dae79380445b9696cede8e94a4c78c9c7afd0669c532f690ca24405353660c`).
   The shared HTML validator accepted it; the required unresolved-placeholder
   search returned `0`, and the required fabricated-claim search returned `0`.
-- The standalone runtime was stopped after validation. Both fixture ports were
-  free, the GPU compute-process query was empty, and the model VRAM was
-  released.
+- The standalone runtime was stopped after validation. The GPU compute-process
+  query was empty and RTX 3090 usage returned to 15 MiB.
 - Mocked local transport tests prove the configured request reaches the
   `llama.cpp` chat route once, disables thinking, preserves finish status, and
   fails closed on malformed, reasoning, tool, and multi-choice responses.
