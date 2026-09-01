@@ -1367,6 +1367,24 @@ class BodyAssemblyTests(unittest.TestCase):
             formspree_todo,
         )
 
+    def test_required_exposure_uses_complete_token_sequences(self):
+        with self.assertRaisesRegex(GeneratedBodyError, "business_name"):
+            validate_generated_body(
+                body_result("<body><main>About our work</main></body>"),
+                required_exposed_values=(("business_name", "A&B"),),
+            )
+
+        marked_up_identity = (
+            "<body><main><span>A</span>&amp;<span>B</span></main></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(marked_up_identity),
+                required_exposed_values=(("business_name", "A&B"),),
+            ),
+            marked_up_identity,
+        )
+
     def test_prompt_defined_square_placeholders_fail_without_rejecting_other_brackets(self):
         prompt = "Use [PROSPECT.phone], [SITE_SLUG], and [N]-MILE RADIUS. - [ ] check"
         placeholders = extract_square_placeholder_tokens(
@@ -2462,6 +2480,49 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(unsupported)),
         )
         self.assertIn("Upfront <strong>Flat-Rate</strong> pricing", html)
+
+    def test_build_generator_gates_field_owned_claim_families(self):
+        field_claims = (
+            ("licensed_and_insured", True, "Licensed & Insured"),
+            ("family_owned", True, "Family Owned & Operated"),
+            ("locally_owned", True, "Locally Owned, Not a Franchise"),
+            ("has_24_7", True, "24/7 Service"),
+            ("same_day_service", True, "Same-Day Service"),
+            ("epa_certified", True, "EPA-Certified Technicians"),
+            ("master_electrician_license", "IL-123", "Master Electrician"),
+            ("ibew_local_number", "176", "IBEW Local 176 Member"),
+        )
+        base_prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "service_promises": [],
+        }
+        for field, supported_value, claim in field_claims:
+            claim_body = COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero">{claim}</section>',
+            )
+            with self.subTest(field=field, state="unsupported"), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "unsupported prospect claims",
+            ):
+                build.generate_build_html(
+                    dict(base_prospect),
+                    config(),
+                    FakeLocalClient(local_chat_payload(claim_body)),
+                )
+
+            supported_prospect = dict(base_prospect)
+            supported_prospect[field] = supported_value
+            html = build.generate_build_html(
+                supported_prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(claim_body)),
+            )
+            self.assertIn(claim, html)
 
     def test_redesign_generator_assembles_body_with_site_brand_contract(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_PAGE_BODY))

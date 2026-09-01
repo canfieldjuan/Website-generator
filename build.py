@@ -93,6 +93,33 @@ GATED_SERVICE_CLAIMS = {
     "Owner Answers": ("owner answers",),
 }
 
+FIELD_GATED_CLAIMS = {
+    "licensed_and_insured": ("Licensed", "Insured"),
+    "family_owned": ("Family Owned",),
+    "locally_owned": ("Locally Owned", "Not a Franchise"),
+    "has_24_7": ("24/7", "24 Hour Service", "Around the Clock"),
+    "same_day_service": ("Same Day Service",),
+    "epa_certified": ("EPA Certified", "EPA Section 608"),
+    "master_electrician_license": ("Master Electrician", "Master Licensed"),
+    "ibew_local_number": ("IBEW",),
+}
+
+FIELD_GATED_PROMISE_EVIDENCE = {
+    "has_24_7": ("24/7", "24 hour", "around the clock"),
+    "same_day_service": ("same-day", "same day"),
+}
+
+BOOLEAN_CLAIM_FIELDS = frozenset(
+    {
+        "licensed_and_insured",
+        "family_owned",
+        "locally_owned",
+        "has_24_7",
+        "same_day_service",
+        "epa_certified",
+    }
+)
+
 BUILD_REQUIRED_CLASS_COUNTS = (
     ("site-nav", 1),
     ("dual-cta-hero", 1),
@@ -309,7 +336,7 @@ def unverified_service_claim_phrases(prospect):
         if isinstance(promises, list)
         else ()
     )
-    return tuple(
+    unsupported_service_claims = tuple(
         claim
         for claim, evidence_phrases in GATED_SERVICE_CLAIMS.items()
         if not any(
@@ -318,6 +345,50 @@ def unverified_service_claim_phrases(prospect):
             for evidence in evidence_phrases
         )
     )
+    unsupported_field_claims = tuple(
+        claim
+        for field, claims in FIELD_GATED_CLAIMS.items()
+        if not _field_claim_is_verified(prospect, field, normalized_promises)
+        for claim in claims
+    )
+    return tuple(dict.fromkeys((*unsupported_service_claims, *unsupported_field_claims)))
+
+
+def _field_claim_is_verified(prospect, field, normalized_promises):
+    if field in BOOLEAN_CLAIM_FIELDS and prospect.get(field) is True:
+        return True
+    evidence_phrases = FIELD_GATED_PROMISE_EVIDENCE.get(field, ())
+    if any(
+        evidence in promise
+        for promise in normalized_promises
+        for evidence in evidence_phrases
+    ):
+        return True
+    value = prospect.get(field)
+    if field == "master_electrician_license":
+        if isinstance(value, str) and value.strip():
+            return True
+        equivalent_credentials = (
+            prospect.get("licenses"),
+            prospect.get("certifications"),
+        )
+        return any(
+            phrase in credential.casefold()
+            for collection in equivalent_credentials
+            if isinstance(collection, list)
+            for credential in collection
+            if isinstance(credential, str)
+            for phrase in ("master electrician", "master-licensed", "master licensed")
+        )
+    if field == "ibew_local_number":
+        return (
+            isinstance(value, str)
+            and bool(value.strip())
+            or isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+        )
+    return False
 
 
 # Catalog of theme names recognized by 09-themes.md. The harness validates

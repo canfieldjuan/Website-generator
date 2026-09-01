@@ -286,6 +286,15 @@ must terminate a candidate phone value. Caller-declared deployment metadata
 markers must also be rejected inside model-authored comments; the explicit
 Formspree setup TODO remains allowed, and trusted head comments remain
 code-owned.
+Conditional business claims must be denied from a complete field-owned
+catalog, not from an issue-specific phrase list. Unsupported trust,
+availability, scheduling, and trade-credential fields must contribute their
+entire canonical claim family; `service_promises` remains the only authority
+for its separate pricing, estimate, billing, and owner-availability families.
+Required identity substitutions may match punctuation or markup variants only
+as a complete normalized alphanumeric token sequence. A short compact name must
+never pass because it appears inside an unrelated longer word elsewhere in the
+page.
 The shared parser must also reject unclosed, unexpectedly closed, or misnested
 non-void descendants before BeautifulSoup repair, while accepting standard void
 elements and valid self-closing SVG content. Finally, each generator must pass
@@ -386,6 +395,10 @@ behavior, or any image, email, deployment, and Connect job contract.
     and terminates at semantic block or line boundaries.
 39. Reject caller-declared deployment metadata markers inside model-authored
     comments while preserving the explicit Formspree setup TODO.
+40. Derive unsupported conditional claim denials from every field-owned trust,
+    availability, scheduling, and trade-credential claim family.
+41. Replace page-wide compact substring identity admission with complete
+    normalized token-sequence matching.
 
 ### Files touched
 
@@ -545,8 +558,9 @@ claim remains admissible.
   It contains one services grid, six service cards, six service names, six
   service descriptions, and every other mandatory class at its exact count.
 - The saved GPU artifact was re-admitted through the final executable-attribute,
-  deployment-comment, DOM-adjacent phone, exposed-phone, and allowed-class
-  gates in this PR; the current build caller returned
+  deployment-comment, conditional-claim, complete-token identity,
+  DOM-adjacent phone, exposed-phone, and allowed-class gates in this PR; the
+  current build caller returned
   `saved-gpu-artifact-final-admission: PASS` without another model request. The
   fixture contains no `img` element, so the fixed post-admission image handler
   is proven separately by the focused trusted-assembly regression rather than

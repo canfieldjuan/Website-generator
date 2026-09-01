@@ -755,6 +755,39 @@ def _compact_claim_match_text(value: str) -> str:
     return "".join(character for character in normalized if character.isalnum())
 
 
+def _alphanumeric_tokens(value: str) -> tuple[str, ...]:
+    tokens: list[str] = []
+    current: list[str] = []
+    for character in unicodedata.normalize("NFKC", value).casefold():
+        if character.isalnum():
+            current.append(character)
+        elif current:
+            tokens.append("".join(current))
+            current = []
+    if current:
+        tokens.append("".join(current))
+    return tuple(tokens)
+
+
+def _contains_complete_token_sequence(surface: str, expected: str) -> bool:
+    expected_compact = _compact_claim_match_text(expected)
+    if not expected_compact:
+        return False
+    tokens = _alphanumeric_tokens(surface)
+    for start in range(len(tokens)):
+        candidate = ""
+        for token in tokens[start:]:
+            candidate += token
+            if candidate == expected_compact:
+                return True
+            if (
+                len(candidate) >= len(expected_compact)
+                or not expected_compact.startswith(candidate)
+            ):
+                break
+    return False
+
+
 def _phone_scan_components(value: str) -> tuple[str, frozenset[int]]:
     characters: list[str] = []
     bidi_boundaries: set[int] = set()
@@ -1183,28 +1216,11 @@ def validate_generated_body(
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
-    normalized_exposure_surfaces = tuple(
-        _normalize_claim_match_text(surface) for surface in exposure_surfaces
-    )
-    compact_exposure_surfaces = tuple(
-        _compact_claim_match_text(surface) for surface in exposure_surfaces
-    )
     missing_exposed_values = []
     for label, value in required_exposed_values:
-        normalized_value = _normalize_claim_match_text(value)
-        compact_value = _compact_claim_match_text(value)
-        if not normalized_value or not (
-            any(
-                normalized_value in surface
-                for surface in normalized_exposure_surfaces
-            )
-            or (
-                compact_value
-                and any(
-                    compact_value in surface
-                    for surface in compact_exposure_surfaces
-                )
-            )
+        if not any(
+            _contains_complete_token_sequence(surface, value)
+            for surface in exposure_surfaces
         ):
             missing_exposed_values.append(label)
     if missing_exposed_values:
