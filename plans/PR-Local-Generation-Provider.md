@@ -220,9 +220,11 @@ claim remains admissible.
 ## Verification
 
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 79 tests passed, including the `llama.cpp` health/model/chat contract,
+  — 80 tests passed, including the `llama.cpp` health/model/chat contract,
   browser- and URL-decoded placeholder admission, startup-script boundaries, and both
-  HTML entry points' shared assembly.
+  HTML entry points' shared assembly. The suite also proves this slice cannot
+  reconfigure the pre-existing extraction or image model roles through new
+  environment variables.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
 - `bash -n scripts/start_llama_server.sh` — passed.

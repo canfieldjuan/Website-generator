@@ -18,11 +18,11 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY")
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-EXTRACTION_MODEL = os.environ.get("EXTRACTION_MODEL", "anthropic/claude-haiku-4.5")
+EXTRACTION_MODEL = "anthropic/claude-haiku-4.5"
 # Hero / background image generation. OpenRouter's image model catalog
 # shifts over time; update this constant when the provider deprecates an
 # entry. Bypass at runtime with --skip-image-gen.
-IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "black-forest-labs/flux.2-max")
+IMAGE_MODEL = "black-forest-labs/flux.2-max"
 
 
 class MissingServiceConfiguration(RuntimeError):

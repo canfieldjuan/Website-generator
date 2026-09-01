@@ -488,6 +488,25 @@ class ProviderBoundaryTests(unittest.TestCase):
         http_get.assert_not_called()
         openai.assert_not_called()
 
+    def test_local_generation_slice_does_not_reconfigure_other_model_roles(self):
+        with patch.dict(
+            os.environ,
+            {
+                "EXTRACTION_MODEL": "unrelated/extraction-override",
+                "IMAGE_MODEL": "unrelated/image-override",
+            },
+        ):
+            importlib.reload(lib.clients)
+            self.assertEqual(
+                lib.clients.EXTRACTION_MODEL,
+                "anthropic/claude-haiku-4.5",
+            )
+            self.assertEqual(
+                lib.clients.IMAGE_MODEL,
+                "black-forest-labs/flux.2-max",
+            )
+        importlib.reload(lib.clients)
+
     def test_local_preflight_accepts_exact_loaded_model(self):
         selected = config()
         client = FakeLocalClient(
