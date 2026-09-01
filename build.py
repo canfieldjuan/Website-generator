@@ -283,14 +283,16 @@ def review_contract_instruction(contract):
     if contract.mode == "omit":
         return (
             "MANDATORY REVIEW MODE: omit. Render no customer-review section, "
-            "review component, score, count, author, or review quotation."
+            "review component, score, count, author, review quotation, or "
+            "testimonial-like prose in ordinary elements."
         )
     if contract.mode == "aggregate":
         return (
             "MANDATORY REVIEW MODE: aggregate. Render the aggregate component "
             f"with exact score {contract.aggregate_score!r}, exact count "
             f"{contract.aggregate_count!r}, and exact href "
-            f"{json.dumps(contract.reviews_url)}."
+            f"{json.dumps(contract.reviews_url)}. Render no review or testimonial "
+            "prose outside that component."
         )
     summary = (
         " Include the sourced aggregate summary with exact score "
@@ -302,7 +304,7 @@ def review_contract_instruction(contract):
     return (
         "MANDATORY REVIEW MODE: cards. Render exactly three complete review "
         "objects from prospect.reviews without combining or rewriting fields."
-        f"{summary}"
+        f"{summary} Render no review or testimonial prose outside those components."
     )
 
 
@@ -1060,6 +1062,17 @@ def generate_build_html(prospect, generation_config=None, client=None):
             "`.ft-phone`, and `.coverage-band`; render `.cta-planned` as the "
             "sole hero CTA anchored to `#contact`."
         )
+    if prospect.get("owner_email"):
+        email_instruction = (
+            "VERIFIED BUSINESS EMAIL: Email display is optional. If rendered "
+            "anywhere, use only the exact prospect.owner_email value and the same "
+            "address in every mailto target."
+        )
+    else:
+        email_instruction = (
+            "NO VERIFIED BUSINESS EMAIL: Emit no business email-like value and no "
+            "mailto target. Keep the visitor email input in the contact form."
+        )
     review_contract = expected_review_contract(prospect)
     required_class_counts = required_build_class_counts(prospect)
     if logo_url:
@@ -1084,6 +1097,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
         f"{review_contract_instruction(review_contract)}\n"
         f"{phone_instruction}\n"
+        f"{email_instruction}\n"
         f"{logo_instruction}"
     )
 
@@ -1140,7 +1154,6 @@ def generate_build_html(prospect, generation_config=None, client=None):
         forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
         forbidden_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
         forbidden_class_names=interior_only_classes,
-        forbidden_testimonial_tags=("blockquote", "cite"),
         allowed_class_names=homepage_classes,
         required_exposed_values=tuple(
             (name, value)
@@ -1148,6 +1161,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             if isinstance(value, str) and value
         ),
         expected_phone=prospect.get("phone"),
+        expected_email=prospect.get("owner_email") or None,
         expected_form_action=expected_build_form_action(prospect),
         expected_reviews=review_contract,
         required_class_counts=required_class_counts,

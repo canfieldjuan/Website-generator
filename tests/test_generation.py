@@ -2485,6 +2485,29 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(testimonial)),
             )
 
+        ordinary_testimonial = COMPLETE_BUILD_BODY.replace(
+            '<form class="contact-form-wrap"',
+            '<p>“They were fantastic.” — Jane D.</p>'
+            '<form class="contact-form-wrap"',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unstructured testimonial"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(ordinary_testimonial)),
+            )
+
+        attributed_testimonial = ordinary_testimonial.replace(
+            "“They were fantastic.”",
+            "They were fantastic.",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unstructured testimonial"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(attributed_testimonial)),
+            )
+
         unscored_widget = COMPLETE_BUILD_BODY.replace(
             "</nav>",
             '<span class="form-trust-stars">Stars</span></nav>',
@@ -2593,7 +2616,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 "rating": 5,
                 "date": "a month ago",
                 "platform": "Google",
-                "text": "Prompt and careful work.",
+                "text": "“Prompt and careful work.”",
             },
             {
                 "author": "Ben B.",
@@ -2644,9 +2667,9 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             )
 
         accessible_override = admitted_body.replace(
-            '<p class="review-text">Prompt and careful work.</p>',
+            '<p class="review-text">“Prompt and careful work.”</p>',
             '<p class="review-text" role="img" '
-            'aria-label="Best plumber in town">Prompt and careful work.</p>',
+            'aria-label="Best plumber in town">“Prompt and careful work.”</p>',
         )
         with self.assertRaisesRegex(GeneratedBodyError, "review component attribute"):
             build.generate_build_html(
@@ -2824,7 +2847,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     '<form action="https://wa.me/12175550199">'
                     "<button>Message us</button></form></nav>",
                 ),
-                "unexpected actionable phone",
+                "exactly one generated form",
             ),
             (
                 COMPLETE_BUILD_BODY.replace(
@@ -3011,6 +3034,22 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(wrong_endpoint_body)),
             )
 
+        alternate_form_body = COMPLETE_BUILD_BODY.replace(
+            '<form class="contact-form-wrap" action="#">',
+            '<form class="contact-form-wrap" '
+            'action="https://formspree.io/f/verified">',
+        ).replace(
+            '<form class="contact-form-wrap"',
+            '<form action="https://formspree.io/f/other"></form>'
+            '<form class="contact-form-wrap"',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "exactly one generated form"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(alternate_form_body)),
+            )
+
         verified_body = COMPLETE_BUILD_BODY.replace(
             '<form class="contact-form-wrap" action="#">',
             '<form class="contact-form-wrap" '
@@ -3065,6 +3104,49 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY)),
         )
         self.assertIn('action="#"', html)
+
+    def test_build_generator_binds_every_business_email_to_source(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+        invented_email = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            '<a href="mailto:invented@example.com">invented@example.com</a></nav>',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "no verified business email"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(invented_email)),
+            )
+
+        prospect["owner_email"] = "owner@realbusiness.test"
+        verified_email = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            '<a href="mailto:owner@realbusiness.test">owner@realbusiness.test</a>'
+            "</nav>",
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(verified_email)),
+        )
+        self.assertIn("mailto:owner@realbusiness.test", html)
+
+        wrong_email = verified_email.replace(
+            "owner@realbusiness.test",
+            "invented@example.com",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unexpected business email"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_email)),
+            )
 
     def test_redesign_generator_assembles_body_with_site_brand_contract(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_PAGE_BODY))
