@@ -40,6 +40,41 @@ contract. A controlled real-model fixture remains required before the Connect
 slice can merge, and the runtime must be unloaded after its evidence is
 captured.
 
+### Exact-head boundary revision
+
+Exact-head review proved that the shared local URL constructor validates scheme,
+path, query, and fragment but not the host, so a remote endpoint can receive the
+complete prompt while still being labeled `local`. It also proved that body
+admission excludes wrappers, style, and script but still admits HTML head
+metadata, while one wired prompt contradicts code-owned fonts by asking the model
+to paste a font import.
+
+The correct fix must make the URL constructor used by both preflight and
+generation admit only `localhost` or literal loopback addresses and reject
+credentials, remote/wildcard/lookalike hosts, and malformed ports before any
+request. It must reject `base`, `link`, `meta`, and HTML `title` from the body,
+preserve valid SVG accessibility titles, and align every wired prompt with that
+boundary. It must not alter OpenRouter, page content/layout, CSS tokens, or the
+Connect job contract.
+
+### Exact-model fixture revision
+
+The real local Qwen fixture exposed a second ownership error: the model receives
+the complete multi-industry body scaffold and deployment-comment templates even
+though most of their placeholders do not apply to the selected prospect. Qwen
+can therefore copy unrelated calendar/radio or optional photo-credit tokens into
+an otherwise complete local-business body. Rewording individual prompt warnings
+does not remove that source of invalid output.
+
+The correct fix must keep the base template authoritative while sending the
+model only its code-derived class vocabulary plus the existing page-specific
+section patterns. Deployment metadata and optional image credit must be derived,
+comment-sanitized, and inserted by trusted code. Body admission must continue to
+reject unresolved placeholders, unsupported gated prospect claims, and provider
+chatter. This revision must not
+change visible page copy/layout rules, prospect facts, provider selection,
+OpenRouter behavior, deployment/email/image effects, or the Connect job contract.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -58,6 +93,11 @@ captured.
 7. Add focused unit tests, CI enrollment, and operator documentation.
 8. Replace the LM Studio transport with direct loopback `llama.cpp` health,
    model-discovery, and chat-completion contracts plus a guarded startup script.
+9. Enforce locality at both local request entry points and exclude head metadata
+   from generated bodies while preserving SVG titles.
+10. Remove cross-industry scaffold placeholders and deployment metadata from
+    model context; expose the template class catalog and insert sanitized,
+    code-owned head comments instead.
 
 ### Files touched
 
@@ -65,7 +105,7 @@ captured.
 - `build.py`, `pipeline.py`
 - `tests/test_generation.py`, `tests/__init__.py`
 - `references/02-redesign-gen-prompt.md`, `references/04-interior-page-prompt.md`,
-  `references/06-build-prompt.md`
+  `references/06-build-prompt.md`, `references/07-industry-defaults.md`
 - `.github/workflows/generator-tests.yml`
 - `scripts/start_llama_server.sh`
 - `README.md`
@@ -74,7 +114,8 @@ captured.
 ## Mechanism
 
 The CLI resolves a `GenerationConfig` from explicit arguments and environment
-configuration. Local is the default and preflights standalone `llama.cpp`
+configuration. Local is the default, accepts only localhost or literal loopback
+endpoints, and preflights standalone `llama.cpp`
 `/health` and `/v1/models` responses; OpenRouter requires the operator to select
 it and provide a model. Local generation uses `llama.cpp`'s OpenAI-compatible
 `/v1/chat/completions` contract, sends plain system/user messages, disables Qwen
@@ -105,9 +146,9 @@ contract, not the deadline: the model is asked to reproduce the large immutable
 template head and CSS on every build even though only the body varies.
 
 The corrected contract keeps `references/03-base-template.html` authoritative.
-Trusted code extracts its head and body scaffold, applies the already selected
-theme and palette from the existing catalogs/JSON, and inserts a generated body
-fragment only after it passes a body-root/content boundary. The assembled page
+Trusted code extracts its head and body class vocabulary, applies the already
+selected theme and palette from the existing catalogs/JSON, and inserts a
+generated body fragment only after it passes a body-root/content boundary. The assembled page
 then passes the existing complete-document and byte gates. This preserves the
 model's content, conditional-section, and layout decisions while bounding model
 output to the actual variable page surface.
@@ -119,27 +160,35 @@ claim/fabrication rules, or explicit OpenRouter selection.
 
 Each response records provider, model, finish reason, content, and usage. Body
 admission accepts only a normal `stop` response containing exactly one body root
-and no head, style, script, doctype, or html wrapper. Trusted code combines that
+and no head, head metadata, style, script, doctype, or html wrapper. Trusted code combines that
 fragment with the immutable template head. Full-document admission then requires
 one ordered doctype, `html`, `head`, and `body` structure within the byte limit.
 Writes use a same-directory temporary file plus `os.replace`. Non-whitespace text
 and HTML elements outside `head` or `body` are rejected rather than silently
-admitted. Required deployment-metadata placement remains code-owned: the model
-supplies the existing comment as the body's first child, admission verifies that
-boundary, and the assembler moves it into the trusted head exactly once.
+admitted. Required deployment metadata is fully code-owned: callers derive it
+from normalized prospect/site data, sanitize it as one valid HTML comment, and
+the assembler inserts it into the trusted head exactly once. The model neither
+sees nor emits that metadata.
 
 Each caller derives its square-bracket placeholder vocabulary from every trusted
-static prompt source it actually sends, including catalogs/defaults and the base
-body scaffold, then supplies that set to body admission. Dynamic prospect/site
+static prompt source it actually sends, including catalogs/defaults, then
+supplies that set to body admission. Dynamic prospect/site
 data is deliberately excluded so real bracketed customer content remains valid;
 static prompt edits cannot add new placeholder syntax that silently leaks into
-output. Admission checks the raw body plus browser-decoded, element-spanning
+output. The immutable base template contributes only its extracted class-name
+catalog to model context, so unrelated page and industry placeholders cannot be
+copied. Admission checks the raw body plus browser-decoded, element-spanning
 visible text and decoded attribute values, including percent-decoded attribute
 surfaces, so character references or URL encoding cannot hide either
-square-bracket or curly-brace placeholders. Homepage callers also provide
-their own required
-deployment-comment marker set; an incidental leading comment cannot impersonate
-the build or redesign metadata contract.
+square-bracket or curly-brace placeholders. Homepage callers instead provide
+their own code-owned deployment-comment builders; an incidental model comment
+cannot impersonate the build or redesign metadata contract.
+
+The from-scratch caller also derives a deny set for prospect-specific pricing,
+estimate, and owner-availability claims from `service_promises`. Body admission
+checks browser-visible, element-spanning text so known unsupported claims fail
+before any write. When the JSON explicitly carries the matching promise, the
+claim remains admissible.
 
 ## Intentional
 
@@ -168,7 +217,7 @@ the build or redesign metadata contract.
 ## Verification
 
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 72 tests passed, including the `llama.cpp` health/model/chat contract,
+  — 79 tests passed, including the `llama.cpp` health/model/chat contract,
   browser- and URL-decoded placeholder admission, startup-script boundaries, and both
   HTML entry points' shared assembly.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
@@ -190,8 +239,8 @@ the build or redesign metadata contract.
   `qwen/qwen3.8-27b` alias. The command produced no deployment, email, or image
   side effect.
 - The admitted artifact was
-  `outputs/builds/drees-plumbing-inc/index.html` (74,544 bytes, SHA-256
-  `1ae5aef15a28d3ddc19d0a86cf92ec67cf49d4b49a101563858783c196b28331`).
+  `outputs/builds/drees-plumbing-inc/index.html` (71,594 bytes, SHA-256
+  `df6d7cf5c4fccb3c0146f94db68aeac84a5189d4a973e1d864941382f9f7ccfa`).
   The shared HTML validator accepted it; the required unresolved-placeholder
   search returned `0`, and the required fabricated-claim search returned `0`.
 - The standalone runtime was stopped after validation. Both fixture ports were

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import tempfile
@@ -146,6 +147,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.has_content_outside_body = False
         self.visible_text_parts: list[str] = []
         self.decoded_attribute_values: list[str] = []
+        self.svg_depth = 0
 
     def handle_decl(self, decl: str) -> None:
         self.has_content_outside_body = True
@@ -159,8 +161,12 @@ class _GeneratedBodyParser(HTMLParser):
             self.body_events.append("start")
             self.body_depth += 1
             return
-        if tag_name in {"html", "head", "style", "script"}:
+        if tag_name in {"html", "head", "style", "script", "base", "link", "meta"}:
             self.forbidden_tags.append(tag_name)
+        elif tag_name == "title" and self.svg_depth == 0:
+            self.forbidden_tags.append(tag_name)
+        if tag_name == "svg":
+            self.svg_depth += 1
         if self.body_depth == 0:
             self.has_content_outside_body = True
 
@@ -173,8 +179,12 @@ class _GeneratedBodyParser(HTMLParser):
             else:
                 self.has_content_outside_body = True
             return
-        if tag_name in {"html", "head", "style", "script"}:
+        if tag_name in {"html", "head", "style", "script", "base", "link", "meta"}:
             self.forbidden_tags.append(tag_name)
+        elif tag_name == "title" and self.svg_depth == 0:
+            self.forbidden_tags.append(tag_name)
+        if tag_name == "svg" and self.svg_depth:
+            self.svg_depth -= 1
         if self.body_depth == 0:
             self.has_content_outside_body = True
 
@@ -186,6 +196,8 @@ class _GeneratedBodyParser(HTMLParser):
             self.has_content_outside_body = True
             return
         self.handle_starttag(tag, attrs)
+        if tag.lower() == "svg":
+            self.handle_endtag(tag)
 
     def handle_data(self, data: str) -> None:
         if self.body_depth:
@@ -536,11 +548,28 @@ def require_complete_text(result: GenerationResult) -> str:
     return content
 
 
+def make_html_comment(content: str) -> str:
+    """Wrap trusted metadata as one syntactically safe HTML comment."""
+    if not isinstance(content, str):
+        raise GeneratedHtmlError("Trusted comment content must be text.")
+    normalized = content.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        raise GeneratedHtmlError("Trusted comment content must not be empty.")
+    # HTML comments cannot contain a double hyphen. Dynamic prospect/site
+    # values are allowed in these code-owned notes, so neutralize the comment
+    # delimiter rather than letting data terminate the comment early.
+    normalized = normalized.replace("--", "- -")
+    if normalized.endswith("-"):
+        normalized += " "
+    return f"<!--\n{normalized}\n-->"
+
+
 def validate_generated_body(
     result: GenerationResult,
     *,
     max_bytes: int = MAX_GENERATED_BODY_BYTES,
     forbidden_square_placeholders: Iterable[str] = (),
+    forbidden_visible_phrases: Iterable[str] = (),
 ) -> str:
     body = _strip_outer_code_fence(require_complete_text(result))
     if "```" in body:
@@ -569,22 +598,48 @@ def validate_generated_body(
     if parser.forbidden_tags:
         names = ", ".join(sorted(set(parser.forbidden_tags)))
         raise GeneratedBodyError(
-            f"Generated body contains forbidden document or executable tags: {names}."
+            "Generated body contains forbidden document, metadata, or "
+            f"executable tags: {names}."
         )
     if parser.has_content_outside_body:
         raise GeneratedBodyError(
             "Generated body contains content outside its body root."
         )
 
+    visible_text = "".join(parser.visible_text_parts).casefold()
+    leaked_phrases = sorted(
+        {
+            phrase
+            for phrase in forbidden_visible_phrases
+            if isinstance(phrase, str)
+            and phrase
+            and phrase.casefold() in visible_text
+        },
+        key=str.casefold,
+    )
+    if leaked_phrases:
+        leaked = ", ".join(leaked_phrases[:3])
+        raise GeneratedBodyError(
+            f"Generated body contains unsupported prospect claims: {leaked}."
+        )
     placeholder_surfaces = (
         body,
         "".join(parser.visible_text_parts),
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
-    if any(re.search(r"{{[^{}]+}}", surface) for surface in placeholder_surfaces):
+    leaked_curly_placeholders = sorted(
+        {
+            match.group(0)
+            for surface in placeholder_surfaces
+            for match in re.finditer(r"{{[^{}]+}}", surface)
+        },
+        key=str.casefold,
+    )
+    if leaked_curly_placeholders:
+        leaked = ", ".join(leaked_curly_placeholders[:3])
         raise GeneratedBodyError(
-            "Generated body contains unresolved template placeholders."
+            f"Generated body contains unresolved template placeholders: {leaked}."
         )
     folded_surfaces = tuple(surface.casefold() for surface in placeholder_surfaces)
     leaked_square_placeholders = sorted(
@@ -617,6 +672,31 @@ def extract_template_body_scaffold(template_html: str) -> str:
     if not match:
         raise GeneratedHtmlError("Base template has no complete body scaffold.")
     return match.group(0).strip()
+
+
+def extract_template_class_names(template_html: str) -> tuple[str, ...]:
+    """Return the immutable template's HTML/CSS class vocabulary."""
+    class_names = {
+        class_name
+        for match in re.finditer(
+            r"\bclass\s*=\s*(['\"])(.*?)\1",
+            template_html,
+            re.IGNORECASE | re.DOTALL,
+        )
+        for class_name in match.group(2).split()
+        if class_name
+    }
+    for style_block in re.findall(
+        r"<style(?:\s[^>]*)?>(.*?)</style\s*>",
+        template_html,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        class_names.update(
+            re.findall(r"(?<![\w-])\.([A-Za-z_][A-Za-z0-9_-]*)", style_block)
+        )
+    if not class_names:
+        raise GeneratedHtmlError("Base template body has no class vocabulary.")
+    return tuple(sorted(class_names, key=str.casefold))
 
 
 def parse_theme_definition(catalog: str, theme_name: str) -> ThemeDefinition:
@@ -680,8 +760,9 @@ def assemble_generated_html(
     colors: DocumentColors,
     title: str,
     body_theme: str,
-    required_leading_comment_markers: Iterable[str] = (),
+    trusted_head_comment: str | None = None,
     forbidden_square_placeholders: Iterable[str] = (),
+    forbidden_visible_phrases: Iterable[str] = (),
 ) -> str:
     if body_theme not in {"theme-light", "theme-dark"}:
         raise GeneratedHtmlError(
@@ -696,6 +777,7 @@ def assemble_generated_html(
     body = validate_generated_body(
         result,
         forbidden_square_placeholders=forbidden_square_placeholders,
+        forbidden_visible_phrases=forbidden_visible_phrases,
     )
     body = re.sub(
         r"^<body(?:\s[^>]*)?>",
@@ -706,33 +788,24 @@ def assemble_generated_html(
     )
 
     head_comment = ""
-    comment_markers = tuple(required_leading_comment_markers)
-    if any(not isinstance(marker, str) or not marker for marker in comment_markers):
-        raise GeneratedHtmlError(
-            "Required deployment-comment markers must be non-empty strings."
-        )
-    if comment_markers:
-        comment_match = re.match(
-            r'^(<body class="(?:theme-light|theme-dark)">)\s*(<!--.*?-->)\s*',
-            body,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if not comment_match:
-            raise GeneratedBodyError(
-                "Generated body is missing its leading deployment comment."
+    if trusted_head_comment is not None:
+        if not isinstance(trusted_head_comment, str):
+            raise GeneratedHtmlError("Trusted head comment must be text.")
+        head_comment = trusted_head_comment.strip()
+        if not re.fullmatch(r"<!--\n?.*?\n?-->", head_comment, re.DOTALL):
+            raise GeneratedHtmlError(
+                "Trusted head comment must contain exactly one HTML comment."
             )
-        head_comment = comment_match.group(2)
-        missing_markers = [
-            marker
-            for marker in comment_markers
-            if marker.casefold() not in head_comment.casefold()
-        ]
-        if missing_markers:
-            raise GeneratedBodyError(
-                "Generated body's leading comment does not match the required "
-                "deployment-comment contract."
+        comment_content = head_comment[4:-3]
+        if (
+            "<!--" in comment_content
+            or "-->" in comment_content
+            or "--" in comment_content
+            or comment_content.endswith("-")
+        ):
+            raise GeneratedHtmlError(
+                "Trusted head comment contains an unsafe nested delimiter."
             )
-        body = comment_match.group(1) + body[comment_match.end() :]
 
     head_close = re.search(r"</head\s*>", base_template, re.IGNORECASE)
     if not head_close:
@@ -914,11 +987,36 @@ def _replace_root_property(head: str, property_name: str, value: str) -> str:
 
 
 def _llama_cpp_urls(base_url: str) -> tuple[str, str, str]:
-    parsed = urlsplit(base_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    try:
+        parsed = urlsplit(base_url)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as exc:
         raise GenerationConfigurationError(
-            "Local generation base URL must be an absolute HTTP(S) URL."
+            "Local generation base URL must be a valid loopback HTTP(S) URL."
+        ) from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise GenerationConfigurationError(
+            "Local generation base URL must be a loopback HTTP(S) URL."
         )
+    normalized_hostname = hostname.rstrip(".").lower()
+    if normalized_hostname != "localhost":
+        try:
+            address = ipaddress.ip_address(normalized_hostname)
+        except ValueError as exc:
+            raise GenerationConfigurationError(
+                "Local generation base URL must use a literal loopback host."
+            ) from exc
+        if not address.is_loopback:
+            raise GenerationConfigurationError(
+                "Local generation base URL must use a literal loopback host."
+            )
     if parsed.query or parsed.fragment:
         raise GenerationConfigurationError(
             "Local generation base URL cannot contain a query or fragment."

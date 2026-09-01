@@ -38,13 +38,13 @@ send the live URL to the prospect before a 5-minute discovery call.
 You produce the variable `<body>` for clean, modern, production-grade
 single-file HTML/CSS.
 
-CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the
-provided `03-base-template.html` body scaffold as your framework. Output only
-one populated `<body>...</body>` fragment using its pre-defined HTML classes.
+CRITICAL RULE: DO NOT WRITE CUSTOM CSS. Compose one `<body>...</body>` fragment
+from the section patterns below using only the provided allowed-class catalog.
 The caller owns the doctype, `<html>`, `<head>`, CSS, font import, and `:root`
 tokens and assembles them after validating your body.
 - Do NOT invent new classes or layout structures.
 - Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype.
+- Do NOT output HTML head metadata (`<base>`, `<link>`, `<meta>`, or a page `<title>`) anywhere in the body; an accessibility `<title>` nested inside `<svg>` is allowed.
 - You are an injection engine.
 
 Content source rules:
@@ -89,9 +89,10 @@ Output rules:
 - Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
   preamble, trailing commentary, doctype, `<html>`, `<head>`, `<style>`, or
   `<script>`. The first characters must be `<body` and the last characters
-  must be `</body>`.
-- Put the required deployment comment immediately after the opening `<body>`;
-  trusted code relocates it immediately after `<head>` in the final document.
+  must be `</body>`. No HTML comment may precede the opening `<body>` tag.
+- Do not emit any unresolved template token.
+- Do not output deployment metadata; trusted code inserts it into the final
+  document head.
 - Choose body content using this color priority; trusted code applies the
   resulting values to `:root`:
     1. If `prospect.brand_colors` is provided, use those values
@@ -129,8 +130,8 @@ THEMES:
 SECTION ORDERS:
 { ...10-section-orders.md contents... }
 
-BASE BODY TEMPLATE:
-{ ...the body scaffold from 03-base-template.html... }
+ALLOWED BODY CLASSES:
+{ ...the class catalog extracted from 03-base-template.html... }
 
 PROSPECT JSON:
 { ...json... }
@@ -342,12 +343,11 @@ The per-section rules:
    `Family Owned` + `Locally Owned`), consolidate into a single
    card and pull one more from the next priority bucket.
 
-   **Anti-pattern from PR #6 review (do not repeat).** Earlier
-   builds rendered `Upfront Flat-Rate Pricing` as a benefit card
-   even though `prospect.service_promises: []`. That bullet now sits
-   in the verified-service-promise category and may not render
-   without a matching entry. The same discipline applies to every
-   business-practice claim in 07's positive-signals list.
+   **Anti-pattern from PR #6 review (do not repeat).** Earlier builds rendered
+   an unsupported pricing promise even though `prospect.service_promises: []`.
+   A service-promise card may not render without a matching entry. The same
+   discipline applies to every business-practice claim in 07's
+   positive-signals list.
 7. Customer Reviews -- branching logic based on what prospect data
    contains. Three possible renderings:
 
@@ -675,57 +675,12 @@ mile count like 20 -- that misrepresents coverage.) Markup:
 
 ---
 
-## DEPLOYMENT COMMENT BLOCK
+## DEPLOYMENT METADATA
 
-Put this comment block immediately after the opening `<body>` tag. Trusted code
-removes it from the body and inserts it immediately after the opening `<head>`
-tag in the final document.
-Use `prospect.build_date` verbatim for the Generated line -- do NOT
-guess or fabricate a date. If `prospect.build_date` is absent, omit the
-Generated line entirely rather than inventing a value.
-
-```html
-<!--
-  ============================================================
-  NEW WEBSITE BUILD -- FROM SCRATCH
-  ============================================================
-  Prospect:        [PROSPECT.business_name]
-  Trade:           [PROSPECT.trade]
-  Location:        [PROSPECT.city], [PROSPECT.state]
-  Generated:       [PROSPECT.build_date]
-
-  HOSTING:         Vercel (free, static, auto-SSL via Let's Encrypt)
-  LEAD HANDLER:    Formspree (free tier 50 submissions/mo)
-  ONGOING COST:    ~$15/yr (domain renewal only)
-
-  HERO PHOTO:      [credit_name] via Unsplash ([credit_url])
-  PHOTO ID:        [photo_id]
-  PHOTO LICENSE:   Unsplash License (free, no on-page attribution required;
-                   credited here per Unsplash API terms of service)
-
-  DEPLOY:
-  1. Confirm prospect.formspree_endpoint is set on the form action.
-  2. Run from project root: vercel --prod --yes --name [SITE_SLUG]
-  3. Custom domain: add it in Vercel dashboard, point DNS.
-  ============================================================
--->
-```
-
-**HERO PHOTO / PHOTO ID / PHOTO LICENSE lines**: include these THREE
-lines only when `prospect.photos[0]` carries `credit_name`,
-`credit_url`, and `photo_id` fields (i.e. the photo was fetched from
-Unsplash). When the hero is a Flux-generated image or a manually-
-uploaded photo without credit metadata, OMIT these three lines
-entirely. The Unsplash API terms of service require credit somewhere
-in the source (a non-visible HTML comment is sufficient and is the
-preferred placement since the prospect's brand owns the page surface,
-not the photographer).
-
-**SALES PITCH line was removed from the template** -- it was a
-canned line about Roto-Rooter saturation that violated the 08
-fabrication guards (specific national-chain claims, unverified SERP
-observations). The salesperson writes the sales pitch when they send
-the email_draft.md, not in the deployment comment.
+Trusted code derives, sanitizes, and inserts deployment metadata and optional
+Unsplash credit into the final document head. Do not output a deployment
+comment or recreate those notes in the generated body. Sales copy remains in
+the separate email draft workflow.
 
 ## STAR WIDGET RENDERING
 
@@ -767,8 +722,7 @@ NEVER invent dates, years, or "since" claims. Specifically:
 ## QUALITY CHECKLIST
 
 Before outputting, verify:
-- [ ] `<body` is first, the deployment comment is its first child, and
-      `</body>` is last
+- [ ] `<body` is first and `</body>` is last; no deployment comment is output
 - [ ] No markdown fences, no preamble text
 - [ ] No doctype, `<html>`, `<head>`, `<style>`, or `<script>` output
 - [ ] All section IDs / classes come from the base template, no inventions

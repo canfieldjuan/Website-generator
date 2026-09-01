@@ -67,12 +67,12 @@ You are given either a fetched interior page OR a section extracted from the hom
 plus the homepage design JSON. Your job is to produce the complete
 `<body>...</body>` redesign of an interior page.
 
-CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the provided
-`03-base-template.html` body scaffold as your framework. Output only one
-populated `<body>...</body>` fragment using its pre-defined HTML classes.
+CRITICAL RULE: DO NOT WRITE CUSTOM CSS. Compose one `<body>...</body>` fragment
+from the page patterns below using only the provided allowed-class catalog.
 Trusted code owns the doctype, `<html>`, `<head>`, CSS, fonts, and `:root` tokens.
 - Do NOT invent new classes or layout structures.
 - Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype.
+- Do NOT output HTML head metadata (`<base>`, `<link>`, `<meta>`, or a page `<title>`) anywhere in the body; an accessibility `<title>` nested inside `<svg>` is allowed.
 - You are an injection engine: map the content to the existing template blocks.
 - Uses only real content from the provided source.
 
@@ -89,7 +89,8 @@ In both modes:
 - Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
   preamble, trailing commentary, doctype, `<html>`, `<head>`, `<style>`, or
   `<script>`. The first characters must be `<body` and the last characters
-  must be `</body>`.
+  must be `</body>`. No HTML comment may precede the opening `<body>` tag.
+- Do not emit any unresolved template token.
 - The nav and footer must match the homepage exactly (same links, same brand treatment)
 - Only the main content area changes per page type
 - Apply the same `class="theme-light"` or `class="theme-dark"` to the `<body>` as the homepage
@@ -107,8 +108,8 @@ NOTES: [any client-specific instructions or "none"]
 HOMEPAGE DESIGN JSON:
 [PASTE FULL JSON FROM STEP 01 HERE]
 
-BASE BODY TEMPLATE:
-[PASTE THE BODY SCAFFOLD FROM 03-BASE-TEMPLATE.HTML HERE]
+ALLOWED BODY CLASSES:
+[PASTE THE CLASS CATALOG FROM 03-BASE-TEMPLATE.HTML HERE]
 
 ---
 SOURCE CONTENT:
@@ -128,7 +129,7 @@ All layouts share: sticky nav (from homepage) + trust strip (from homepage) + fo
 ### CONTACT PAGE
 
 Above the fold:
-- Headline: "Get in Touch" or "Contact {{SITE_NAME}}" -- short, not clever
+- Headline: "Get in Touch" or "Contact [SITE_NAME]" -- short, not clever
 - Subheadline: response time promise if available ("We respond within 2 hours")
   or hours of operation
 - Trust strip (same as homepage)

@@ -35,7 +35,9 @@ from lib.generation import (
     create_local_generation_client,
     extract_square_placeholder_tokens,
     extract_template_body_scaffold,
+    extract_template_class_names,
     generate_text,
+    make_html_comment,
     preflight_generation_provider,
     resolve_generation_config,
     validate_generated_body,
@@ -47,19 +49,6 @@ COMPLETE_HTML = """<!DOCTYPE html>
 <html lang="en"><head><title>Test</title></head>
 <body><main>Ready</main></body></html>"""
 COMPLETE_BODY = '<body class="theme-light"><main>Ready</main></body>'
-COMMENTED_BODY = (
-    '<body class="theme-light">'
-    '<!-- deployment metadata -->'
-    '<main>Ready</main>'
-    '</body>'
-)
-
-
-def body_with_markers(markers):
-    marker_lines = "\n".join(markers)
-    return f"<body><!--\n{marker_lines}\n--><main>Ready</main></body>"
-
-
 class FakeModels:
     def __init__(self, model_ids=None, error=None):
         self.model_ids = model_ids or []
@@ -515,6 +504,20 @@ class ProviderBoundaryTests(unittest.TestCase):
             ],
         )
 
+    def test_local_preflight_rejects_non_loopback_base_url_without_dispatch(self):
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url="https://example.com/v1",
+            api_key="test-key",
+        )
+        client = FakeLocalClient()
+
+        with self.assertRaisesRegex(GenerationConfigurationError, "loopback"):
+            preflight_generation_provider(selected, client=client)
+
+        self.assertEqual(client.calls, [])
+
     def test_local_preflight_rejects_missing_model_with_start_instruction(self):
         selected = config()
         client = FakeLocalClient(
@@ -710,6 +713,11 @@ class ProviderBoundaryTests(unittest.TestCase):
             "query": "http://127.0.0.1:8080/v1?mode=local",
             "fragment": "http://127.0.0.1:8080/v1#local",
             "wrong scheme": "ftp://127.0.0.1:8080/v1",
+            "remote hostname": "https://example.com/v1",
+            "wildcard host": "http://0.0.0.0:8080/v1",
+            "hostname lookalike": "http://localhost.example.com:8080/v1",
+            "credentials": "http://user:pass@127.0.0.1:8080/v1",
+            "invalid port": "http://127.0.0.1:70000/v1",
         }
         for label, base_url in invalid_urls.items():
             with self.subTest(label=label):
@@ -734,10 +742,20 @@ class ProviderBoundaryTests(unittest.TestCase):
 
     def test_local_request_accepts_root_or_v1_base_url(self):
         valid_urls = {
-            "root": "http://127.0.0.1:8080",
-            "versioned": "http://127.0.0.1:8080/v1/",
+            "IPv4 root": (
+                "http://127.0.0.1:8080",
+                "http://127.0.0.1:8080/v1/chat/completions",
+            ),
+            "localhost versioned": (
+                "http://localhost:8080/v1/",
+                "http://localhost:8080/v1/chat/completions",
+            ),
+            "IPv6 versioned": (
+                "http://[::1]:8080/v1",
+                "http://[::1]:8080/v1/chat/completions",
+            ),
         }
-        for label, base_url in valid_urls.items():
+        for label, (base_url, expected_endpoint) in valid_urls.items():
             with self.subTest(label=label):
                 selected = GenerationConfig(
                     provider="local",
@@ -757,7 +775,7 @@ class ProviderBoundaryTests(unittest.TestCase):
 
                 self.assertEqual(
                     client.calls[0][1],
-                    "http://127.0.0.1:8080/v1/chat/completions",
+                    expected_endpoint,
                 )
 
     def test_local_request_translates_http_failure_without_retry(self):
@@ -839,8 +857,29 @@ class BodyAssemblyTests(unittest.TestCase):
         self.assertNotIn("<head>", scaffold)
         self.assertNotIn("INTERIOR PAGE EXAMPLES", scaffold)
 
+    def test_template_class_catalog_contains_classes_without_placeholder_markup(self):
+        class_names = extract_template_class_names(self.base_template)
+
+        self.assertIn("site-nav", class_names)
+        self.assertIn("dual-cta-hero", class_names)
+        self.assertIn("contact-grid", class_names)
+        self.assertIn("benefit-text", class_names)
+        self.assertIn("coverage-band", class_names)
+        self.assertIn("reviews-card-grid", class_names)
+        self.assertNotIn("{{SITE_NAME}}", class_names)
+
     def test_body_admission_accepts_one_plain_body(self):
         self.assertEqual(validate_generated_body(body_result()), COMPLETE_BODY)
+
+    def test_body_admission_rejects_gated_claim_across_elements(self):
+        body = "<body><p>Upfront <strong>Flat-Rate</strong> pricing.</p></body>"
+        with self.assertRaisesRegex(GeneratedBodyError, "Upfront Flat-Rate"):
+            validate_generated_body(
+                body_result(body),
+                forbidden_visible_phrases=("Upfront Flat-Rate",),
+            )
+
+        self.assertEqual(validate_generated_body(body_result(body)), body)
 
     def test_body_admission_rejects_document_wrapper_and_provider_chatter(self):
         invalid_bodies = {
@@ -859,12 +898,20 @@ class BodyAssemblyTests(unittest.TestCase):
             "head": "<body><head><title>bad</title></head></body>",
             "style": "<body><style>body{color:red}</style></body>",
             "script": "<body><script>alert(1)</script></body>",
+            "base": '<body><base href="https://example.test/"><main>Ready</main></body>',
+            "link": '<body><link rel="stylesheet" href="theme.css"><main>Ready</main></body>',
+            "meta": '<body><meta name="theme-color" content="#000"><main>Ready</main></body>',
+            "title": "<body><title>Wrong head title</title><main>Ready</main></body>",
             "placeholder": "<body><main>{{SITE_NAME}}</main></body>",
         }
         for label, content in invalid_bodies.items():
             with self.subTest(label=label):
                 with self.assertRaises(GeneratedBodyError):
                     validate_generated_body(body_result(content))
+
+    def test_body_admission_preserves_svg_accessibility_title(self):
+        body = "<body><svg><title>Service area map</title></svg></body>"
+        self.assertEqual(validate_generated_body(body_result(body)), body)
 
     def test_prompt_defined_square_placeholders_fail_without_rejecting_other_brackets(self):
         prompt = "Use [PROSPECT.phone], [SITE_SLUG], and [N]-MILE RADIUS. - [ ] check"
@@ -923,6 +970,11 @@ class BodyAssemblyTests(unittest.TestCase):
             "<body><main>&#91;Saturday&#93;</main></body>",
         )
 
+        with self.assertRaisesRegex(GeneratedBodyError, r"\{\{SITE_NAME\}\}"):
+            validate_generated_body(
+                body_result("<body><main>{{SITE_NAME}}</main></body>")
+            )
+
     def test_placeholder_admission_percent_decodes_attribute_values(self):
         placeholders = extract_square_placeholder_tokens("Use [PROSPECT.phone].")
 
@@ -959,28 +1011,29 @@ class BodyAssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(GeneratedBodyError, "byte limit"):
             validate_generated_body(body_result(over_limit))
 
-    def test_assembly_uses_trusted_head_and_relocates_deployment_comment(self):
+    def test_assembly_uses_trusted_head_and_code_owned_comment(self):
+        trusted_comment = make_html_comment("deployment metadata")
         document = assemble_generated_html(
-            body_result(COMMENTED_BODY),
+            body_result(),
             base_template=self.base_template,
             theme_catalog=self.theme_catalog,
             theme_name="warm",
             colors=self.colors,
             title=r"Drees \1 <Plumbing>",
             body_theme="theme-light",
-            required_leading_comment_markers=("deployment metadata",),
+            trusted_head_comment=trusted_comment,
         )
 
         self.assertTrue(document.startswith("<!DOCTYPE html>"))
-        self.assertIn("<head>\n<!-- deployment metadata -->", document)
+        self.assertIn("<head>\n<!--\ndeployment metadata\n-->", document)
         self.assertIn("<title>Drees \\1 &lt;Plumbing&gt;</title>", document)
         self.assertIn("--accent: #B91C1C;", document)
         self.assertIn("--font-display: 'Lexend', sans-serif;", document)
         self.assertIn('<body class="theme-light"><main>Ready</main></body>', document)
-        self.assertEqual(document.count("<!-- deployment metadata -->"), 1)
+        self.assertEqual(document.count(trusted_comment), 1)
 
-    def test_assembly_rejects_missing_comment_invalid_color_and_unknown_theme(self):
-        with self.assertRaisesRegex(GeneratedBodyError, "deployment comment"):
+    def test_assembly_rejects_unsafe_comment_invalid_color_and_unknown_theme(self):
+        with self.assertRaisesRegex(GeneratedHtmlError, "exactly one HTML comment"):
             assemble_generated_html(
                 body_result(),
                 base_template=self.base_template,
@@ -989,19 +1042,31 @@ class BodyAssemblyTests(unittest.TestCase):
                 colors=self.colors,
                 title="Test",
                 body_theme="theme-light",
-                required_leading_comment_markers=("deployment metadata",),
+                trusted_head_comment="deployment metadata",
             )
 
-        with self.assertRaisesRegex(GeneratedBodyError, "comment does not match"):
+        with self.assertRaisesRegex(GeneratedHtmlError, "unsafe nested delimiter"):
             assemble_generated_html(
-                body_result("<body><!-- TODO --><main>Ready</main></body>"),
+                body_result(),
                 base_template=self.base_template,
                 theme_catalog=self.theme_catalog,
                 theme_name="warm",
                 colors=self.colors,
                 title="Test",
                 body_theme="theme-light",
-                required_leading_comment_markers=("deployment metadata",),
+                trusted_head_comment="<!-- unsafe -- delimiter -->",
+            )
+
+        with self.assertRaisesRegex(GeneratedHtmlError, "unsafe nested delimiter"):
+            assemble_generated_html(
+                body_result(),
+                base_template=self.base_template,
+                theme_catalog=self.theme_catalog,
+                theme_name="warm",
+                colors=self.colors,
+                title="Test",
+                body_theme="theme-light",
+                trusted_head_comment="<!-- ends--->",
             )
 
         with self.assertRaisesRegex(GeneratedHtmlError, "six-digit hex"):
@@ -1026,6 +1091,12 @@ class BodyAssemblyTests(unittest.TestCase):
                 body_theme="theme-light",
             )
 
+    def test_comment_builder_neutralizes_dynamic_closing_delimiter(self):
+        comment = make_html_comment("Client: Acme --> injected")
+
+        self.assertEqual(comment.count("<!--"), 1)
+        self.assertEqual(comment.count("-->"), 1)
+        self.assertIn("Acme - -> injected", comment)
 
 class HtmlAdmissionTests(unittest.TestCase):
     def test_complete_html_is_accepted(self):
@@ -1192,9 +1263,13 @@ class PromptContractTests(unittest.TestCase):
                 self.assertIn("first characters", prompt)
                 self.assertIn("must be `<body`", prompt)
                 self.assertIn("Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype", prompt)
+                self.assertIn(
+                    "Do NOT output HTML head metadata (`<base>`, `<link>`, `<meta>`, or a page `<title>`) anywhere in the body; an accessibility `<title>` nested inside `<svg>` is allowed.",
+                    prompt,
+                )
                 self.assertNotIn("(or a leading comment)", prompt)
 
-    def test_deployment_comments_are_generated_first_and_relocated_to_head(self):
+    def test_deployment_comments_are_code_owned_and_absent_from_prompts(self):
         for prompt_path, markers in (
             (Path("references/06-build-prompt.md"), build.BUILD_DEPLOYMENT_COMMENT_MARKERS),
             (
@@ -1204,16 +1279,43 @@ class PromptContractTests(unittest.TestCase):
         ):
             with self.subTest(prompt=str(prompt_path)):
                 prompt = prompt_path.read_text(encoding="utf-8")
-                self.assertIn(
-                    "immediately after the opening `<body>` tag",
-                    prompt,
-                )
-                self.assertIn(
-                    "inserts it immediately after the opening `<head>`",
-                    prompt,
-                )
+                self.assertIn("Trusted code derives", prompt)
+                self.assertIn("Do not output", prompt)
                 for marker in markers:
-                    self.assertIn(marker, prompt)
+                    self.assertNotIn(marker, prompt)
+
+        build_comment = build.build_deployment_comment(
+            {
+                "business_name": "Test Business",
+                "trade": "plumber",
+                "city": "Effingham",
+                "state": "IL",
+                "build_date": "2026-09-01",
+            }
+        )
+        redesign_comment = pipeline.redesign_deployment_comment(
+            {"site": {"name": "Current Business"}},
+            theme="minimal",
+        )
+        for comment, markers in (
+            (build_comment, build.BUILD_DEPLOYMENT_COMMENT_MARKERS),
+            (redesign_comment, pipeline.REDESIGN_DEPLOYMENT_COMMENT_MARKERS),
+        ):
+            with self.subTest(comment=comment[:40]):
+                for marker in markers:
+                    self.assertIn(marker, comment)
+
+    def test_build_prompt_does_not_seed_fixture_forbidden_claims(self):
+        prompt = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                Path("references/06-build-prompt.md"),
+                Path("references/07-industry-defaults.md"),
+            )
+        ).casefold()
+        for claim in build.GATED_SERVICE_CLAIMS:
+            with self.subTest(claim=claim):
+                self.assertNotIn(claim.casefold(), prompt)
 
 
 class AtomicWriteAndCliTests(unittest.TestCase):
@@ -1253,11 +1355,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIsNone(args.generation_model)
 
     def test_build_generator_uses_shared_admission_gate(self):
-        client = FakeLocalClient(
-            local_chat_payload(
-                body_with_markers(build.BUILD_DEPLOYMENT_COMMENT_MARKERS)
-            )
-        )
+        client = FakeLocalClient(local_chat_payload(COMPLETE_BODY))
         prospect = {
             "business_name": "Test Business",
             "trade": "plumber",
@@ -1269,13 +1367,26 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         html = build.generate_build_html(prospect, config(), client)
 
         self.assertTrue(html.startswith("<!DOCTYPE html>"))
-        self.assertIn("<head>\n<!--\nNEW WEBSITE BUILD -- FROM SCRATCH", html)
+        self.assertIn("NEW WEBSITE BUILD - - FROM SCRATCH", html)
         self.assertIn('<body class="theme-light"><main>Ready</main></body>', html)
+        request = next(call for call in client.calls if call[0] == "POST")
+        user_content = request[2]["json"]["messages"][1]["content"]
+        self.assertIn(build.BUILD_RESPONSE_BOUNDARY_REMINDER, user_content)
+        self.assertIn(
+            '"business_name": "Test Business"',
+            user_content,
+        )
+        self.assertNotIn("BASE BODY TEMPLATE", user_content)
+        self.assertNotIn("{{SITE_NAME}}", user_content)
+        self.assertTrue(
+            user_content.endswith(
+                "No logo URL was supplied. Omit the nav-logo image entirely, show "
+                "the text business name, and do not invent a logo URL."
+            )
+        )
 
     def test_build_generator_rejects_placeholder_from_static_industry_defaults(self):
-        leaked_body = body_with_markers(
-            build.BUILD_DEPLOYMENT_COMMENT_MARKERS
-        ).replace("Ready", "Serving Effingham since [YEAR]")
+        leaked_body = COMPLETE_BODY.replace("Ready", "Serving Effingham since [YEAR]")
         client = FakeLocalClient(local_chat_payload(leaked_body))
         prospect = {
             "business_name": "Test Business",
@@ -1288,12 +1399,36 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         with self.assertRaisesRegex(GeneratedBodyError, r"\[YEAR\]"):
             build.generate_build_html(prospect, config(), client)
 
-    def test_redesign_generator_assembles_body_with_site_brand_contract(self):
-        client = FakeLocalClient(
-            local_chat_payload(
-                body_with_markers(pipeline.REDESIGN_DEPLOYMENT_COMMENT_MARKERS)
-            )
+    def test_build_generator_rejects_claim_without_matching_promise(self):
+        unsupported = COMPLETE_BODY.replace(
+            "Ready", "Upfront <strong>Flat-Rate</strong> pricing"
         )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "service_promises": [],
+        }
+
+        with self.assertRaisesRegex(GeneratedBodyError, "Upfront Flat-Rate"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unsupported)),
+            )
+
+        prospect["service_promises"] = ["Flat-rate pricing"]
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(unsupported)),
+        )
+        self.assertIn("Upfront <strong>Flat-Rate</strong> pricing", html)
+
+    def test_redesign_generator_assembles_body_with_site_brand_contract(self):
+        client = FakeLocalClient(local_chat_payload(COMPLETE_BODY))
         site_json = {
             "site": {"name": "Current Business"},
             "brand": {
@@ -1315,7 +1450,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("<title>Current Business</title>", html)
         self.assertIn("--accent: #123456;", html)
         self.assertIn("--secondary: #ABCDEF;", html)
-        self.assertIn("<head>\n<!--\nWEBSITE REDESIGN MOCKUP", html)
+        self.assertIn("WEBSITE REDESIGN MOCKUP", html)
         self.assertIn('<body class="theme-dark"><main>Ready</main></body>', html)
 
     def test_interior_generator_assembles_body_without_deployment_comment(self):

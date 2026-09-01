@@ -32,8 +32,9 @@ from lib.generation import (
     atomic_write_text,
     body_generation_config,
     extract_square_placeholder_tokens,
-    extract_template_body_scaffold,
+    extract_template_class_names,
     generate_text,
+    make_html_comment,
     preflight_generation_provider,
     require_complete_text,
     resolve_generation_config,
@@ -58,13 +59,19 @@ BUILD_OUTPUT_ROOT = os.path.join("outputs", "builds")
 EMAIL_DRAFT_ROOT = os.path.join("outputs", "email_drafts")
 BUILD_TEMPERATURE = 0.4
 BUILD_USER_TRUNCATE = 200000
+BUILD_RESPONSE_BOUNDARY_REMINDER = (
+    "RESPONSE BOUNDARY: Begin your response immediately with <body. "
+    "End immediately with </body>. Emit no leading comment, preamble, markdown "
+    "fence, trailing text, deployment metadata, or HTML head metadata. Do not "
+    "emit any unresolved double-curly or square-bracket template token."
+)
 # Email-draft generation is short, deterministic, and copy-focused.
 # Lower temperature than the HTML build to keep the voice tight.
 EMAIL_TEMPERATURE = 0.3
 DEFAULT_SALESPERSON_FIRST_NAME = "Juan"
 
 BUILD_DEPLOYMENT_COMMENT_MARKERS = (
-    "NEW WEBSITE BUILD -- FROM SCRATCH",
+    "NEW WEBSITE BUILD - - FROM SCRATCH",
     "Prospect:",
     "Trade:",
     "Location:",
@@ -73,6 +80,13 @@ BUILD_DEPLOYMENT_COMMENT_MARKERS = (
     "ONGOING COST:",
     "DEPLOY:",
 )
+
+GATED_SERVICE_CLAIMS = {
+    "Upfront Flat-Rate": ("flat-rate pricing", "upfront pricing"),
+    "Surprise Fees": ("flat-rate pricing", "upfront pricing", "no surprise fees"),
+    "Free Estimates": ("free estimates",),
+    "Owner Answers": ("owner answers",),
+}
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
 
@@ -178,6 +192,80 @@ def load_prospect(path):
 
 def slugify(name):
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "prospect"
+
+
+def build_deployment_comment(prospect):
+    """Render deployment metadata from trusted inputs, never model output."""
+    lines = [
+        "============================================================",
+        "NEW WEBSITE BUILD -- FROM SCRATCH",
+        "============================================================",
+        f"Prospect:        {prospect['business_name']}",
+        f"Trade:           {prospect['trade']}",
+        f"Location:        {prospect['city']}, {prospect['state']}",
+    ]
+    if prospect.get("build_date"):
+        lines.append(f"Generated:       {prospect['build_date']}")
+    lines.extend(
+        [
+            "",
+            "HOSTING:         Vercel (free, static, auto-SSL via Let's Encrypt)",
+            "LEAD HANDLER:    Formspree (free tier 50 submissions/mo)",
+            "ONGOING COST:    ~$15/yr (domain renewal only)",
+        ]
+    )
+
+    photos = prospect.get("photos")
+    first_photo = (
+        photos[0]
+        if isinstance(photos, list) and photos and isinstance(photos[0], dict)
+        else {}
+    )
+    if all(first_photo.get(field) for field in ("credit_name", "credit_url", "photo_id")):
+        lines.extend(
+            [
+                "",
+                f"HERO PHOTO:      {first_photo['credit_name']} via Unsplash ({first_photo['credit_url']})",
+                f"PHOTO ID:        {first_photo['photo_id']}",
+                "PHOTO LICENSE:   Unsplash License (free, no on-page attribution required;",
+                "                 credited here per Unsplash API terms of service)",
+            ]
+        )
+
+    site_slug = prospect.get("slug") or slugify(prospect["business_name"])
+    lines.extend(
+        [
+            "",
+            "DEPLOY:",
+            "1. Confirm prospect.formspree_endpoint is set on the form action.",
+            f"2. Run the production Vercel deploy command for project {site_slug}.",
+            "3. Custom domain: add it in Vercel dashboard, point DNS.",
+            "============================================================",
+        ]
+    )
+    return make_html_comment("\n".join(lines))
+
+
+def unverified_service_claim_phrases(prospect):
+    promises = prospect.get("service_promises")
+    normalized_promises = (
+        tuple(
+            promise.casefold()
+            for promise in promises
+            if isinstance(promise, str) and promise.strip()
+        )
+        if isinstance(promises, list)
+        else ()
+    )
+    return tuple(
+        claim
+        for claim, evidence_phrases in GATED_SERVICE_CLAIMS.items()
+        if not any(
+            evidence in promise
+            for promise in normalized_promises
+            for evidence in evidence_phrases
+        )
+    )
 
 
 # Catalog of theme names recognized by 09-themes.md. The harness validates
@@ -559,7 +647,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         section_orders = f.read()
     with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
-    base_body = extract_template_body_scaffold(base_template)
+    class_catalog = "\n".join(extract_template_class_names(base_template))
 
     # Static block -- same bytes for every plumber/HVAC/electrician build.
     # Cache marker on the end of this lets consecutive builds within the
@@ -574,18 +662,53 @@ def generate_build_html(prospect, generation_config=None, client=None):
     # 10-section-orders.md are dangling references -- the LLM never sees
     # the file contents. Slice 3b (PR #19) closed the gap for 10; this
     # closes it for 09 (issue #20). The block order
-    # INDUSTRY_DEFAULTS -> THEMES -> SECTION_ORDERS -> BASE_TEMPLATE
+    # INDUSTRY_DEFAULTS -> THEMES -> SECTION_ORDERS -> CLASS_CATALOG
     # walks the LLM through trade guidance, then typography/layout
     # personality, then section sequence, then the CSS framework.
     static_block = (
         f"INDUSTRY DEFAULTS:\n{industry_defaults}\n\n"
         f"THEMES:\n{themes_catalog}\n\n"
         f"SECTION ORDERS:\n{section_orders}\n\n"
-        f"BASE BODY TEMPLATE:\n{base_body}"
+        f"ALLOWED BODY CLASSES:\n{class_catalog}"
     )
     prospect_block = f"PROSPECT JSON:\n{json.dumps(prospect, indent=2)}"
     if len(prospect_block) > BUILD_USER_TRUNCATE:
         prospect_block = prospect_block[:BUILD_USER_TRUNCATE]
+
+    logo_url = prospect.get("logo_url")
+    prospect_photos = prospect.get("photos")
+    if not isinstance(logo_url, str) or not logo_url.strip():
+        logo_url = next(
+            (
+                candidate
+                for photo in (
+                    prospect_photos if isinstance(prospect_photos, list) else []
+                )
+                if isinstance(photo, dict) and photo.get("context") == "logo"
+                for candidate in (photo.get("url"), photo.get("src"), photo.get("path"))
+                if isinstance(candidate, str) and candidate.strip()
+            ),
+            None,
+        )
+    required_substitutions = {
+        "business_name": prospect["business_name"],
+        "phone": prospect.get("phone"),
+    }
+    if logo_url:
+        logo_instruction = (
+            f"Use this exact logo URL when rendering the nav: {json.dumps(logo_url)}."
+        )
+    else:
+        logo_instruction = (
+            "No logo URL was supplied. Omit the nav-logo image entirely, show the "
+            "text business name, and do not invent a logo URL."
+        )
+    response_boundary = (
+        f"{BUILD_RESPONSE_BOUNDARY_REMINDER}\n"
+        "MANDATORY EXACT SUBSTITUTIONS: "
+        f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
+        f"{logo_instruction}"
+    )
 
     result = generate_text(
         body_generation_config(config),
@@ -593,6 +716,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         user_parts=(
             PromptPart(static_block, cacheable=True),
             PromptPart(prospect_block),
+            PromptPart(response_boundary),
         ),
         temperature=BUILD_TEMPERATURE,
         cache_system_prompt=True,
@@ -630,11 +754,12 @@ def generate_build_html(prospect, generation_config=None, client=None):
         colors=_resolve_build_document_colors(prospect),
         title=prospect.get("display_name") or prospect["business_name"],
         body_theme="theme-light",
-        required_leading_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
+        trusted_head_comment=build_deployment_comment(prospect),
         forbidden_square_placeholders=extract_square_placeholder_tokens(
             system_prompt,
             static_block,
         ),
+        forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
     )
 
 
