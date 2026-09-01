@@ -453,7 +453,8 @@ def generate_redesign(
         base_template = f.read()
     with open(THEMES_CATALOG_PATH, "r") as f:
         theme_catalog = f.read()
-    class_catalog = "\n".join(extract_homepage_class_names(base_template))
+    homepage_classes = extract_homepage_class_names(base_template)
+    class_catalog = "\n".join(homepage_classes)
     interior_only_classes = extract_interior_only_class_names(base_template)
 
     user_prompt = f"""THEME: {theme}
@@ -500,6 +501,7 @@ text, HTML head metadata, or unresolved template token.
             class_catalog,
         ),
         forbidden_class_names=interior_only_classes,
+        allowed_class_names=homepage_classes,
         required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
         required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     )
@@ -521,7 +523,8 @@ def generate_interior_page(
         base_template = f.read()
     with open(THEMES_CATALOG_PATH, "r") as f:
         theme_catalog = f.read()
-    class_catalog = "\n".join(extract_template_class_names(base_template))
+    template_classes = extract_template_class_names(base_template)
+    class_catalog = "\n".join(template_classes)
         
     if page_url:
         print(f"[*] Fetching interior page content from {page_url}...")
@@ -577,6 +580,7 @@ SOURCE CONTENT:
             system_prompt,
             class_catalog,
         ),
+        allowed_class_names=template_classes,
         required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
         required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     )

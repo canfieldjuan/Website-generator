@@ -709,7 +709,8 @@ def generate_build_html(prospect, generation_config=None, client=None):
         section_orders = f.read()
     with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
-    class_catalog = "\n".join(extract_homepage_class_names(base_template))
+    homepage_classes = extract_homepage_class_names(base_template)
+    class_catalog = "\n".join(homepage_classes)
     interior_only_classes = extract_interior_only_class_names(base_template)
 
     # Static block -- same bytes for every plumber/HVAC/electrician build.
@@ -833,6 +834,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         ),
         forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
         forbidden_class_names=interior_only_classes,
+        allowed_class_names=homepage_classes,
         required_exposed_values=tuple(
             (name, value)
             for name, value in required_substitutions.items()

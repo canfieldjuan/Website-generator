@@ -254,11 +254,18 @@ The correct fix must enforce every build substitution that affects identity or
 the primary contact path. The normalized business name and, when present, phone
 must occur in visual or accessibility exposure; a present phone must have at
 least one `tel:` target and every `tel:` target must resolve to that same phone;
-when no phone is verified, no `tel:` target may appear. The shared parser must
-also reject unclosed, unexpectedly closed, or misnested non-void descendants
-before BeautifulSoup repair, while accepting standard void elements and valid
-self-closing SVG content. Tests must prove omissions, wrong links, no-phone
-links, both malformed-markup directions, and valid opposites.
+every exposed phone-like value must resolve to the verified phone, and when no
+phone is verified neither phone-like exposure nor a `tel:` target may appear.
+Inline display/visibility suppression, including an `!important` priority,
+must not satisfy required visual or accessibility exposure.
+The shared parser must also reject unclosed, unexpectedly closed, or misnested
+non-void descendants before BeautifulSoup repair, while accepting standard void
+elements and valid self-closing SVG content. Finally, each generator must pass
+the exact class catalog it gave the model into admission so build, redesign, and
+interior output cannot invent unstyled classes. Tests must prove omissions,
+wrong and mixed links, exposed-phone mismatches, no-phone output, unknown
+classes on all three callers, both malformed-markup directions, and valid
+opposites.
 
 This must not change prospect values, phone presentation, visible copy, trusted
 template/CSS, required component counts, provider/model selection, GPU/runtime
@@ -326,6 +333,12 @@ behavior, or any image, email, deployment, and Connect job contract.
     path.
 27. Reject unbalanced or misnested generated descendants before browser repair
     while preserving standard void elements and valid SVG self-closing tags.
+28. Reject exposed phone-like values that are absent from or conflict with the
+    sanitized prospect phone, not only incorrect `tel:` destinations.
+29. Enforce each generator's provided allowed-class catalog during shared body
+    admission for build, redesign, and interior output.
+30. Treat priority-bearing inline display and visibility suppression as hidden
+    when validating required generated output exposure.
 
 ### Files touched
 
@@ -484,6 +497,9 @@ claim remains admissible.
   search returned `0`, and the required fabricated-claim search returned `0`.
   It contains one services grid, six service cards, six service names, six
   service descriptions, and every other mandatory class at its exact count.
+- The saved GPU artifact was re-admitted through the final exposed-phone and
+  allowed-class gates in this PR; the current build caller returned
+  `saved-gpu-artifact-final-admission: PASS` without another model request.
 - System Chrome screenshots at 1440x900, 1440x3000, 390x844, and 390x5000
   confirmed the services grid renders as two rows of three on desktop and six
   stacked cards on mobile without horizontal clipping.

@@ -53,6 +53,10 @@ HTML_VOID_ELEMENTS = frozenset(
         "wbr",
     }
 )
+PHONE_LIKE_PATTERN = re.compile(
+    r"(?<!\d)(?:\+?1[\s()./-]*)?\(?[2-9]\d{2}\)?[\s./-]*"
+    r"[2-9]\d{2}[\s./-]*\d{4}(?!\d)"
+)
 _EXPECTED_PHONE_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
@@ -668,6 +672,17 @@ def _compact_claim_match_text(value: str) -> str:
     return "".join(character for character in normalized if character.isalnum())
 
 
+def _canonical_phone_digits(value: str) -> str:
+    digits = "".join(
+        character
+        for character in unicodedata.normalize("NFKC", value)
+        if character.isdecimal()
+    )
+    if len(digits) == 11 and digits.startswith("1"):
+        return digits[1:]
+    return digits
+
+
 def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
     visual_parts: list[str] = []
     id_targets: dict[str, list[Tag]] = {}
@@ -691,7 +706,8 @@ def _claim_exposure_texts(body_root: Tag) -> tuple[str, str]:
         return bool(
             re.search(
                 r"(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|"
-                r"content-visibility\s*:\s*hidden)\s*(?:;|$)",
+                r"content-visibility\s*:\s*hidden)\s*"
+                r"(?:!\s*important\s*)?(?:;|$)",
                 style,
                 re.IGNORECASE,
             )
@@ -841,6 +857,7 @@ def validate_generated_body(
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
+    allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
@@ -932,6 +949,22 @@ def validate_generated_body(
             "Generated body has invalid required class counts: "
             + "; ".join(class_count_mismatches[:3])
         )
+    if allowed_class_names is not None:
+        allowed_classes = {
+            class_name
+            for class_name in allowed_class_names
+            if isinstance(class_name, str) and class_name
+        }
+        unknown_class_names = sorted(
+            parser.class_names - allowed_classes,
+            key=str.casefold,
+        )
+        if unknown_class_names:
+            unknown = ", ".join(unknown_class_names[:3])
+            raise GeneratedBodyError(
+                "Generated body contains classes outside the allowed class "
+                f"catalog: {unknown}."
+            )
 
     parsed_body = BeautifulSoup(body, "html.parser")
     body_root = parsed_body.find("body")
@@ -984,6 +1017,13 @@ def validate_generated_body(
         )
 
     if expected_phone is not _EXPECTED_PHONE_UNSET:
+        exposed_phone_digits = {
+            _canonical_phone_digits(match.group(0))
+            for surface in exposure_surfaces
+            for match in PHONE_LIKE_PATTERN.finditer(
+                unicodedata.normalize("NFKC", surface)
+            )
+        }
         tel_targets = []
         for element in body_root.find_all(href=True):
             href = element.get("href")
@@ -993,16 +1033,21 @@ def validate_generated_body(
             if decoded_href.casefold().startswith("tel:"):
                 tel_targets.append(decoded_href)
         if expected_phone is None:
+            if exposed_phone_digits:
+                raise GeneratedBodyError(
+                    "Generated body contains a phone-like value with no verified phone."
+                )
             if tel_targets:
                 raise GeneratedBodyError(
                     "Generated body contains a tel target with no verified phone."
                 )
         else:
-            expected_digits = "".join(
-                character
-                for character in unicodedata.normalize("NFKC", str(expected_phone))
-                if character.isdecimal()
-            )
+            expected_digits = _canonical_phone_digits(str(expected_phone))
+            unexpected_exposed_phone = exposed_phone_digits - {expected_digits}
+            if unexpected_exposed_phone:
+                raise GeneratedBodyError(
+                    "Generated body contains an unexpected exposed phone."
+                )
             if not tel_targets:
                 raise GeneratedBodyError(
                     "Generated body is missing the required tel target for phone."
@@ -1010,12 +1055,7 @@ def validate_generated_body(
             unexpected_targets = [
                 target
                 for target in tel_targets
-                if "".join(
-                    character
-                    for character in unicodedata.normalize("NFKC", target[4:])
-                    if character.isdecimal()
-                )
-                != expected_digits
+                if _canonical_phone_digits(target[4:]) != expected_digits
             ]
             if unexpected_targets:
                 raise GeneratedBodyError(
@@ -1214,6 +1254,7 @@ def assemble_generated_html(
     forbidden_square_placeholders: Iterable[str] = (),
     forbidden_visible_phrases: Iterable[str] = (),
     forbidden_class_names: Iterable[str] = (),
+    allowed_class_names: Iterable[str] | None = None,
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
@@ -1236,6 +1277,7 @@ def assemble_generated_html(
         forbidden_square_placeholders=forbidden_square_placeholders,
         forbidden_visible_phrases=forbidden_visible_phrases,
         forbidden_class_names=forbidden_class_names,
+        allowed_class_names=allowed_class_names,
         required_exposed_values=required_exposed_values,
         expected_phone=expected_phone,
         required_class_counts=required_class_counts,

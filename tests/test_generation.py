@@ -1975,6 +1975,31 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(unexpected_phone)),
             )
 
+        unexpected_plain_phone = body_without_coverage.replace(
+            "</nav>",
+            "<span>Call 217-555-0199</span></nav>",
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "phone-like value with no verified phone",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unexpected_plain_phone)),
+            )
+
+        non_phone_numbers = body_without_coverage.replace(
+            "</nav>",
+            "<span>Serving since 2011. Rated 4.8 by 12 customers.</span></nav>",
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(non_phone_numbers)),
+        )
+        self.assertIn("Serving since 2011", html)
+
         prospect["phone"] = "217-555-0100"
         with self.assertRaisesRegex(
             GeneratedBodyError,
@@ -2030,6 +2055,14 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             (
                 COMPLETE_BUILD_BODY.replace(
                     '<a href="tel:2175550100">217-555-0100</a>',
+                    '<a href="tel:2175550100" '
+                    'style="display:none!important">217-555-0100</a>',
+                ),
+                "missing required visible substitution: phone",
+            ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    '<a href="tel:2175550100">217-555-0100</a>',
                     "<span>217-555-0100</span>",
                 ),
                 "missing the required tel target",
@@ -2045,6 +2078,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 ),
                 "unexpected tel target",
             ),
+            (
+                COMPLETE_BUILD_BODY.replace(
+                    "</nav>",
+                    "<span>Alternate 217-555-0199</span></nav>",
+                ),
+                "unexpected exposed phone",
+            ),
         )
         for adverse_body, message in adverse_bodies:
             with self.subTest(message=message), self.assertRaisesRegex(
@@ -2056,6 +2096,55 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     config(),
                     FakeLocalClient(local_chat_payload(adverse_body)),
                 )
+
+    def test_generators_reject_classes_outside_provided_catalog(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+        invalid_build = COMPLETE_BUILD_BODY.replace(
+            '<form class="contact-form-wrap">',
+            '<div class="invented-layout"></div><form class="contact-form-wrap">',
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "outside the allowed class catalog: invented-layout",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(invalid_build)),
+            )
+
+        invalid_page = COMPLETE_PAGE_BODY.replace(
+            "<main>",
+            '<main class="invented-layout">',
+        )
+        site_json = {"site": {"name": "Current Business"}}
+        generators = (
+            lambda: pipeline.generate_redesign(
+                site_json,
+                theme="minimal",
+                generation_config=config(),
+                generation_client=FakeLocalClient(local_chat_payload(invalid_page)),
+            ),
+            lambda: pipeline.generate_interior_page(
+                site_json,
+                "contact",
+                theme="warm",
+                generation_config=config(),
+                generation_client=FakeLocalClient(local_chat_payload(invalid_page)),
+            ),
+        )
+        for generator in generators:
+            with self.subTest(generator=generator), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "outside the allowed class catalog: invented-layout",
+            ):
+                generator()
 
     def test_build_generator_rejects_claim_without_matching_promise(self):
         unsupported = COMPLETE_BUILD_BODY.replace(
