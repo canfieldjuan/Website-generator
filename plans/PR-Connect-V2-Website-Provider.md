@@ -125,12 +125,15 @@ builds with no official keyring fail closed as authority-unavailable.
   failure, and interrupted-job restart reconciliation.
 - `bash scripts/local_pr_review.sh` passed, including `git diff --check` and both
   required plan documents.
-- The controlled real-Qwen proof is not complete. The selected NVIDIA runtime
-  aborted on a CUDA out-of-memory allocation; the isolated CPU runtime then
-  refused the saved value-cache/flash-attention combination before loading; and
-  the existing authenticated local API did not answer the credentialed probe.
-  The original runtime selection was restored and `lms ps` confirmed that no
-  model remained loaded. This is a local acceptance blocker, not passing proof.
+- The controlled real-Qwen proof is not complete. An authenticated replacement
+  server on loopback port 1235 loaded exact model `qwen/qwen3.8-27b` on the CPU
+  runtime with a 131,072-token context. The fixture passed exact-model preflight
+  and began generation, but LM Studio then attempted to restore its server
+  setting to port 1234. A stale LM Studio listener already owned that port, so
+  the restart failed, disconnected the request, and produced no admitted HTML.
+  The proof model was unloaded and the original NVIDIA runtime restored. The
+  stale server conflict and viable inference performance remain local acceptance
+  blockers, not passing proof.
 
 ## Estimated diff size
 
