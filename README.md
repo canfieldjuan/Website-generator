@@ -80,6 +80,8 @@ pip install -r requirements.txt
 export LLAMA_CPP_MODEL_PATH=/absolute/path/to/Qwen3.8-27B-Q4_K_M.gguf
 # Only needed when llama-server is not on PATH:
 export LLAMA_CPP_SERVER_BIN=/absolute/path/to/llama-server
+# The launcher defaults to full GPU layer offload. Override
+# LLAMA_CPP_GPU_LAYERS only for a different hardware configuration.
 scripts/start_llama_server.sh
 
 # Headless browser (only needed for JS-rendered sites in pipeline.py)

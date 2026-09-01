@@ -15,14 +15,21 @@ from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
 from lib.generation import (
+    DEFAULT_DOCUMENT_ACCENT,
+    DEFAULT_DOCUMENT_SECONDARY,
+    REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+    REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
     PromptPart,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
+    extract_homepage_class_names,
+    extract_interior_only_class_names,
     extract_square_placeholder_tokens,
-    extract_template_body_scaffold,
+    extract_template_class_names,
     generate_text,
+    make_html_comment,
     preflight_generation_provider,
     resolve_generation_config,
 )
@@ -82,7 +89,7 @@ def _resolve_site_document_colors(site_json):
             )
             if color
         ),
-        "#1D4ED8",
+        DEFAULT_DOCUMENT_ACCENT,
     )
     secondary = next(
         (
@@ -93,7 +100,7 @@ def _resolve_site_document_colors(site_json):
             )
             if color
         ),
-        "#1F3A5F",
+        DEFAULT_DOCUMENT_SECONDARY,
     )
     return DocumentColors(
         accent=primary,
@@ -105,6 +112,89 @@ def _resolve_site_document_colors(site_json):
 def _site_body_theme(site_json):
     brand = site_json.get("brand") if isinstance(site_json.get("brand"), dict) else {}
     return "theme-dark" if brand.get("color_mode") == "dark" else "theme-light"
+
+
+_PLATFORM_ANNUAL_COSTS = {
+    "wix (light)": 219,
+    "wix (core)": 363,
+    "wix (business)": 483,
+    "squarespace": 207,
+    "godaddy-builder": 240,
+    "traditional-hosting": 350,
+    "wordpress-hosted": 180,
+}
+
+
+def redesign_deployment_comment(site_json, *, theme, source_url=None, site_slug=None):
+    """Render redesign metadata from extracted facts, never model output."""
+    site = site_json.get("site") if isinstance(site_json.get("site"), dict) else {}
+    site_name = site.get("name") or "Website"
+    platform = site_json.get("platform")
+    if isinstance(platform, dict):
+        platform_name = platform.get("detected")
+    elif isinstance(platform, str):
+        platform_name = platform
+    else:
+        platform_name = None
+    platform_name = platform_name.strip() if isinstance(platform_name, str) else "unknown"
+    if not platform_name:
+        platform_name = "unknown"
+    annual_cost = _PLATFORM_ANNUAL_COSTS.get(platform_name.casefold())
+    annual_cost_text = f"${annual_cost}" if annual_cost is not None else "unknown"
+    savings_text = f"${annual_cost * 5 - 75}" if annual_cost is not None else "unknown"
+
+    resolved_source = source_url or site_json.get("source_url") or "unknown"
+    if not site_slug:
+        parsed_host = urllib.parse.urlparse(str(resolved_source)).netloc.replace("www.", "")
+        site_slug = parsed_host.replace(".", "-") or re.sub(
+            r"[^a-z0-9]+", "-", str(site_name).lower()
+        ).strip("-") or "website"
+
+    lines = [
+        "============================================================",
+        "WEBSITE REDESIGN MOCKUP",
+        "============================================================",
+        f"Client:          {site_name}",
+        f"Source URL:      {resolved_source}",
+        f"Platform:        {platform_name}",
+        f"Theme applied:   {theme}",
+        "",
+        f"THEIR CURRENT ANNUAL COST: {annual_cost_text}/year" if annual_cost is not None else "THEIR CURRENT ANNUAL COST: unknown",
+        "YOUR MODEL:      ~$15/year (domain only) + one-time build fee",
+        f"5-YEAR SAVINGS:  {savings_text}" if annual_cost is not None else "5-YEAR SAVINGS:  unknown",
+        "Hosting:         Vercel (free, static, auto-SSL via Let's Encrypt)",
+        "",
+        "SALES PITCH:",
+        "Write manually from verified prospect facts; not model-generated.",
+        "",
+        "DEPLOY THIS MOCKUP:",
+        "1. Go to vercel.com/new",
+        "2. Drag and drop this HTML file",
+        f"3. Assign subdomain: {site_slug}.preview.yourdomain.com",
+        "4. Vercel provisions HTTPS automatically -- no SSL config needed",
+        "5. Share live URL with prospect before the sales call",
+        "",
+        "INTERIOR PAGES REMAINING:",
+    ]
+    pages = site_json.get("pages_to_fetch")
+    remaining = []
+    if isinstance(pages, list):
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            priority = page.get("priority")
+            if not isinstance(priority, (int, float)) or priority > 2:
+                continue
+            label = page.get("label") or page.get("page_type") or "Unnamed page"
+            page_type = page.get("page_type") or "other"
+            if page.get("fetchable") is True and page.get("url"):
+                action = f"fetch {page['url']}"
+            else:
+                action = "use homepage-section"
+            remaining.append(f"- {label} ({page_type}) -- {action}")
+    lines.extend(remaining or ["- None"])
+    lines.append("============================================================")
+    return make_html_comment("\n".join(lines))
 
 
 def _fetch_with_playwright(url):
@@ -348,6 +438,8 @@ def generate_redesign(
     color_mode="brand",
     generation_config=None,
     generation_client=None,
+    source_url=None,
+    site_slug=None,
 ):
     config = generation_config or resolve_generation_config()
     print(
@@ -361,7 +453,9 @@ def generate_redesign(
         base_template = f.read()
     with open(THEMES_CATALOG_PATH, "r") as f:
         theme_catalog = f.read()
-    base_body = extract_template_body_scaffold(base_template)
+    homepage_classes = extract_homepage_class_names(base_template)
+    class_catalog = "\n".join(homepage_classes)
+    interior_only_classes = extract_interior_only_class_names(base_template)
 
     user_prompt = f"""THEME: {theme}
 COLOR_MODE: {color_mode}
@@ -371,8 +465,12 @@ NOTES: none
 SITE JSON:
 {json.dumps(site_json, indent=2)}
 
-BASE BODY TEMPLATE:
-{base_body}
+ALLOWED BODY CLASSES:
+{class_catalog}
+
+RESPONSE BOUNDARY: Begin immediately with <body and end immediately with
+</body>. Emit no leading comment, deployment metadata, markdown fence, trailing
+text, HTML head metadata, or unresolved template token.
 """
 
     result = generate_text(
@@ -392,11 +490,21 @@ BASE BODY TEMPLATE:
         colors=_resolve_site_document_colors(site_json),
         title=site_name,
         body_theme=_site_body_theme(site_json),
-        required_leading_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+        trusted_head_comment=redesign_deployment_comment(
+            site_json,
+            theme=theme,
+            source_url=source_url,
+            site_slug=site_slug,
+        ),
         forbidden_square_placeholders=extract_square_placeholder_tokens(
             system_prompt,
-            base_body,
+            class_catalog,
         ),
+        forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+        forbidden_class_names=interior_only_classes,
+        allowed_class_names=homepage_classes,
+        required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+        required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     )
 
 def generate_interior_page(
@@ -416,7 +524,8 @@ def generate_interior_page(
         base_template = f.read()
     with open(THEMES_CATALOG_PATH, "r") as f:
         theme_catalog = f.read()
-    base_body = extract_template_body_scaffold(base_template)
+    template_classes = extract_template_class_names(base_template)
+    class_catalog = "\n".join(template_classes)
         
     if page_url:
         print(f"[*] Fetching interior page content from {page_url}...")
@@ -440,8 +549,8 @@ NOTES: none
 HOMEPAGE DESIGN JSON:
 {json.dumps(site_json, indent=2)}
 
-BASE BODY TEMPLATE:
-{base_body}
+ALLOWED BODY CLASSES:
+{class_catalog}
 
 ---
 SOURCE CONTENT:
@@ -470,8 +579,12 @@ SOURCE CONTENT:
         body_theme=_site_body_theme(site_json),
         forbidden_square_placeholders=extract_square_placeholder_tokens(
             system_prompt,
-            base_body,
+            class_catalog,
         ),
+        forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+        allowed_class_names=template_classes,
+        required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+        required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     )
 
 
@@ -563,6 +676,8 @@ def main(
         site_json,
         theme=theme,
         generation_config=generation_config,
+        source_url=url,
+        site_slug=site_slug,
     )
     pages_to_deploy = {"index.html": redesign_html}
     

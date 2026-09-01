@@ -23,18 +23,27 @@ import hashlib
 import argparse
 import copy
 from datetime import date
+from urllib.parse import quote_plus
 
 from lib.images import fetch_unsplash_hero, generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.generation import (
+    DEFAULT_DOCUMENT_ACCENT,
+    DEFAULT_DOCUMENT_SECONDARY,
+    REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+    REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
     PromptPart,
+    ReviewAdmissionContract,
+    ReviewEvidence,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
+    extract_homepage_class_names,
+    extract_interior_only_class_names,
     extract_square_placeholder_tokens,
-    extract_template_body_scaffold,
     generate_text,
+    make_html_comment,
     preflight_generation_provider,
     require_complete_text,
     resolve_generation_config,
@@ -60,13 +69,19 @@ BUILD_OUTPUT_ROOT = os.path.join("outputs", "builds")
 EMAIL_DRAFT_ROOT = os.path.join("outputs", "email_drafts")
 BUILD_TEMPERATURE = 0.4
 BUILD_USER_TRUNCATE = 200000
+BUILD_RESPONSE_BOUNDARY_REMINDER = (
+    "RESPONSE BOUNDARY: Begin your response immediately with <body. "
+    "End immediately with </body>. Emit no leading comment, preamble, markdown "
+    "fence, trailing text, deployment metadata, or HTML head metadata. Do not "
+    "emit any unresolved double-curly or square-bracket template token."
+)
 # Email-draft generation is short, deterministic, and copy-focused.
 # Lower temperature than the HTML build to keep the voice tight.
 EMAIL_TEMPERATURE = 0.3
 DEFAULT_SALESPERSON_FIRST_NAME = "Juan"
 
 BUILD_DEPLOYMENT_COMMENT_MARKERS = (
-    "NEW WEBSITE BUILD -- FROM SCRATCH",
+    "NEW WEBSITE BUILD - - FROM SCRATCH",
     "Prospect:",
     "Trade:",
     "Location:",
@@ -74,6 +89,258 @@ BUILD_DEPLOYMENT_COMMENT_MARKERS = (
     "LEAD HANDLER:",
     "ONGOING COST:",
     "DEPLOY:",
+)
+
+GATED_SERVICE_CLAIMS = {
+    "Upfront Flat-Rate": ("flat-rate pricing", "upfront pricing"),
+    "Surprise Fees": ("flat-rate pricing", "upfront pricing", "no surprise fees"),
+    "Free Estimates": ("free estimates",),
+    "Owner Answers": ("owner answers",),
+}
+
+FIELD_GATED_CLAIMS = {
+    "licensed_and_insured": ("Licensed", "Insured"),
+    "family_owned": ("Family Owned",),
+    "locally_owned": ("Locally Owned", "Not a Franchise"),
+    "has_24_7": ("24/7", "24 Hour Service", "Around the Clock"),
+    "same_day_service": ("Same Day",),
+    "epa_certified": ("EPA Certified", "EPA Section 608"),
+    "master_electrician_license": ("Master Electrician", "Master Licensed"),
+    "ibew_local_number": ("IBEW",),
+}
+
+FIELD_GATED_PROMISE_EVIDENCE = {
+    "has_24_7": ("24/7", "24 hour", "around the clock"),
+    "same_day_service": ("same-day", "same day"),
+}
+
+BOOLEAN_CLAIM_FIELDS = frozenset(
+    {
+        "licensed_and_insured",
+        "family_owned",
+        "locally_owned",
+        "has_24_7",
+        "same_day_service",
+        "epa_certified",
+    }
+)
+
+BUILD_REQUIRED_CLASS_COUNTS = (
+    ("site-nav", 1),
+    ("dual-cta-hero", 1),
+    ("coverage-band", 1),
+    ("services-grid", 1),
+    ("service-card", 6),
+    ("service-card-name", 6),
+    ("service-card-desc", 6),
+    ("benefits-grid", 1),
+    ("benefit-card", 3),
+    ("contact-form-wrap", 1),
+    *REQUIRED_FOOTER_CLASS_COUNTS,
+)
+BUILD_REQUIRED_CHILD_CLASS_SEQUENCES = (
+    ("services-grid", ("service-card",) * 6),
+    ("service-card", ("service-card-name", "service-card-desc")),
+    ("benefits-grid", ("benefit-card",) * 3),
+    *REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+)
+
+REVIEW_CLASS_NAMES = (
+    "reviews-card-grid",
+    "review-card",
+    "review-stars-sm",
+    "review-text",
+    "review-author",
+    "review-date",
+    "review-platform",
+    "reviews-summary-row",
+    "reviews-summary-stars",
+    "reviews-summary-text",
+    "reviews-summary-cta",
+    "reviews-aggregate",
+    "reviews-stars-lg",
+    "reviews-score",
+    "reviews-count",
+    "reviews-cta",
+)
+
+
+def _usable_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _usable_review_entry(review):
+    if not isinstance(review, dict):
+        return False
+    text_fields = ("author", "text", "date", "platform")
+    rating = review.get("rating")
+    return (
+        all(
+            isinstance(review.get(field), str)
+            and review[field].strip()
+            and not _is_placeholder(review[field])
+            for field in text_fields
+        )
+        and _usable_number(rating)
+        and 1 <= rating <= 5
+    )
+
+
+def _aggregate_review_values(prospect):
+    score = prospect.get("google_review_score")
+    count = prospect.get("google_review_count")
+    if (
+        not _usable_number(score)
+        or not 0 <= score <= 5
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count < 1
+    ):
+        return None, None
+    return score, count
+
+
+def expected_google_reviews_url(prospect):
+    supplied = prospect.get("google_business_url")
+    if isinstance(supplied, str) and supplied.strip():
+        return supplied.strip()
+    query = " ".join(
+        str(prospect.get(field) or "").strip()
+        for field in ("business_name", "city", "state")
+    ).strip()
+    return f"https://www.google.com/maps/search/?api=1&query={quote_plus(query)}"
+
+
+def expected_review_contract(prospect):
+    reviews = tuple(
+        ReviewEvidence(
+            author=review["author"],
+            rating=review["rating"],
+            date=review["date"],
+            platform=review["platform"],
+            text=review["text"],
+        )
+        for review in prospect.get("reviews", ())
+        if _usable_review_entry(review)
+    )
+    score, count = _aggregate_review_values(prospect)
+    reviews_url = expected_google_reviews_url(prospect)
+    if len(reviews) >= 3:
+        return ReviewAdmissionContract(
+            mode="cards",
+            source_reviews=reviews,
+            aggregate_score=score,
+            aggregate_count=count,
+            reviews_url=reviews_url if score is not None else None,
+        )
+    if score is not None:
+        return ReviewAdmissionContract(
+            mode="aggregate",
+            aggregate_score=score,
+            aggregate_count=count,
+            reviews_url=reviews_url,
+        )
+    return ReviewAdmissionContract(mode="omit")
+
+
+def _review_class_counts(contract):
+    counts = dict.fromkeys(REVIEW_CLASS_NAMES, 0)
+    if contract.mode == "cards":
+        counts.update(
+            {
+                "reviews-card-grid": 1,
+                "review-card": 3,
+                "review-stars-sm": 3,
+                "review-text": 3,
+                "review-author": 3,
+                "review-date": 3,
+                "review-platform": 3,
+            }
+        )
+        if contract.aggregate_score is not None:
+            counts.update(
+                {
+                    "reviews-summary-row": 1,
+                    "reviews-summary-stars": 1,
+                    "reviews-summary-text": 1,
+                    "reviews-summary-cta": 1,
+                }
+            )
+    elif contract.mode == "aggregate":
+        counts.update(
+            {
+                "reviews-aggregate": 1,
+                "reviews-stars-lg": 1,
+                "reviews-score": 1,
+                "reviews-count": 1,
+                "reviews-cta": 1,
+            }
+        )
+    return tuple(counts.items())
+
+
+def review_contract_instruction(contract):
+    if contract.mode == "omit":
+        return (
+            "MANDATORY REVIEW MODE: omit. Render no customer-review section, "
+            "review component, score, count, author, or review quotation."
+        )
+    if contract.mode == "aggregate":
+        return (
+            "MANDATORY REVIEW MODE: aggregate. Render the aggregate component "
+            f"with exact score {contract.aggregate_score!r}, exact count "
+            f"{contract.aggregate_count!r}, and exact href "
+            f"{json.dumps(contract.reviews_url)}."
+        )
+    summary = (
+        " Include the sourced aggregate summary with exact score "
+        f"{contract.aggregate_score!r}, exact count {contract.aggregate_count!r}, "
+        f"and exact href {json.dumps(contract.reviews_url)}."
+        if contract.aggregate_score is not None
+        else " Omit the aggregate summary because no complete aggregate exists."
+    )
+    return (
+        "MANDATORY REVIEW MODE: cards. Render exactly three complete review "
+        "objects from prospect.reviews without combining or rewriting fields."
+        f"{summary}"
+    )
+
+
+def required_build_class_counts(prospect):
+    """Return the exact page skeleton valid for the sanitized prospect."""
+    base_counts = (
+        BUILD_REQUIRED_CLASS_COUNTS
+        if prospect.get("phone")
+        else tuple(
+            (class_name, 0 if class_name == "coverage-band" else expected_count)
+            for class_name, expected_count in BUILD_REQUIRED_CLASS_COUNTS
+        )
+    )
+    return (*base_counts, *_review_class_counts(expected_review_contract(prospect)))
+
+
+def expected_build_form_action(prospect):
+    endpoint = prospect.get("formspree_endpoint")
+    if isinstance(endpoint, str) and endpoint.strip():
+        return endpoint.strip()
+    return "#"
+
+
+BUILD_SERVICES_RESPONSE_SCAFFOLD = (
+    '<div class="page-wrap section-gap">\n'
+    '  <div class="sec-hd">\n'
+    '    <span class="sec-title"><span class="sec-dot"></span>Services</span>\n'
+    '  </div>\n'
+    '  <div class="services-grid">\n'
+    + "\n".join(
+        '    <div class="service-card">\n'
+        f'      <div class="service-card-name">[SERVICE_{index}_NAME]</div>\n'
+        f'      <p class="service-card-desc">[SERVICE_{index}_DESCRIPTION]</p>\n'
+        '    </div>'
+        for index in range(1, 7)
+    )
+    + '\n  </div>\n'
+    '</div>'
 )
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
@@ -122,10 +389,7 @@ def sanitize_placeholders(prospect):
 
 
 def sanitize_reviews(prospect):
-    """Drop entries from prospect.reviews that still contain template
-    placeholder markers (EXAMPLE / REPLACE / etc.) in any of their
-    visible string fields. The remaining list is what the build will
-    actually render."""
+    """Keep only complete, source-backed review entries the build can render."""
     reviews = prospect.get("reviews")
     if not isinstance(reviews, list) or not reviews:
         return
@@ -135,16 +399,21 @@ def sanitize_reviews(prospect):
         if not isinstance(r, dict):
             dropped += 1
             continue
-        suspect_fields = ("author", "text", "date", "platform")
-        if any(_is_placeholder(r.get(f)) for f in suspect_fields):
+        if not _usable_review_entry(r):
             text_preview = (r.get("text") or "")[:60]
-            print(f"[*] Dropping placeholder review entry: author={r.get('author')!r}, text={text_preview!r}...")
+            print(
+                "[*] Dropping unusable review entry: "
+                f"author={r.get('author')!r}, text={text_preview!r}..."
+            )
             dropped += 1
             continue
         cleaned.append(r)
+    prospect["reviews"] = cleaned
     if dropped:
-        prospect["reviews"] = cleaned
-        print(f"[*] {dropped} placeholder review(s) removed; {len(cleaned)} real review(s) remain.")
+        print(
+            f"[*] {dropped} unusable review(s) removed; "
+            f"{len(cleaned)} source review(s) remain."
+        )
 
 
 def normalize_years(prospect, build_date):
@@ -206,6 +475,124 @@ def prepare_prospect(prospect, build_date=None):
 
 def slugify(name):
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "prospect"
+
+
+def build_deployment_comment(prospect):
+    """Render deployment metadata from trusted inputs, never model output."""
+    lines = [
+        "============================================================",
+        "NEW WEBSITE BUILD -- FROM SCRATCH",
+        "============================================================",
+        f"Prospect:        {prospect['business_name']}",
+        f"Trade:           {prospect['trade']}",
+        f"Location:        {prospect['city']}, {prospect['state']}",
+    ]
+    if prospect.get("build_date"):
+        lines.append(f"Generated:       {prospect['build_date']}")
+    lines.extend(
+        [
+            "",
+            "HOSTING:         Vercel (free, static, auto-SSL via Let's Encrypt)",
+            "LEAD HANDLER:    Formspree (free tier 50 submissions/mo)",
+            "ONGOING COST:    ~$15/yr (domain renewal only)",
+        ]
+    )
+
+    photos = prospect.get("photos")
+    first_photo = (
+        photos[0]
+        if isinstance(photos, list) and photos and isinstance(photos[0], dict)
+        else {}
+    )
+    if all(first_photo.get(field) for field in ("credit_name", "credit_url", "photo_id")):
+        lines.extend(
+            [
+                "",
+                f"HERO PHOTO:      {first_photo['credit_name']} via Unsplash ({first_photo['credit_url']})",
+                f"PHOTO ID:        {first_photo['photo_id']}",
+                "PHOTO LICENSE:   Unsplash License (free, no on-page attribution required;",
+                "                 credited here per Unsplash API terms of service)",
+            ]
+        )
+
+    site_slug = prospect.get("slug") or slugify(prospect["business_name"])
+    lines.extend(
+        [
+            "",
+            "DEPLOY:",
+            "1. Confirm prospect.formspree_endpoint is set on the form action.",
+            f"2. Run the production Vercel deploy command for project {site_slug}.",
+            "3. Custom domain: add it in Vercel dashboard, point DNS.",
+            "============================================================",
+        ]
+    )
+    return make_html_comment("\n".join(lines))
+
+
+def unverified_service_claim_phrases(prospect):
+    promises = prospect.get("service_promises")
+    normalized_promises = (
+        tuple(
+            promise.casefold()
+            for promise in promises
+            if isinstance(promise, str) and promise.strip()
+        )
+        if isinstance(promises, list)
+        else ()
+    )
+    unsupported_service_claims = tuple(
+        claim
+        for claim, evidence_phrases in GATED_SERVICE_CLAIMS.items()
+        if not any(
+            evidence in promise
+            for promise in normalized_promises
+            for evidence in evidence_phrases
+        )
+    )
+    unsupported_field_claims = tuple(
+        claim
+        for field, claims in FIELD_GATED_CLAIMS.items()
+        if not _field_claim_is_verified(prospect, field, normalized_promises)
+        for claim in claims
+    )
+    return tuple(dict.fromkeys((*unsupported_service_claims, *unsupported_field_claims)))
+
+
+def _field_claim_is_verified(prospect, field, normalized_promises):
+    if field in BOOLEAN_CLAIM_FIELDS and prospect.get(field) is True:
+        return True
+    evidence_phrases = FIELD_GATED_PROMISE_EVIDENCE.get(field, ())
+    if any(
+        evidence in promise
+        for promise in normalized_promises
+        for evidence in evidence_phrases
+    ):
+        return True
+    value = prospect.get(field)
+    if field == "master_electrician_license":
+        if isinstance(value, str) and value.strip():
+            return True
+        equivalent_credentials = (
+            prospect.get("licenses"),
+            prospect.get("certifications"),
+        )
+        return any(
+            phrase in credential.casefold()
+            for collection in equivalent_credentials
+            if isinstance(collection, list)
+            for credential in collection
+            if isinstance(credential, str)
+            for phrase in ("master electrician", "master-licensed", "master licensed")
+        )
+    if field == "ibew_local_number":
+        return (
+            isinstance(value, str)
+            and bool(value.strip())
+            or isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+        )
+    return False
 
 
 # Catalog of theme names recognized by 09-themes.md. The harness validates
@@ -440,20 +827,34 @@ def resolve_build_document_colors(prospect):
             DocumentColors(
                 accent=accent,
                 accent_dark=accent_dark or _darken_hex_color(accent),
-                secondary=secondary or trade_secondary or "#1F3A5F",
+                secondary=(
+                    secondary
+                    or trade_secondary
+                    or DEFAULT_DOCUMENT_SECONDARY
+                ),
             )
         )
 
-    palette = prospect.get("_computed_palette") or select_palette(prospect)
-    if not isinstance(palette, dict):
-        raise ValueError(
-            "No document palette is available; supply brand_colors or a supported trade."
+    palette = prospect.get("_computed_palette")
+    if palette is None:
+        palette = select_palette(prospect)
+    if palette is None:
+        return DocumentColors(
+            accent=DEFAULT_DOCUMENT_ACCENT,
+            accent_dark=_darken_hex_color(DEFAULT_DOCUMENT_ACCENT),
+            secondary=DEFAULT_DOCUMENT_SECONDARY,
         )
+    if not isinstance(palette, dict):
+        raise ValueError("_computed_palette must be a palette object.")
     return validate_document_colors(
         DocumentColors(
             accent=palette.get("accent"),
             accent_dark=palette.get("accent_dark"),
-            secondary=palette.get("secondary") or trade_secondary or "#1F3A5F",
+            secondary=(
+                palette.get("secondary")
+                or trade_secondary
+                or DEFAULT_DOCUMENT_SECONDARY
+            ),
         )
     )
 
@@ -597,7 +998,9 @@ def generate_build_html(prospect, generation_config=None, client=None):
         section_orders = f.read()
     with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
-    base_body = extract_template_body_scaffold(base_template)
+    homepage_classes = extract_homepage_class_names(base_template)
+    class_catalog = "\n".join(homepage_classes)
+    interior_only_classes = extract_interior_only_class_names(base_template)
 
     # Static block -- same bytes for every plumber/HVAC/electrician build.
     # Cache marker on the end of this lets consecutive builds within the
@@ -612,18 +1015,77 @@ def generate_build_html(prospect, generation_config=None, client=None):
     # 10-section-orders.md are dangling references -- the LLM never sees
     # the file contents. Slice 3b (PR #19) closed the gap for 10; this
     # closes it for 09 (issue #20). The block order
-    # INDUSTRY_DEFAULTS -> THEMES -> SECTION_ORDERS -> BASE_TEMPLATE
+    # INDUSTRY_DEFAULTS -> THEMES -> SECTION_ORDERS -> CLASS_CATALOG
     # walks the LLM through trade guidance, then typography/layout
     # personality, then section sequence, then the CSS framework.
     static_block = (
         f"INDUSTRY DEFAULTS:\n{industry_defaults}\n\n"
         f"THEMES:\n{themes_catalog}\n\n"
         f"SECTION ORDERS:\n{section_orders}\n\n"
-        f"BASE BODY TEMPLATE:\n{base_body}"
+        f"ALLOWED BODY CLASSES:\n{class_catalog}"
     )
     prospect_block = format_prospect_prompt_block(prospect)
     if len(prospect_block) > BUILD_USER_TRUNCATE:
         prospect_block = prospect_block[:BUILD_USER_TRUNCATE]
+
+    logo_url = prospect.get("logo_url")
+    prospect_photos = prospect.get("photos")
+    if not isinstance(logo_url, str) or not logo_url.strip():
+        logo_url = next(
+            (
+                candidate
+                for photo in (
+                    prospect_photos if isinstance(prospect_photos, list) else []
+                )
+                if isinstance(photo, dict) and photo.get("context") == "logo"
+                for candidate in (photo.get("url"), photo.get("src"), photo.get("path"))
+                if isinstance(candidate, str) and candidate.strip()
+            ),
+            None,
+        )
+    required_substitutions = {"business_name": prospect["business_name"]}
+    if prospect.get("phone"):
+        required_substitutions["phone"] = prospect["phone"]
+        phone_instruction = (
+            "VERIFIED BUSINESS PHONE: Render only the exact phone from "
+            "MANDATORY EXACT SUBSTITUTIONS as the business phone in the nav, "
+            "hero, and footer, with matching tel links."
+        )
+    else:
+        phone_instruction = (
+            "NO VERIFIED BUSINESS PHONE: Emit no business phone-like contact "
+            "value and no `tel:`, `sms:`, or phone-number messaging destination. "
+            "Keep the visitor phone input in the contact form. Omit "
+            "`.nav-phone`, `.cta-emergency`, `.cta-or`, `.ft-phone-label`, "
+            "`.ft-phone`, and `.coverage-band`; render `.cta-planned` as the "
+            "sole hero CTA anchored to `#contact`."
+        )
+    review_contract = expected_review_contract(prospect)
+    required_class_counts = required_build_class_counts(prospect)
+    if logo_url:
+        logo_instruction = (
+            f"Use this exact logo URL when rendering the nav: {json.dumps(logo_url)}."
+        )
+    else:
+        logo_instruction = (
+            "No logo URL was supplied. Omit the nav-logo image entirely, show the "
+            "text business name, and do not invent a logo URL."
+        )
+    response_boundary = (
+        f"{BUILD_RESPONSE_BOUNDARY_REMINDER}\n"
+        "MANDATORY CLASS COUNTS: "
+        f"{json.dumps(dict(required_class_counts), ensure_ascii=False)}\n"
+        "MANDATORY SERVICES: At the position required by "
+        "prospect._computed_section_order, reproduce the exact scaffold below. "
+        "Replace every square-bracket token with the selected prospect or "
+        "canonical-trade service content; do not emit the tokens themselves.\n"
+        f"{BUILD_SERVICES_RESPONSE_SCAFFOLD}\n"
+        "MANDATORY EXACT SUBSTITUTIONS: "
+        f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
+        f"{review_contract_instruction(review_contract)}\n"
+        f"{phone_instruction}\n"
+        f"{logo_instruction}"
+    )
 
     result = generate_text(
         body_generation_config(config),
@@ -631,6 +1093,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         user_parts=(
             PromptPart(static_block, cacheable=True),
             PromptPart(prospect_block),
+            PromptPart(response_boundary),
         ),
         temperature=BUILD_TEMPERATURE,
         cache_system_prompt=True,
@@ -668,11 +1131,27 @@ def generate_build_html(prospect, generation_config=None, client=None):
         colors=document_colors,
         title=prospect.get("display_name") or prospect["business_name"],
         body_theme="theme-light",
-        required_leading_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
+        trusted_head_comment=build_deployment_comment(prospect),
         forbidden_square_placeholders=extract_square_placeholder_tokens(
             system_prompt,
             static_block,
+            response_boundary,
         ),
+        forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
+        forbidden_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
+        forbidden_class_names=interior_only_classes,
+        forbidden_testimonial_tags=("blockquote", "cite"),
+        allowed_class_names=homepage_classes,
+        required_exposed_values=tuple(
+            (name, value)
+            for name, value in required_substitutions.items()
+            if isinstance(value, str) and value
+        ),
+        expected_phone=prospect.get("phone"),
+        expected_form_action=expected_build_form_action(prospect),
+        expected_reviews=review_contract,
+        required_class_counts=required_class_counts,
+        required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
     )
 
 

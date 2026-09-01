@@ -53,18 +53,15 @@ Examples:
 ### `[SERVICE_PROMISE]`
 
 Expand into the verified service promises from
-`prospect.service_promises` (an array of short strings such as
-`["Free estimates", "Same-day repair", "Flat-rate pricing"]`),
-joined with periods, terminated with a period.
+`prospect.service_promises` (an array of short, prospect-verified strings),
+joined with periods and terminated with a period.
 
 If `prospect.service_promises` is absent, empty, or null, render
-the empty string. **Never default-render "Free estimates",
-"Same-day service", "24/7 response", "upfront pricing",
-"flat-rate pricing", or "no franchise fees" -- those are
-operational claims about a specific prospect's business
-practices, not generic trade defaults**. The salesperson supplies
-verified promises in the prospect JSON; this skill does not
-invent them.
+the empty string. **Never default-render any scheduling, estimate, pricing,
+response-time, fee, or owner-availability promise -- those are operational
+claims about a specific prospect's business practices, not generic trade
+defaults**. The salesperson supplies verified promises in the prospect JSON;
+this skill does not invent them.
 
 ### `[YEARS]` and `since [YEAR]` (separate tenure placeholders)
 
@@ -123,13 +120,17 @@ A plumbing prospect's site visitor falls into two segments:
 
 1. **Emergency** (~70% of inbound traffic for plumbers) -- pipe burst,
    water heater failed, sewage backup, no water, no hot water. Decision
-   in minutes. They will call the first credible result. Phone CTA dominates.
+   in minutes. They will call the first credible result when a verified phone
+   is available; otherwise the request-service form must carry that intent.
 2. **Planned** (~30%) -- water heater replacement, repipe quote,
    bathroom remodel rough-in, recurring drain maintenance. Decision in
    days. Form CTA acceptable.
 
-A plumber site MUST serve emergency first. Phone visible in nav, sticky
-on mobile, "Available 24/7" badge if applicable. Form is secondary.
+A plumber site MUST serve emergency intent first. When `prospect.phone` is set,
+render that exact phone in the nav and hero and keep the form secondary. When
+`prospect.phone` is null or empty, do not invent a phone action; make the
+request-service form the primary path. Render an "Available 24/7" badge only
+when the corresponding prospect field is verified.
 
 ### Canonical service catalog
 
@@ -139,7 +140,7 @@ specify, OR to augment a sparse list. Prospect-specified items win.
 | Service                       | One-line description                                                |
 |-------------------------------|---------------------------------------------------------------------|
 | Emergency Leak Repair         | 24/7 response to burst pipes, slab leaks, and active water damage.  |
-| Water Heater Repair & Install | Tank and tankless systems. Same-day replacement available.          |
+| Water Heater Repair & Install | Tank and tankless system repair, replacement, and installation.      |
 | Drain Cleaning                | Hydro-jet and snake service for kitchen, bath, and main lines.      |
 | Sewer Line Repair             | Camera inspection, spot repair, and trenchless replacement.         |
 | Sump Pump Service             | Repair, replacement, and battery backup installation.               |
@@ -224,10 +225,9 @@ service-promise card just to fill the 3rd slot.
 - "Licensed & Insured" -- render only if `prospect.licensed_and_insured` is true.
 
 **Verified service promises** (require a matching entry in `prospect.service_promises`):
-- "Upfront Flat-Rate Pricing" / "No Surprise Fees" -- requires `"Flat-rate pricing"`, `"Upfront pricing"`, or close equivalent in `service_promises`.
-- "Same-Day Service" -- requires `"Same-day service"` entry.
-- "Free Estimates" -- requires `"Free estimates"` entry.
-- "Owner Answers the Phone After Hours" -- specific business-practice claim; requires an explicit `service_promises` entry naming this. Never inferred from `has_24_7`.
+- Any pricing or billing benefit requires a close equivalent in `service_promises`.
+- Any scheduling or estimate benefit requires a close equivalent in `service_promises`.
+- Any owner-availability benefit requires an explicit matching entry and is never inferred from `has_24_7`.
 
 **Safe generic positioning** (true by definition for the skill's target audience -- rural small-town owner-operators with no franchise affiliation, owner-or-tight-crew operations):
 - "Local Service, Not a Call-Center Dispatch"
@@ -427,7 +427,8 @@ two plumber prospects could share a theme and still get different
 palette variants, or share a palette and get different themes.
 
 Apply the COLOR DISCIPLINE rule from `02-redesign-gen-prompt.md`: accent
-appears on AT MOST 3-4 elements (primary CTA, sticky phone, one badge).
+appears on AT MOST 3-4 elements (primary CTA, verified-phone CTA when present,
+one badge).
 
 ---
 
@@ -440,8 +441,8 @@ An HVAC prospect's site visitor falls into two segments:
 1. **Emergency** (~60% of inbound traffic) -- AC failure in summer,
    no heat in winter, furnace making concerning noises before it
    quits. Decision in hours rather than minutes (unlike a burst
-   pipe). They will call the first credible result. Phone CTA
-   dominates.
+   pipe). They will call the first credible result when a verified phone is
+   available; otherwise the request-service form must carry that intent.
 2. **Planned** (~40%) -- end-of-life system replacement (15-25 year
    cycle), new-construction install, ductwork upgrade, seasonal
    tune-up, indoor air quality improvements. Decision in days to
@@ -449,10 +450,12 @@ An HVAC prospect's site visitor falls into two segments:
 
 Compared to plumbing, HVAC emergencies have slightly more grace
 period and a higher proportion of planned high-ticket work
-(~$5-15K full system installs). The site should still serve
-emergency first -- phone visible in nav, sticky on mobile, "24/7"
-badge if applicable -- but the planned-work pitch carries more
-weight here than for plumber.
+(~$5-15K full system installs). The site should still serve emergency intent
+first. When `prospect.phone` is set, render that exact phone in the nav and
+hero; when it is null or empty, do not invent a phone action and make the
+request-service form primary. A "24/7" badge still requires the corresponding
+verified field. The planned-work pitch carries more weight here than for
+plumber.
 
 ### Canonical service catalog
 
@@ -462,7 +465,7 @@ items always win.
 
 | Service                       | One-line description                                                |
 |-------------------------------|---------------------------------------------------------------------|
-| AC Repair & Installation      | Window units, central AC, mini-splits. Same-day repair, multi-day install. |
+| AC Repair & Installation      | Window units, central AC, and mini-split repair and installation.         |
 | Furnace Repair & Installation | Gas, electric, oil. Repair to full system replacement.              |
 | Heat Pump Service             | Installation, repair, and refrigerant service for heat pumps.       |
 | Duct Cleaning & Sealing       | Air duct cleaning, sealing leaks, improving system airflow.         |
@@ -566,10 +569,9 @@ service-promise card just to fill the 3rd slot.
 - "Licensed & Insured" -- render only if `prospect.licensed_and_insured` is true.
 
 **Verified service promises** (require a matching entry in `prospect.service_promises`):
-- "Upfront Flat-Rate Pricing" / "No Warranty-Company Runaround" -- requires `"Flat-rate pricing"`, `"Upfront pricing"`, or close equivalent in `service_promises`.
-- "Same-Day Service" -- requires `"Same-day service"` entry.
-- "Free Estimates on System Replacement" -- requires `"Free estimates"` entry.
-- "Owner Answers the Phone After Hours" -- requires explicit `service_promises` entry; never inferred from `has_24_7`.
+- Any pricing or billing benefit requires a close equivalent in `service_promises`.
+- Any scheduling or estimate benefit requires a close equivalent in `service_promises`.
+- Any owner-availability benefit requires an explicit matching entry and is never inferred from `has_24_7`.
 
 **Verified trade credential** (gated by an explicit prospect field):
 - "EPA-Certified Technicians" -- render only if `prospect.epa_certified` is true. EPA Section 608 cert IS near-universal among professional HVAC techs (legally required for refrigerant handling), but "near-universal" is not "verified" -- the salesperson must confirm during intake before this card renders.
@@ -710,8 +712,8 @@ in hue and weight to fingerprint two HVAC contractors in the
 same service area.
 
 Apply the COLOR DISCIPLINE rule from `02-redesign-gen-prompt.md`:
-accent appears on AT MOST 3-4 elements (primary CTA, sticky phone,
-one badge). The secondary emergency red is reserved for emergency
+accent appears on AT MOST 3-4 elements (primary CTA, verified-phone CTA when
+present, one badge). The secondary emergency red is reserved for emergency
 CTAs only -- not used as a general accent.
 
 ---
@@ -881,10 +883,9 @@ service-promise card just to fill the 3rd slot.
 - "Licensed & Insured" -- render only if `prospect.licensed_and_insured` is true.
 
 **Verified service promises** (require a matching entry in `prospect.service_promises`):
-- "Upfront Flat-Rate Pricing" / "No Breaker-By-Breaker Upcharges" -- requires `"Flat-rate pricing"`, `"Upfront pricing"`, or close equivalent in `service_promises`.
-- "Same-Day Service" -- requires `"Same-day service"` entry.
-- "Free Estimates on Panel Upgrades / Generator Installs" -- requires `"Free estimates"` entry.
-- "Owner Answers the Phone After Hours" -- requires explicit `service_promises` entry; never inferred.
+- Any pricing or billing benefit requires a close equivalent in `service_promises`.
+- Any scheduling or estimate benefit requires a close equivalent in `service_promises`.
+- Any owner-availability benefit requires an explicit matching entry and is never inferred from `has_24_7`.
 
 **Verified trade credential** (gated by explicit prospect fields):
 - "Master Electrician on Staff" -- render only if `prospect.master_electrician_license` (or equivalent in `prospect.licenses` / `prospect.certifications`) is verified. Same gating rule as the Tier 3 headline upgrade in the credential-stripping section above. Not "near-universal" the way EPA-cert is for HVAC -- electrician licensing varies meaningfully by state and not every electrician holds Master; verify before rendering.
@@ -1013,7 +1014,7 @@ giving same-trade prospects in the same area visibly different
 accents.
 
 Apply the COLOR DISCIPLINE rule from `02-redesign-gen-prompt.md`:
-accent appears on AT MOST 3-4 elements (primary CTA, sticky phone,
-one badge). The secondary navy is reserved for emergency CTAs and
+accent appears on AT MOST 3-4 elements (primary CTA, verified-phone CTA when
+present, one badge). The secondary navy is reserved for emergency CTAs and
 high-ticket-install CTAs (panel upgrade, generator) -- not used
 as a general accent.
