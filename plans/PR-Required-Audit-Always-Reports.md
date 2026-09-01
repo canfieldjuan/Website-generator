@@ -52,7 +52,7 @@ means the audit actually ran rather than a synthetic no-op reporting success.
   with no exact violations.
 - `git diff --check` passed. `actionlint` was not installed locally; GitHub
   workflow parsing remains part of the pull-request proof.
-- Pending `bash scripts/local_pr_review.sh` after commit.
+- `bash scripts/local_pr_review.sh` passed against `origin/main`.
 - The pull request must itself receive a successful required `audit` check.
 
 ## Estimated diff size
