@@ -2503,7 +2503,7 @@ class PromptContractTests(unittest.TestCase):
 
 class AtomicWriteAndCliTests(unittest.TestCase):
     def test_uncatalogued_trade_uses_generic_document_colors(self):
-        colors = build._resolve_build_document_colors(
+        colors = build.resolve_build_document_colors(
             {"business_name": "Test Business", "trade": "roofer"}
         )
 
@@ -2513,7 +2513,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
     def test_malformed_computed_palette_does_not_use_generic_fallback(self):
         with self.assertRaisesRegex(ValueError, "_computed_palette"):
-            build._resolve_build_document_colors(
+            build.resolve_build_document_colors(
                 {
                     "business_name": "Test Business",
                     "trade": "roofer",
@@ -2622,6 +2622,25 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 "the text business name, and do not invent a logo URL."
             )
         )
+
+    def test_build_generator_validates_brand_colors_before_model_request(self):
+        client = FakeLocalClient()
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "brand_colors": {
+                "accent": "#123456",
+                "secondary": "red",
+            },
+        }
+
+        with self.assertRaisesRegex(GeneratedHtmlError, "secondary.*six-digit"):
+            build.generate_build_html(prospect, config(), client)
+
+        self.assertEqual(client.calls, [])
 
     def test_build_claim_allowlist_uses_the_same_source_evidence_as_admission(self):
         unsupported = {

@@ -21,6 +21,7 @@ import re
 import json
 import hashlib
 import argparse
+import copy
 from datetime import date
 from urllib.parse import quote_plus
 
@@ -43,6 +44,7 @@ from lib.generation import (
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
+    canonical_email_address,
     extract_homepage_class_names,
     extract_interior_only_class_names,
     extract_square_placeholder_tokens,
@@ -54,6 +56,7 @@ from lib.generation import (
     require_complete_text,
     resolve_generation_config,
     short_text_generation_config,
+    validate_document_colors,
 )
 # lib.email.send_pitch_email is intentionally NOT imported here. The
 # from-scratch build flow uses the manual email_draft.md workflow
@@ -365,6 +368,7 @@ BUILD_SERVICES_RESPONSE_SCAFFOLD = (
 )
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
+OPTIONAL_STRING_FIELDS = ("display_name", "owner_email", "address")
 
 # Substring markers that indicate a prospect-JSON field was left at its
 # template default. Case-insensitive substring match against the value.
@@ -457,12 +461,48 @@ def load_prospect(path):
         raise FileNotFoundError(f"Prospect JSON not found: {path}")
     with open(path, "r") as f:
         prospect = json.load(f)
-    missing = [k for k in REQUIRED_FIELDS if not prospect.get(k)]
-    if missing:
-        raise ValueError(f"Prospect JSON missing required field(s): {', '.join(missing)}")
+    return prepare_prospect(prospect)
+
+
+def prepare_prospect(prospect, build_date=None):
+    """Validate and normalize an in-memory prospect document."""
+    if not isinstance(prospect, dict):
+        raise ValueError("Prospect JSON must contain one object.")
+    prospect = copy.deepcopy(prospect)
+    invalid = [
+        key
+        for key in REQUIRED_FIELDS
+        if not isinstance(prospect.get(key), str) or not prospect[key].strip()
+    ]
+    if invalid:
+        raise ValueError(
+            "Prospect JSON required field(s) must be non-empty strings: "
+            f"{', '.join(invalid)}"
+        )
+    invalid_optional_strings = [
+        key
+        for key in OPTIONAL_STRING_FIELDS
+        if prospect.get(key) is not None and not isinstance(prospect[key], str)
+    ]
+    if invalid_optional_strings:
+        raise ValueError(
+            "Prospect JSON optional field(s) must be strings or null: "
+            f"{', '.join(invalid_optional_strings)}"
+        )
     sanitize_placeholders(prospect)
+    owner_email = prospect.get("owner_email")
+    if isinstance(owner_email, str):
+        owner_email = owner_email.strip()
+        if canonical_email_address(owner_email) is None:
+            raise ValueError(
+                "Prospect JSON owner_email must be a valid email address or null."
+            )
+        prospect["owner_email"] = owner_email
+    address = prospect.get("address")
+    if isinstance(address, str):
+        prospect["address"] = address.strip() or None
     sanitize_reviews(prospect)
-    build_date = date.today()
+    build_date = build_date or date.today()
     prospect["build_date"] = build_date.isoformat()
     normalize_years(prospect, build_date)
     return prospect
@@ -1025,7 +1065,7 @@ def _darken_hex_color(value):
     return "#" + "".join(f"{round(channel * 0.75):02X}" for channel in channels)
 
 
-def _resolve_build_document_colors(prospect):
+def resolve_build_document_colors(prospect):
     brand_colors = prospect.get("brand_colors")
     trade_secondary = _extract_trade_secondary(prospect.get("trade", ""))
     if brand_colors:
@@ -1047,10 +1087,16 @@ def _resolve_build_document_colors(prospect):
             )
         if not accent:
             raise ValueError("brand_colors does not contain a primary color.")
-        return DocumentColors(
-            accent=accent,
-            accent_dark=accent_dark or _darken_hex_color(accent),
-            secondary=secondary or trade_secondary or DEFAULT_DOCUMENT_SECONDARY,
+        return validate_document_colors(
+            DocumentColors(
+                accent=accent,
+                accent_dark=accent_dark or _darken_hex_color(accent),
+                secondary=(
+                    secondary
+                    or trade_secondary
+                    or DEFAULT_DOCUMENT_SECONDARY
+                ),
+            )
         )
 
     palette = prospect.get("_computed_palette")
@@ -1064,14 +1110,16 @@ def _resolve_build_document_colors(prospect):
         )
     if not isinstance(palette, dict):
         raise ValueError("_computed_palette must be a palette object.")
-    return DocumentColors(
-        accent=palette.get("accent"),
-        accent_dark=palette.get("accent_dark"),
-        secondary=(
-            palette.get("secondary")
-            or trade_secondary
-            or DEFAULT_DOCUMENT_SECONDARY
-        ),
+    return validate_document_colors(
+        DocumentColors(
+            accent=palette.get("accent"),
+            accent_dark=palette.get("accent_dark"),
+            secondary=(
+                palette.get("secondary")
+                or trade_secondary
+                or DEFAULT_DOCUMENT_SECONDARY
+            ),
+        )
     )
 
 
@@ -1192,7 +1240,13 @@ def build_hero_prompt(prospect):
     )
 
 
+def format_prospect_prompt_block(prospect):
+    """Serialize the variable prospect block exactly as generation sends it."""
+    return f"PROSPECT JSON:\n{json.dumps(prospect, indent=2)}"
+
+
 def generate_build_html(prospect, generation_config=None, client=None):
+    document_colors = resolve_build_document_colors(prospect)
     config = generation_config or resolve_generation_config()
     print(
         f"[*] Generating site for {prospect['business_name']} using "
@@ -1236,7 +1290,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"SECTION ORDERS:\n{section_orders}\n\n"
         f"ALLOWED BODY CLASSES:\n{class_catalog}"
     )
-    prospect_block = f"PROSPECT JSON:\n{json.dumps(prospect, indent=2)}"
+    prospect_block = format_prospect_prompt_block(prospect)
     if len(prospect_block) > BUILD_USER_TRUNCATE:
         prospect_block = prospect_block[:BUILD_USER_TRUNCATE]
 
@@ -1348,7 +1402,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             base_template=base_template,
             theme_catalog=themes_catalog,
             theme_name=prospect.get("_computed_theme") or DEFAULT_THEME,
-            colors=_resolve_build_document_colors(prospect),
+            colors=document_colors,
             title=prospect.get("display_name") or prospect["business_name"],
             body_theme="theme-light",
             trusted_head_comment=build_deployment_comment(prospect),
@@ -1451,6 +1505,46 @@ def generate_email_draft(prospect, generation_config=None, client=None):
     return draft.strip()
 
 
+def apply_design_selections(prospect, *, announce=True):
+    """Apply the deterministic design choices shared by CLI and Connect."""
+    # Deterministic theme selection. Setting this on the prospect dict
+    # before HTML generation means the LLM reads `_computed_theme` as a
+    # fact in the prospect JSON and applies the matching block from
+    # references/09-themes.md. Two builds of the same prospect always
+    # pick the same theme; different prospects within a trade get
+    # different themes from the trade's allowed_themes list in 07.
+    prospect["_computed_theme"] = select_theme(prospect)
+    if announce:
+        print(f"[*] Theme: {prospect['_computed_theme']}")
+
+    # Deterministic palette selection. Independent from theme (different
+    # hash slice). When prospect.brand_colors is set this returns None
+    # and the LLM uses those colors verbatim per 06's :root rule.
+    palette = select_palette(prospect)
+    if palette:
+        prospect["_computed_palette"] = palette
+        if announce:
+            print(f"[*] Palette: accent={palette['accent']} accent_dark={palette['accent_dark']}")
+
+    # Hero shape coupled to theme. Same prospect -> same theme ->
+    # same hero shape. Couples visual language: editorial themes get
+    # split-photo heroes, minimal themes get gradient (no photo),
+    # everything else gets the historical fullbleed.
+    prospect["_computed_hero_shape"] = select_hero_shape(prospect)
+    if announce:
+        print(f"[*] Hero shape: {prospect['_computed_hero_shape']}")
+
+    # Section ordering. Independent of theme/palette/hero-shape --
+    # uses md5[16:24] slice so it varies even when two prospects
+    # collide on the earlier axes. The LLM reads
+    # _computed_section_order and renders sections in the order
+    # documented in references/10-section-orders.md for that name.
+    prospect["_computed_section_order"] = select_section_order(prospect)
+    if announce:
+        print(f"[*] Section order: {prospect['_computed_section_order']}")
+    return prospect
+
+
 def main(
     prospect_json_path,
     *,
@@ -1472,38 +1566,7 @@ def main(
 
     print(f"[*] Building {prospect['business_name']} ({prospect['trade']}, {prospect['city']}, {prospect['state']})")
     print(f"[*] Output: {output_dir}/")
-
-    # Deterministic theme selection. Setting this on the prospect dict
-    # before HTML generation means the LLM reads `_computed_theme` as a
-    # fact in the prospect JSON and applies the matching block from
-    # references/09-themes.md. Two builds of the same prospect always
-    # pick the same theme; different prospects within a trade get
-    # different themes from the trade's allowed_themes list in 07.
-    prospect["_computed_theme"] = select_theme(prospect)
-    print(f"[*] Theme: {prospect['_computed_theme']}")
-
-    # Deterministic palette selection. Independent from theme (different
-    # hash slice). When prospect.brand_colors is set this returns None
-    # and the LLM uses those colors verbatim per 06's :root rule.
-    palette = select_palette(prospect)
-    if palette:
-        prospect["_computed_palette"] = palette
-        print(f"[*] Palette: accent={palette['accent']} accent_dark={palette['accent_dark']}")
-
-    # Hero shape coupled to theme. Same prospect -> same theme ->
-    # same hero shape. Couples visual language: editorial themes get
-    # split-photo heroes, minimal themes get gradient (no photo),
-    # everything else gets the historical fullbleed.
-    prospect["_computed_hero_shape"] = select_hero_shape(prospect)
-    print(f"[*] Hero shape: {prospect['_computed_hero_shape']}")
-
-    # Section ordering. Independent of theme/palette/hero-shape --
-    # uses md5[16:24] slice so it varies even when two prospects
-    # collide on the earlier axes. The LLM reads
-    # _computed_section_order and renders sections in the order
-    # documented in references/10-section-orders.md for that name.
-    prospect["_computed_section_order"] = select_section_order(prospect)
-    print(f"[*] Section order: {prospect['_computed_section_order']}")
+    apply_design_selections(prospect)
 
     # Hero image acquisition (unless skipped or prospect already provided one).
     # Path 1 (Unsplash) is tried first when UNSPLASH_ACCESS_KEY is set --

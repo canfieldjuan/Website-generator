@@ -10,6 +10,7 @@ Two parallel implementations of the same pipeline: fetch a small-business websit
 |---|---|---|
 | **Redesign pipeline** | `pipeline.py` | Client already has a website — you're pitching a modernised version |
 | **From-scratch build** | `build.py` | No existing site — you fill a prospect JSON and generate one cold |
+| **Local Connect provider** | `connect_provider.py` | Another local app supplies prospect JSON and receives generated HTML |
 | **Claude skill** | `SKILL.md` + `references/*.md` | Running inside a Claude skill host (no Python at runtime) |
 
 All three share the same prompt files in `references/`. The skill and the scripts are two UIs on top of the same LLM prompts.
@@ -155,6 +156,47 @@ python build.py examples/my-prospect.json --generation-provider openrouter --gen
 
 Output site: `outputs/builds/<slug>/index.html`
 Pitch email draft: `outputs/email_drafts/<slug>.md` (never published to Vercel)
+
+### Expose local generation through Local Connect
+
+Local Connect exposes one capability: `website.generate.single-page` version
+`1.0`. It accepts one bounded `application/json` prospect artifact and returns
+one complete `text/html` artifact. The provider always uses local
+`qwen/qwen3.8-27b`; it does not scrape a URL, generate images or email, deploy,
+or fall back to OpenRouter.
+
+Start standalone vLLM, then run the Connect provider in a second shell:
+
+```bash
+export VLLM_MODEL_PATH=/absolute/path/to/Qwen3.8-27B-Q4_K_M.gguf
+# Set VLLM_BIN too when vllm is not on PATH.
+scripts/start_vllm_server.sh
+
+# Second shell, after /health reports ready:
+python connect_provider.py
+```
+
+The provider fails before registration if vLLM is unhealthy or does not
+serve that exact model alias. While running, it publishes an owner-private v2 registration under
+`$XDG_RUNTIME_DIR/local-connect/v2/providers/`. Its durable provider identity,
+accepted inputs, job states, and completed HTML are retained in
+`$XDG_STATE_HOME/website-redesign/` (or
+`~/.local/state/website-redesign/`). The bearer token rotates on each process
+start while the provider instance ID remains stable with that retained state.
+
+Every Connect route also requires the independently signed local entitlement
+feature `connect.capability_exchange`. The license is read from
+`$XDG_CONFIG_HOME/local-connect/entitlement-v1.json` (or
+`~/.config/local-connect/entitlement-v1.json`) on each request, so activation or
+expiry takes effect without restarting the provider. Source checkouts contain
+no official issuer key and therefore fail closed; official keyring and license
+provisioning are tracked in issue #27. Test fixture keys must never be used as
+production authority.
+
+Only one process and one active generation job are allowed for that state.
+Identical caller-owned job IDs replay idempotently; conflicting reuse is
+rejected. An accepted job resumes after restart, while a job interrupted after
+generation began becomes an explicit retryable `PROVIDER_INTERRUPTED` failure.
 
 ---
 
