@@ -457,9 +457,12 @@ as any other invalid token.
   scripts/start_vllm_server.sh
   ```
 
-  In a second shell, this exact harness created the isolated store and active
-  test gate, submitted and polled the real HTTP job, decoded the returned
-  artifact, and enforced the result checks reported above:
+  In a second shell, the run used the self-contained harness below. The recorded
+  invocation included additional progress and explicit error prints, omitted
+  here because they do not change the route, gate, persistence, polling, or
+  assertions. This reproduction command creates the isolated store and active
+  test gate, submits and polls the real HTTP job, decodes the returned artifact,
+  and enforces the result checks reported above:
 
   ```bash
   LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8000/v1 \
