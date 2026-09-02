@@ -383,6 +383,29 @@ as any other invalid token.
   preflight commits, so that failed attempt is diagnostic evidence rather than
   final-head acceptance. The canonical fixture and both zero-count scans remain
   pending; no CPU, cloud, deployment, email, or image fallback was used.
+- After the GPU returned, the canonical
+  `examples/prospect-plumber-template.json` standalone build completed against
+  `local:qwen/qwen3.8-27b` with image generation, email drafting, and deployment
+  disabled. Its 73,121-byte artifact had SHA-256
+  `e9ff4c2827b62be4a1b7f24f26169de39b4f6d68f96b7606cfd3a454a853ddf8`;
+  the unresolved-placeholder and fabricated-claim scans each returned `0`.
+- Two subsequent controlled `ProviderRuntime` jobs exercised the real durable
+  Connect queue, canonical JSON adapter, local generator, admission boundary,
+  and terminal persistence in temporary state. The first candidate invented
+  the uncatalogued `nav-phone-wrap` class; the second candidate failed location
+  admission. Each used the one bounded local correction and then persisted
+  `status=failed`, `error_code=MODEL_RESPONSE_INVALID`, with zero output bytes.
+  No repository, deployment, email, or image output was written. These runs
+  prove fail-closed behavior, not successful Connect artifact delivery; the
+  required successful terminal Connect fixture remains pending.
+- The vLLM server was stopped after the bounded attempts. The post-stop compute
+  process query was empty; the RTX 3090 reported 247 MiB used.
+- `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935
+  /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
+  -m unittest
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_location_and_radius_claims_to_source
+  tests.test_connect_provider.GenerationSeamTests` passed 23 focused location
+  and Connect adapter tests in 3.174 seconds on the merged branch.
 
 ## Final diff size
 
