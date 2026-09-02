@@ -645,6 +645,46 @@ alter image acquisition or mirroring, add model retries, enable CPU or cloud
 fallback, change deployment/email-send behavior, or weaken the existing phone,
 email, address, tenure, review, form-action, class, and HTML-structure gates.
 
+### Final identity, action-destination, and credential contract revision
+
+Exact-head review exposed three confirmed source-ownership gaps and one partly
+overstated tenure finding. The redesign callers supply the extracted site name
+only as trusted document-title metadata, so generated visible content can omit
+or replace that identity. Generated anchors and form destinations are checked
+for executable schemes, contact values, review links, and form endpoints in
+separate paths, but there is no exhaustive source-owned destination manifest;
+an unrelated valid HTTPS CTA can therefore pass. Finally, a verified
+`master_electrician_license` authorizes generic `Master Electrician` wording but
+does not bind the rendered license value. The bare form `50 years experience`
+is outside the numeric-tenure patterns. In contrast, the existing contextual
+pattern already matches `Serving families for 50 years`; that side requires a
+regression test, not another matcher.
+
+The correct fix must require the exact extracted business name to be visibly
+present on both redesign page types. Shared generated-body admission must accept
+a typed action-destination contract and reject every generated anchor, form
+action, or submit override that is neither an internal fragment nor an exact
+URL/contact destination from source evidence. The build caller must admit only
+its verified phone/email, selected form action, and sourced review destination;
+the redesign callers must admit explicit URL fields from extracted/enriched
+site JSON plus links in the fetched interior source. The prompt sent to each
+model must describe the same exhaustive destination set.
+
+When a direct Master Electrician license value exists, every generated
+`Master Electrician` occurrence must contain the canonical exact phrase
+`Master Electrician licensed, #<source value>`; equivalent credential text may
+continue to authorize only the exact source credential substring. Numeric
+tenure admission must additionally recognize bare `N years
+experience/service` wording while preserving the contextual `serving ... for N
+years` behavior. Tests must cover absent, wrong, exact, mixed, attribute, and
+renamed paths for these boundaries.
+
+This closure must not fetch URLs, rewrite generated links, change source JSON or
+Connect schemas, broaden credential inference, require optional credential or
+tenure copy, change layout/copy/CSS, alter provider/runtime behavior, or affect
+image acquisition, deployment, and email-send effects. Same-document `#`
+destinations remain allowed without becoming source data.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -1102,6 +1142,22 @@ override before assembly.
 - Mocked local transport tests prove the configured request reaches the
   vLLM chat route once, disables thinking, preserves finish status, and
   fails closed on malformed, reasoning, tool, and multi-choice responses.
+- `python3 -m unittest tests.test_generation.BodyAssemblyTests
+  tests.test_generation.AtomicWriteAndCliTests` — 77 focused admission and
+  caller tests passed in 6.241 seconds after the final identity,
+  action-destination, credential-value, and tenure closure. The boundary set
+  includes empty, exact, mixed valid/invalid, attribute, contact-scheme,
+  invented relative/absolute destination, wrong identity, wrong license,
+  exact split-inline license, unproven insurance, contextual tenure, and
+  fetched-interior-source cases.
+- The subsequent empty-license boundary probe
+  (`test_build_generator_binds_master_electrician_license_value` plus the
+  existing field-family test) passed after requiring a non-empty credential
+  value following `#` prefix normalization; values `""`, `"#"`, and `" ## "`
+  remain unverified and cannot authorize licensed wording.
+- `python3 -m py_compile build.py pipeline.py lib/generation.py` and
+  `git diff --check` — passed after the same closure. The repository-wide CI
+  unit gate remains the authoritative full-suite check for the pushed head.
 
 ## Estimated diff size
 
