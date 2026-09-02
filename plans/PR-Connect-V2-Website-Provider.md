@@ -299,6 +299,18 @@ as any other invalid token.
 
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935
   /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
+  -m unittest -v tests.test_connect_provider.GenerationSeamTests` — 22 tests
+  passed in 2.844 seconds on the combined head. The suite includes truthy and
+  falsy malformed address rejection before generation, blank-address omission,
+  exact local-Qwen selection, literal-loopback enforcement, photo-free hero
+  fallback, input/model error ownership, and registration-after-listener order.
+- Current recovery evidence does not permit another live fixture:
+  `nvidia-smi -L` enumerates only the NVIDIA GeForce RTX 4060 Ti, while `lsblk`
+  shows the `Dev-Drive` partition with no mountpoint. The previously used vLLM
+  binary and 27B model paths are therefore unavailable, and the RTX 3090 is not
+  currently enumerated. No model was started on the display GPU.
+- `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935
+  /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
   -m unittest -v
   tests.test_connect_provider.GenerationSeamTests.test_optional_owner_email_must_be_string_or_null
   tests.test_connect_provider.GenerationSeamTests.test_malformed_owner_email_is_nonretryable_before_generation
@@ -362,20 +374,19 @@ as any other invalid token.
   deployment, email, image, or file-write side effect.
 - The llama.cpp server was stopped after acceptance; the post-run GPU query
   reported 15 MiB used and 0% utilization on the RTX 3090.
-- The mandated final-head plumber fixture was rerun on CUDA after the admission
-  fixes. GPU 0 reached 96% utilization at 387.79 W, but the existing prompt
-  still seeded the unsupported `Not a Franchise` claim and final admission
-  correctly rejected it. The prompt now removes unverified claim examples
-  through the same source-evidence authority; six focused boundary tests and
-  the combined 176-test suite pass. The next CUDA fixture request did not return
-  model output because `llama.cpp` aborted with `CUDA error: unspecified launch
-  failure`, after which `nvidia-smi` could not obtain a device handle for GPU 0.
-  The canonical fixture and its two zero-count scans therefore remain pending;
-  no CPU, cloud, deployment, email, or image fallback was used.
+- The first post-replacement Connect attempt proved the pinned upstream adapter
+  could load the exact Qwen3.8 GGUF as `Qwen3_5ForCausalLM` under standalone
+  vLLM and make the loopback API healthy. The real Connect generation request
+  then killed the engine during prompt prefill with `CUDA error: unspecified
+  launch failure`; no artifact or content-safety scan result was produced.
+  The current combined head contains later address admission and pinned-adapter
+  preflight commits, so that failed attempt is diagnostic evidence rather than
+  final-head acceptance. The canonical fixture and both zero-count scans remain
+  pending; no CPU, cloud, deployment, email, or image fallback was used.
 
 ## Final diff size
 
-Measured against the current provider base: 13 files changed, with 3,542
-insertions and 53 deletions across the durable provider and its contract,
+Measured against the current provider base: 13 files changed, with 3,828
+insertions and 55 deletions across the durable provider and its contract,
 concurrency, and restart boundary suite. Removing those tests or persistence
 boundaries would make the advertised asynchronous capability unproved.
