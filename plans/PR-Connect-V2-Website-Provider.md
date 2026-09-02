@@ -97,6 +97,33 @@ worker `ValueError` or `UnicodeEncodeError` exceptions. Tests must drive the
 real generated-body validator through the worker and prove both ownership
 directions.
 
+### Final input and hero-asset admission contract
+
+Exact-head review exposed two remaining admission-order defects. Shared prospect
+preparation accepts a non-string `owner_email`, even though final generated-body
+validation treats that value as an exact source-owned string; the deterministic
+input defect therefore spends a model call and is mislabeled as a retryable model
+response failure. Separately, the Connect-only hero predicate treats any nonempty
+HTTP authority or `data:image/` prefix as a usable asset, so malformed authorities,
+empty data payloads, and invalid base64 can preserve a photo-dependent layout that
+the single-artifact capability cannot actually satisfy.
+
+The correct fix must validate `owner_email` as string-or-null in the shared
+pre-generation prospect boundary and retain `INPUT_INVALID` as its non-retryable
+Connect outcome. It must admit a remote hero only when an HTTP(S) URL has a valid
+host authority, and admit an embedded hero only when its image data payload is
+nonempty and decodes according to its data-URL encoding. Boundary tests must prove
+both accepted and rejected sides, including falsy optional-field values, malformed
+HTTP authorities, empty data, invalid base64, valid absolute URLs, and valid
+embedded image data.
+
+This revision must not fetch or inspect remote images, add a second artifact,
+change hero selection for valid supplied assets, alter generated HTML or job/error
+schemas, broaden model-error classification, or validate unrelated optional
+prospect fields. The repository-mandated plumber fixture and both zero-count
+content-safety scans must then be rerun on the final combined head using the CUDA
+llama.cpp runtime before the slice is called verified.
+
 ## Scope (this PR)
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
@@ -122,6 +149,10 @@ directions.
    rules.
 10. Classify unencodable model body text as retryable invalid model response
     while preserving strict non-retryable Unicode rejection on input.
+11. Reject malformed `owner_email` and unusable hero-asset references before
+    generation while preserving valid remote and embedded hero inputs.
+12. Re-run the canonical plumber fixture and both zero-count fabrication scans on
+    the final combined head with standalone CUDA llama.cpp.
 
 ### Files touched
 

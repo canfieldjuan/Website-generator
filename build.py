@@ -346,7 +346,7 @@ BUILD_SERVICES_RESPONSE_SCAFFOLD = (
 )
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
-OPTIONAL_STRING_FIELDS = ("display_name",)
+OPTIONAL_STRING_FIELDS = ("display_name", "owner_email")
 
 # Substring markers that indicate a prospect-JSON field was left at its
 # template default. Case-insensitive substring match against the value.

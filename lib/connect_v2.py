@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import fcntl
 import hashlib
 import hmac
@@ -20,7 +21,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import unquote_to_bytes, urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -662,10 +663,50 @@ def _is_connect_accessible_image_url(value: Any) -> bool:
     except ValueError:
         return False
     if parsed.scheme.lower() in {"http", "https"}:
-        return bool(parsed.netloc)
+        try:
+            hostname = parsed.hostname
+            parsed.port
+        except ValueError:
+            return False
+        if not hostname or any(character.isspace() for character in hostname):
+            return False
+        try:
+            ascii_hostname = hostname.encode("idna").decode("ascii").rstrip(".")
+        except UnicodeError:
+            return False
+        if not ascii_hostname or len(ascii_hostname) > 253:
+            return False
+        try:
+            ipaddress.ip_address(ascii_hostname)
+        except ValueError:
+            labels = ascii_hostname.split(".")
+            if any(
+                not re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?",
+                    label,
+                )
+                for label in labels
+            ):
+                return False
+        return True
     if parsed.scheme.lower() == "data":
-        header, separator, _payload = candidate.partition(",")
-        return bool(separator) and header.lower().startswith("data:image/")
+        header, separator, payload = candidate.partition(",")
+        metadata = header[5:].split(";")
+        if (
+            not separator
+            or not metadata[0].lower().startswith("image/")
+            or len(metadata[0]) == len("image/")
+            or not payload
+            or re.search(r"%(?![0-9A-Fa-f]{2})", payload)
+        ):
+            return False
+        decoded_payload = unquote_to_bytes(payload)
+        if any(parameter.lower() == "base64" for parameter in metadata[1:]):
+            try:
+                decoded_payload = base64.b64decode(decoded_payload, validate=True)
+            except (binascii.Error, ValueError):
+                return False
+        return bool(decoded_payload)
     return False
 
 
