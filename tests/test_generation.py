@@ -3223,6 +3223,137 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             )
             self.assertIn(claim, html)
 
+    def test_build_generator_binds_footer_address_to_source(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+
+        def with_address(value):
+            return COMPLETE_BUILD_BODY.replace(
+                '<div class="footer-grid"></div>',
+                '<div class="footer-grid"><div>'
+                f'<div class="ft-address">{value}</div>'
+                '</div></div>',
+            )
+
+        invented = with_address("123 Main St.<br>Effingham, IL 62401")
+        with self.assertRaisesRegex(GeneratedBodyError, "no verified address"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(invented)),
+            )
+        moved_invented = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero"><p>Visit 123 Main St.</p></section>',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unexpected physical address"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(moved_invented)),
+            )
+
+        prospect["address"] = "100 W Elm St, Dieterich, IL 62424"
+        with self.assertRaisesRegex(GeneratedBodyError, "does not match"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(invented)),
+            )
+        with self.assertRaisesRegex(GeneratedBodyError, "exactly one"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY)),
+            )
+
+        verified = with_address(
+            "100 W Elm St,<br><span>Dieterich, IL 62424</span><br>Mon-Fri 8-5"
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(verified)),
+        )
+        self.assertIn("100 W Elm St,", html)
+
+        wrong_attribute = verified.replace(
+            '<div class="ft-address">',
+            '<div class="ft-address" title="Visit 123 Main St.">',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unexpected physical address"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_attribute)),
+            )
+
+    def test_build_generator_binds_ibew_claim_to_exact_local(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "electrician",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "ibew_local_number": "176",
+        }
+
+        def with_claim(value):
+            return COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero">{value}</section>',
+            )
+
+        for claim in ("IBEW Member", "IBEW Local 1 Member"):
+            with self.subTest(claim=claim), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "verified IBEW local number",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(with_claim(claim))),
+                )
+
+        split_exact = with_claim(
+            "Proud <span>IBEW</span> <span>Local 176</span> Member"
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(split_exact)),
+        )
+        self.assertIn("<span>IBEW</span> <span>Local 176</span>", html)
+
+        wrong_attribute = with_claim(
+            '<span aria-label="IBEW Local 1 Member">IBEW Local 176 Member</span>'
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "verified IBEW local number",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_attribute)),
+            )
+
+    def test_build_claim_allowlist_preserves_exact_ibew_local(self):
+        instruction = build.source_claim_boundary_instruction(
+            {
+                "ibew_local_number": "176",
+                "service_promises": [],
+            }
+        )
+
+        self.assertIn('"IBEW Local 176"', instruction)
+        self.assertNotIn('"IBEW"', instruction)
+
     def test_build_generator_requires_exact_contact_form_action(self):
         prospect = {
             "business_name": "Test Business",

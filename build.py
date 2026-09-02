@@ -566,7 +566,29 @@ def verified_source_claim_phrases(prospect):
         claim for claims in FIELD_GATED_CLAIMS.values() for claim in claims
     )
     unsupported = frozenset(unverified_service_claim_phrases(prospect))
-    return tuple(dict.fromkeys(claim for claim in all_claims if claim not in unsupported))
+    allowed = tuple(claim for claim in all_claims if claim not in unsupported)
+    ibew_claim = expected_ibew_local_claim(prospect)
+    if ibew_claim is not None:
+        allowed = tuple(claim for claim in allowed if claim != "IBEW") + (ibew_claim,)
+    return tuple(dict.fromkeys(allowed))
+
+
+def expected_ibew_local_claim(prospect):
+    value = prospect.get("ibew_local_number")
+    if not _field_claim_is_verified(prospect, "ibew_local_number", ()):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value_text = str(int(value))
+    else:
+        value_text = str(value).strip()
+    return f"IBEW Local {value_text}"
+
+
+def exact_source_claim_contracts(prospect):
+    ibew_claim = expected_ibew_local_claim(prospect)
+    if ibew_claim is None:
+        return ()
+    return (("IBEW local number", "IBEW", ibew_claim),)
 
 
 def source_claim_boundary_instruction(prospect):
@@ -1111,6 +1133,18 @@ def generate_build_html(prospect, generation_config=None, client=None):
             "NO VERIFIED BUSINESS EMAIL: Emit no business email-like value and no "
             "mailto target. Keep the visitor email input in the contact form."
         )
+    if prospect.get("address"):
+        address_instruction = (
+            "VERIFIED BUSINESS ADDRESS: Render exactly one `.ft-address`; its first "
+            "rendered content must be this complete address with no preceding text: "
+            f"{json.dumps(prospect['address'], ensure_ascii=False)}. Optional sourced "
+            "hours or availability may follow it."
+        )
+    else:
+        address_instruction = (
+            "NO VERIFIED BUSINESS ADDRESS: Omit `.ft-address` and do not invent a "
+            "physical location."
+        )
     review_contract = expected_review_contract(prospect)
     required_class_counts = required_build_class_counts(prospect)
     if logo_url:
@@ -1137,6 +1171,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{review_contract_instruction(review_contract)}\n"
         f"{phone_instruction}\n"
         f"{email_instruction}\n"
+        f"{address_instruction}\n"
         f"{logo_instruction}"
     )
 
@@ -1201,6 +1236,8 @@ def generate_build_html(prospect, generation_config=None, client=None):
         ),
         expected_phone=prospect.get("phone"),
         expected_email=prospect.get("owner_email") or None,
+        expected_address=prospect.get("address") or None,
+        exact_source_claims=exact_source_claim_contracts(prospect),
         expected_form_action=expected_build_form_action(prospect),
         expected_reviews=review_contract,
         required_class_counts=required_class_counts,

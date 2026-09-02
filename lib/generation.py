@@ -57,6 +57,15 @@ PHONE_LIKE_PATTERN = re.compile(
     r"(?<!\d)(?:\+?1[\s()./-]*)?\(?[2-9]\d{2}\)?[\s./-]*"
     r"[2-9]\d{2}[\s./-]*\d{4}(?!\d)"
 )
+STREET_ADDRESS_LIKE_PATTERN = re.compile(
+    r"(?<!\w)\d{1,7}\s+"
+    r"(?:(?:n|s|e|w|north|south|east|west)\.?\s+)?"
+    r"(?:(?=[\w.'-]*[A-Za-z])[\w.'-]+\s+){1,6}"
+    r"(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|"
+    r"court|ct|highway|hwy|route|rte|parkway|pkwy|circle|cir|trail|trl|way)"
+    r"\.?(?!\w)",
+    re.IGNORECASE,
+)
 DOM_ADJACENCY_BOUNDARY = ":"
 DOM_ADJACENCY_BOUNDARY_TAGS = frozenset(
     {
@@ -154,6 +163,7 @@ NONDETERMINISTIC_RENDERING_TAGS = frozenset(
 )
 _EXPECTED_PHONE_UNSET = object()
 _EXPECTED_EMAIL_UNSET = object()
+_EXPECTED_ADDRESS_UNSET = object()
 _EXPECTED_FORM_ACTION_UNSET = object()
 _EXPECTED_REVIEWS_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
@@ -1618,6 +1628,78 @@ def _required_child_sequence_mismatches(
     return mismatches
 
 
+def _validate_expected_address(
+    body_root: Tag,
+    expected_address: object,
+    address_surfaces: Iterable[str],
+) -> None:
+    address_components = _elements_with_class(body_root, "ft-address")
+    expected_compact = None
+    if expected_address is None:
+        if address_components:
+            raise GeneratedBodyError(
+                "Generated body contains a footer address with no verified address."
+            )
+    else:
+        if not isinstance(expected_address, str) or not expected_address.strip():
+            raise GeneratedBodyError("Expected business address must be text or null.")
+        if len(address_components) != 1:
+            raise GeneratedBodyError(
+                "Generated body must contain exactly one verified footer address."
+            )
+        expected_tokens = _alphanumeric_tokens(expected_address)
+        actual_tokens = _alphanumeric_tokens(
+            " ".join(address_components[0].stripped_strings)
+        )
+        if not expected_tokens or actual_tokens[: len(expected_tokens)] != expected_tokens:
+            raise GeneratedBodyError(
+                "Generated body footer address does not match the verified address."
+            )
+        expected_compact = _compact_claim_match_text(expected_address)
+
+    for surface in address_surfaces:
+        for match in STREET_ADDRESS_LIKE_PATTERN.finditer(
+            unicodedata.normalize("NFKC", surface)
+        ):
+            address_compact = _compact_claim_match_text(match.group(0))
+            if expected_compact is None or address_compact not in expected_compact:
+                raise GeneratedBodyError(
+                    "Generated body contains an unexpected physical address."
+                )
+
+
+def _validate_exact_source_claims(
+    claim_surfaces: Iterable[str],
+    exact_source_claims: Iterable[tuple[str, str, str]],
+) -> None:
+    normalized_surfaces = tuple(
+        _normalize_claim_match_text(surface) for surface in claim_surfaces
+    )
+    for label, trigger, exact_phrase in exact_source_claims:
+        if not all(
+            isinstance(value, str) and _normalize_claim_match_text(value)
+            for value in (label, trigger, exact_phrase)
+        ):
+            raise GeneratedBodyError("Exact source-claim contract is invalid.")
+        normalized_trigger = _normalize_claim_match_text(trigger)
+        normalized_phrase = _normalize_claim_match_text(exact_phrase)
+        trigger_pattern = re.compile(
+            rf"(?<!\w){re.escape(normalized_trigger)}(?!\w)"
+        )
+        exact_pattern = re.compile(
+            rf"{re.escape(normalized_phrase)}(?!\w)"
+        )
+        if not trigger_pattern.match(normalized_phrase):
+            raise GeneratedBodyError("Exact source-claim trigger is invalid.")
+        for surface in normalized_surfaces:
+            for match in trigger_pattern.finditer(surface):
+                if exact_pattern.match(surface, match.start()) is None:
+                    raise GeneratedBodyError(
+                        "Generated body contains a source-owned claim that does "
+                        f"not match verified {label}."
+                    )
+
+
 def validate_generated_body(
     result: GenerationResult,
     *,
@@ -1630,6 +1712,8 @@ def validate_generated_body(
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
     expected_email: object = _EXPECTED_EMAIL_UNSET,
+    expected_address: object = _EXPECTED_ADDRESS_UNSET,
+    exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
@@ -1845,6 +1929,19 @@ def validate_generated_body(
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
+    exact_claim_surfaces = (
+        exposure_surfaces[0],
+        body_root.get_text(" ", strip=True),
+        *parser.decoded_attribute_values,
+        *(unquote(value) for value in parser.decoded_attribute_values),
+    )
+    if expected_address is not _EXPECTED_ADDRESS_UNSET:
+        _validate_expected_address(
+            body_root,
+            expected_address,
+            exact_claim_surfaces,
+        )
+    _validate_exact_source_claims(exact_claim_surfaces, exact_source_claims)
     missing_exposed_values = []
     for label, value in required_exposed_values:
         if not any(
@@ -2168,6 +2265,8 @@ def assemble_generated_html(
     required_exposed_values: Iterable[tuple[str, str]] = (),
     expected_phone: object = _EXPECTED_PHONE_UNSET,
     expected_email: object = _EXPECTED_EMAIL_UNSET,
+    expected_address: object = _EXPECTED_ADDRESS_UNSET,
+    exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
@@ -2196,6 +2295,8 @@ def assemble_generated_html(
         required_exposed_values=required_exposed_values,
         expected_phone=expected_phone,
         expected_email=expected_email,
+        expected_address=expected_address,
+        exact_source_claims=exact_source_claims,
         expected_form_action=expected_form_action,
         expected_reviews=expected_reviews,
         required_class_counts=required_class_counts,
