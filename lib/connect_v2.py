@@ -209,8 +209,8 @@ class ProviderRuntime:
                     code="MODEL_RUNTIME_UNAVAILABLE",
                     message=(
                         "Local Qwen generation is unavailable; start standalone "
-                        f"llama.cpp for {DEFAULT_LOCAL_MODEL} with "
-                        "scripts/start_llama_server.sh."
+                        f"vLLM for {DEFAULT_LOCAL_MODEL} with "
+                        "scripts/start_vllm_server.sh."
                     ),
                     retryable=True,
                 )

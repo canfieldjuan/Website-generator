@@ -549,7 +549,7 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
                 ),
                 "MODEL_RUNTIME_UNAVAILABLE",
                 True,
-                "scripts/start_llama_server.sh",
+                "scripts/start_vllm_server.sh",
             ),
             (
                 lambda _input: (_ for _ in ()).throw(
@@ -946,7 +946,7 @@ class GenerationSeamTests(unittest.TestCase):
         class ModelHandler(BaseHTTPRequestHandler):
             def do_GET(self):
                 if self.path == "/health":
-                    document = {"status": "ok"}
+                    payload = b""
                 else:
                     document = {
                         "object": "list",
@@ -955,13 +955,14 @@ class GenerationSeamTests(unittest.TestCase):
                                 "id": DEFAULT_LOCAL_MODEL,
                                 "object": "model",
                                 "created": 0,
-                                "owned_by": "llamacpp",
+                                "owned_by": "vllm",
                             }
                         ],
                     }
-                payload = json.dumps(document).encode("utf-8")
+                    payload = json.dumps(document).encode("utf-8")
                 self.send_response(200)
-                self.send_header("Content-Type", "application/json")
+                if payload:
+                    self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)

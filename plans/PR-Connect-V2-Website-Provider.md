@@ -22,20 +22,23 @@ exceed the repository's 400-line soft target because separating persistence or
 authentication from the endpoint would temporarily advertise a capability
 that cannot satisfy the job contract.
 
-### llama.cpp integration contract
+### vLLM integration contract
 
-The stacked generator now uses standalone `llama.cpp`, but this provider's CLI
-help, retryable runtime error, README instructions, and loopback fixtures still
-name LM Studio or its former port. Those are active operator/contract surfaces,
-not cosmetic wording: they would direct a failed Connect job toward a runtime
-that no longer satisfies the generator transport.
+The operator selected standalone vLLM as the only named local runtime. The
+stacked core provider now targets vLLM, but this provider's CLI help, retryable
+job error, README instructions, and tests still direct the operator to
+llama.cpp. Those are active recovery and operator-contract surfaces rather than
+cosmetic wording: a failed Connect job would point away from the runtime that
+the generator now requires.
 
-This slice must align those surfaces with `scripts/start_llama_server.sh`, the
-default `127.0.0.1:8080/v1` endpoint, and the exact
+This slice must align those surfaces with `scripts/start_vllm_server.sh`, the
+default `127.0.0.1:8000/v1` endpoint, and the exact
 `qwen/qwen3.8-27b` alias. It must continue to fail before registration when
-`llama.cpp` is unhealthy or serves a different alias. It must not change the
+vLLM is unhealthy or serves a different alias, and a runtime failure must remain
+retryable without starting or restarting vLLM. It must not change the
 advertised capability, artifact/job schemas, entitlement enforcement, bearer
-authentication, durable job transitions, idempotency, or generated HTML.
+authentication, durable job transitions, idempotency, generated HTML, or
+OpenRouter behavior.
 
 ### Review-blocker contract revision
 
@@ -122,7 +125,7 @@ change hero selection for valid supplied assets, alter generated HTML or job/err
 schemas, broaden model-error classification, or validate unrelated optional
 prospect fields. The repository-mandated plumber fixture and both zero-count
 content-safety scans must then be rerun on the final combined head using the CUDA
-llama.cpp runtime before the slice is called verified.
+vLLM runtime before the slice is called verified.
 
 ## Scope (this PR)
 
@@ -140,7 +143,7 @@ llama.cpp runtime before the slice is called verified.
 6. Re-evaluate the signed local Connect entitlement on every route and deny
    manifest, submission, and status access unless it is active.
 7. Align provider startup, errors, documentation, and loopback tests with the
-   direct standalone `llama.cpp` runtime inherited from the core slice.
+   direct standalone vLLM runtime inherited from the core slice.
 8. Close the four exact-head review blockers in model-error classification,
    entitlement decoding, registration cleanup, and pre-generation optional-field
    validation without changing schemas.
@@ -152,7 +155,7 @@ llama.cpp runtime before the slice is called verified.
 11. Reject malformed `owner_email` and unusable hero-asset references before
     generation while preserving valid remote and embedded hero inputs.
 12. Re-run the canonical plumber fixture and both zero-count fabrication scans on
-    the final combined head with standalone CUDA llama.cpp.
+    the final combined head with standalone CUDA vLLM.
 
 ### Files touched
 
@@ -169,7 +172,7 @@ llama.cpp runtime before the slice is called verified.
 
 `connect_provider.py` validates that the configured model endpoint is a literal
 loopback and disables environment-proxy discovery for that Connect-only model
-client. It then preflights standalone `llama.cpp` health and the exact served
+client. It then preflights standalone vLLM health and the exact served
 model alias, opens a listening socket
 on an ephemeral `127.0.0.1` port, rotates a bearer token, and only then
 atomically writes the v2 registration under the XDG runtime directory. Uvicorn
@@ -230,7 +233,7 @@ as any other invalid token.
   absent, background-only, partial, or unrelated photo metadata uses the
   existing photo-free gradient layout because this capability does not produce
   image artifacts.
-- The provider refuses to register when standalone `llama.cpp` or the exact
+- The provider refuses to register when standalone vLLM or the exact
   Qwen alias is unavailable. It never auto-starts a runtime or model.
 - Accepted jobs survive restart. Jobs interrupted while processing become a
   durable retryable `PROVIDER_INTERRUPTED` failure rather than silently rerun.
@@ -253,9 +256,18 @@ as any other invalid token.
 
 ## Verification
 
+- `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest tests.test_generation.GenerationConfigTests tests.test_generation.VllmStartupScriptTests tests.test_generation.ProviderBoundaryTests tests.test_connect_provider.ConcurrencyAndFailureTests.test_invalid_input_and_model_unavailability_have_distinct_failures tests.test_connect_provider.GenerationSeamTests.test_connect_client_bypasses_environment_proxies`
+  passed: 42 affected runtime/Connect tests in 1.329 seconds, including the
+  empty-body vLLM health contract and the retryable vLLM recovery instruction.
+- `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python connect_provider.py --help`
+  passed and names standalone vLLM plus the exact local model alias.
+- The combined suite and CUDA llama.cpp evidence below predate the vLLM
+  replacement. They remain historical regression evidence but do not verify
+  the current runtime or satisfy the final CUDA vLLM fixture requirement.
+
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests`
   passed: 176 tests in 8.757 seconds on the updated combined tree, including
-  direct `llama.cpp` preflight, loopback proxy bypass, startup boundaries, and
+  the then-current direct `llama.cpp` preflight, loopback proxy bypass, startup boundaries, and
   the Connect retryable runtime instruction plus the exact-head review
   regressions, including truthy and falsy malformed optional display names.
 - `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/pip check` passed with no broken

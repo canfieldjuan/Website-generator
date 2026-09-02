@@ -147,18 +147,18 @@ one complete `text/html` artifact. The provider always uses local
 `qwen/qwen3.8-27b`; it does not scrape a URL, generate images or email, deploy,
 or fall back to OpenRouter.
 
-Start standalone `llama.cpp`, then run the Connect provider in a second shell:
+Start standalone vLLM, then run the Connect provider in a second shell:
 
 ```bash
-export LLAMA_CPP_MODEL_PATH=/absolute/path/to/Qwen3.8-27B-Q4_K_M.gguf
-# Set LLAMA_CPP_SERVER_BIN too when llama-server is not on PATH.
-scripts/start_llama_server.sh
+export VLLM_MODEL_PATH=/absolute/path/to/Qwen3.8-27B-Q4_K_M.gguf
+# Set VLLM_BIN too when vllm is not on PATH.
+scripts/start_vllm_server.sh
 
 # Second shell, after /health reports ready:
 python connect_provider.py
 ```
 
-The provider fails before registration if `llama.cpp` is unhealthy or does not
+The provider fails before registration if vLLM is unhealthy or does not
 serve that exact model alias. While running, it publishes an owner-private v2 registration under
 `$XDG_RUNTIME_DIR/local-connect/v2/providers/`. Its durable provider identity,
 accepted inputs, job states, and completed HTML are retained in
