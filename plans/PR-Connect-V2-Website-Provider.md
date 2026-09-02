@@ -1,6 +1,75 @@
-# Local Connect v2 website-generation provider
+# Local Connect v2 provider terminal-delivery evidence
 
 ## Why this slice exists
+
+The Local Connect provider implementation is already merged, but its committed
+verification record still ends by saying that a successful durable terminal
+delivery is pending. A current-tree acceptance run has now exercised the real
+authenticated HTTP route, durable queue, local generation boundary, bounded
+correction, terminal persistence, and returned artifact checks. This
+documentation-only follow-up makes that observed result reproducible and
+removes the stale evidence gap without changing the provider.
+
+## Scope (this PR)
+
+1. Append the successful terminal Connect-delivery result to the existing
+   provider verification history.
+2. Record the exact local vLLM launch configuration and a self-contained
+   reproduction harness for the HTTP/durable-job path.
+3. Preserve the distinction between test-gated runtime acceptance and issue
+   #27's still-unmet production entitlement provisioning.
+
+### Files touched
+
+- `plans/PR-Connect-V2-Website-Provider.md`
+
+## Mechanism
+
+The follow-up adds one chronological acceptance entry to the historical
+provider verification record. The entry identifies the route, state
+transitions, first-candidate rejection, bounded correction, returned artifact
+identity, content-safety checks, and post-run GPU unload. It then includes the
+runtime command and an isolated `TestClient` harness that reproduces the same
+authentication, entitlement-gate, persistence, polling, decoding, and result
+assertions without requiring a production entitlement.
+
+## Intentional
+
+- This is evidence correction only. Provider code, generation behavior,
+  Connect schemas, entitlement enforcement, and product output do not change.
+- The harness uses an isolated active test gate because source builds correctly
+  remain unavailable without the official issuer authority.
+- The historical provider implementation contract remains in this file but is
+  explicitly labeled as historical rather than as the scope of this follow-up.
+
+## Deferred
+
+- Official build-owned issuer keys, production license issuance, and release
+  provisioning remain tracked by #27.
+- Local GGUF/vLLM throughput optimization remains outside this evidence-only
+  slice.
+- Existing guard hardening remains deferred under #32 and #33.
+
+## Verification
+
+- Real `POST /v2/jobs` returned `202`; the durable job rejected one unsupported
+  first candidate, took one local correction, and persisted `completed`.
+- The returned `drees-plumbing-inc-homepage.html` was 73,159 bytes with SHA-256
+  `448d4c8655756448ae8b0bdb92c306e1621a7fd4ef5b9f06d4b0ffcfc99705bd`.
+  Response identity and doctype checks passed; placeholder and fabricated-claim
+  match counts were both `0`.
+- `bash -n` accepted the documented self-contained reproduction command after
+  extraction from this plan.
+- `bash scripts/local_pr_review.sh origin/main` passed on the committed diff.
+- vLLM was stopped after acceptance and the RTX 3090 returned to 358 MiB used.
+
+## Estimated diff size
+
+One documentation file, under 250 added lines, with no production-code change.
+
+---
+
+## Historical provider implementation contract
 
 The local-first generation slice gives the Python entry points one validated
 JSON-to-HTML seam, but independently installed apps still cannot discover or
@@ -166,7 +235,7 @@ must prove truthy and falsy non-string values never reach generation. This must
 not change address rendering, source-ownership admission, job/error schemas,
 or any unrelated prospect field.
 
-## Scope (this PR)
+## Historical provider scope
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
    accepting one `application/json` artifact up to 200,000 bytes and producing
@@ -209,7 +278,7 @@ or any unrelated prospect field.
 - `README.md`
 - `plans/PR-Connect-V2-Website-Provider.md`
 
-## Mechanism
+## Historical provider mechanism
 
 `connect_provider.py` validates that the configured model endpoint is a literal
 loopback and disables environment-proxy discovery for that Connect-only model
@@ -259,7 +328,7 @@ builds with no official keyring fail closed as authority-unavailable. Malformed
 or non-ASCII bearer credentials fail as the same shaped unauthorized response
 as any other invalid token.
 
-## Intentional
+## Historical provider decisions
 
 - Connect invocation is local-Qwen-only and advertises `external: false`; an
   OpenRouter-configured CLI cannot silently change Connect's cost/privacy
@@ -283,7 +352,7 @@ as any other invalid token.
 - Canonical entitlement fixture keys are test-only. Production cannot select a
   keyring with an environment variable.
 
-## Deferred
+## Historical provider deferred work
 
 - Existing-site analysis, email drafting, images, Vercel deployment, and
   OpenRouter-backed Connect capabilities are not advertised.
@@ -295,7 +364,7 @@ as any other invalid token.
   operations tracked by #27; the provider must remain unavailable until both
   exist.
 
-## Verification
+## Historical provider verification record
 
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935
   /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
@@ -595,7 +664,7 @@ as any other invalid token.
   PY
   ```
 
-## Final diff size
+## Historical provider final diff size
 
 Measured against the current provider base: 13 files changed, with 3,870
 insertions and 55 deletions across the durable provider and its contract,
