@@ -502,6 +502,35 @@ CPU offload, model alias, context length, loopback binding, and single-device
 defaults do not change. A successful API startup and generation fixture is still
 required; loading weights followed by a failed warmup is not acceptance proof.
 
+### Pinned Qwen GGUF adapter preflight contract revision
+
+The exact default Qwen3.8 GGUF identifies as the `qwen3_5` architecture, but
+the current upstream `vllm-gguf-plugin` release (`v0.0.5`) does not contain the
+text-only adapter. Upstream PR #120 adds that support, remains open, and its
+currently verified head is
+`d42c0510a1bc96526fd51481ffaf70d58435fd10`. The released plugin therefore
+rejects the production model only after `vllm serve` begins model setup, which
+can spend startup time and reserve GPU resources before reporting `Unknown
+gguf model_type: qwen3_5`.
+
+For a Qwen3.5/3.8 GGUF, identified by either the default served alias or the
+local model `config.json`, the launcher must fail before executing vLLM unless
+`VLLM_GGUF_PLUGIN_PATH` names a clean local checkout whose repository root and
+`HEAD` exactly match that reviewed upstream commit. The launcher must
+prepend that checkout to `PYTHONPATH` for the executed vLLM process so runtime
+behavior matches preflight evidence. The README must give a one-time,
+commit-pinned checkout procedure; normal startup must not clone, fetch, install,
+or update code. Tests must cover the missing, wrong-commit, dirty-checkout, and
+exact-checkout directions and prove a non-GGUF runtime remains outside this
+temporary adapter requirement.
+
+This compatibility seam must not change the model artifact, served model name,
+tokenizer, CUDA settings, OpenRouter behavior, generation request, HTML
+admission, or Connect contracts. It must not treat an unpinned source overlay
+as compatible or start/import the runtime during validation. Once an upstream
+release contains equivalent support, replacing this temporary pin belongs in a
+separate reviewed compatibility slice.
+
 ### Structured source-ownership contract
 
 Exact-head review exposed two content-integrity gaps in the build caller. The
@@ -872,6 +901,24 @@ override before assembly.
 
 ## Verification
 
+- `gh release list --repo vllm-project/vllm-gguf-plugin --limit 5` reported
+  `v0.0.5` as the latest release. `gh pr view 120 --repo
+  vllm-project/vllm-gguf-plugin` reported the required text-only Qwen adapter
+  PR still open at
+  `d42c0510a1bc96526fd51481ffaf70d58435fd10`.
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m
+  unittest -v tests.test_generation.VllmStartupScriptTests` — 15 tests passed
+  in 0.085 seconds. The boundary set proves missing, wrong-commit, dirty, and
+  unreadable adapter evidence fails before vLLM executes; an exact clean pin is
+  forwarded through `PYTHONPATH`; a renamed Qwen model cannot bypass the guard;
+  and a non-GGUF model remains outside the temporary requirement.
+- `bash -n scripts/start_vllm_server.sh` — passed after the pinned-adapter
+  preflight.
+- `git diff --check` — passed after the pinned-adapter preflight.
+- The final-head live fixture was not rerun: the previously used vLLM binary at
+  `/media/juan-canfield/Dev-Drive/vllm-runtime/bin/vllm` is not currently
+  available in the filesystem. No replacement runtime was started and no GPU
+  attempt was made.
 - The matching Qwen tokenizer metadata was pinned locally from
   `Qwen/Qwen3.8-27B` revision
   `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`; the launcher requires all

@@ -432,6 +432,7 @@ class GenerationConfigTests(unittest.TestCase):
 
 class VllmStartupScriptTests(unittest.TestCase):
     script = Path(__file__).resolve().parents[1] / "scripts/start_vllm_server.sh"
+    qwen_adapter_commit = "d42c0510a1bc96526fd51481ffaf70d58435fd10"
     retired_script = (
         Path(__file__).resolve().parents[1] / "scripts/start_llama_server.sh"
     )
@@ -459,6 +460,57 @@ class VllmStartupScriptTests(unittest.TestCase):
             encoding="utf-8",
         )
         return tokenizer
+
+    @classmethod
+    def create_qwen_adapter_checkout(
+        cls,
+        root,
+        *,
+        commit=None,
+        status="",
+        status_exit="0",
+    ):
+        adapter = root / "Qwen GGUF adapter"
+        module = adapter / "vllm_gguf_plugin" / "weights_adapter"
+        module.mkdir(parents=True)
+        (module / "qwen3_5.py").write_text(
+            "# pinned Qwen3.5/3.8 test adapter\n",
+            encoding="utf-8",
+        )
+        fake_bin = root / "fake-bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+case "${3-}:${4-}" in
+    rev-parse:--show-toplevel)
+        printf '%s\n' "${FAKE_GIT_ROOT:?}"
+        ;;
+    rev-parse:--verify)
+        [[ "${5-}" == "HEAD" ]]
+        printf '%s\n' "${FAKE_GIT_COMMIT:?}"
+        ;;
+    status:--porcelain)
+        [[ "${FAKE_GIT_STATUS_EXIT:-0}" == "0" ]]
+        printf '%s' "${FAKE_GIT_STATUS-}"
+        ;;
+    *)
+        exit 2
+        ;;
+esac
+""",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+        return adapter, {
+            "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+            "FAKE_GIT_ROOT": str(adapter),
+            "FAKE_GIT_COMMIT": commit or cls.qwen_adapter_commit,
+            "FAKE_GIT_STATUS": status,
+            "FAKE_GIT_STATUS_EXIT": status_exit,
+            "VLLM_GGUF_PLUGIN_PATH": str(adapter),
+        }
 
     def test_help_does_not_require_or_load_a_model(self):
         completed = subprocess.run(
@@ -525,12 +577,14 @@ class VllmStartupScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             tokenizer = self.create_tokenizer_directory(root)
+            adapter, adapter_environment = self.create_qwen_adapter_checkout(root)
             fake_server = root / "fake-vllm"
             fake_server.write_text(
                 '#!/usr/bin/env bash\n'
                 'printf "CUDA_VISIBLE_DEVICES=%s\\n" "${CUDA_VISIBLE_DEVICES-}"\n'
                 'printf "VLLM_USE_FLASHINFER_SAMPLER=%s\\n" '
                 '"${VLLM_USE_FLASHINFER_SAMPLER-}"\n'
+                'printf "PYTHONPATH=%s\\n" "${PYTHONPATH-}"\n'
                 'printf "%s\\n" "$@"\n',
                 encoding="utf-8",
             )
@@ -547,6 +601,7 @@ class VllmStartupScriptTests(unittest.TestCase):
                     VLLM_BIN=str(fake_server),
                     VLLM_MODEL_PATH=str(model),
                     VLLM_TOKENIZER_PATH=str(tokenizer),
+                    **adapter_environment,
                 ),
             )
 
@@ -554,7 +609,8 @@ class VllmStartupScriptTests(unittest.TestCase):
         arguments = completed.stdout.splitlines()
         self.assertEqual(arguments[0], "CUDA_VISIBLE_DEVICES=0")
         self.assertEqual(arguments[1], "VLLM_USE_FLASHINFER_SAMPLER=0")
-        self.assertEqual(arguments[2:4], ["serve", str(model)])
+        self.assertEqual(arguments[2].split(":", 1)[0], f"PYTHONPATH={adapter}")
+        self.assertEqual(arguments[3:5], ["serve", str(model)])
         self.assertEqual(
             arguments[arguments.index("--tensor-parallel-size") + 1], "1"
         )
@@ -581,6 +637,117 @@ class VllmStartupScriptTests(unittest.TestCase):
         )
         self.assertNotIn("--disable-log-requests", arguments)
         self.assertNotIn("--api-key", arguments)
+
+    def test_default_qwen_gguf_requires_adapter_before_launch(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            tokenizer = self.create_tokenizer_directory(root)
+            marker = root / "vllm-started"
+            fake_server = root / "fake-vllm"
+            fake_server.write_text(
+                '#!/usr/bin/env bash\ntouch "${FAKE_VLLM_MARKER:?}"\n',
+                encoding="utf-8",
+            )
+            fake_server.chmod(0o755)
+            model = root / "qwen.gguf"
+            model.write_bytes(b"")
+            (root / "config.json").write_text("{}", encoding="utf-8")
+
+            completed = subprocess.run(
+                [str(self.script)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self.environment(
+                    VLLM_BIN=str(fake_server),
+                    VLLM_MODEL_PATH=str(model),
+                    VLLM_TOKENIZER_PATH=str(tokenizer),
+                    FAKE_VLLM_MARKER=str(marker),
+                ),
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("VLLM_GGUF_PLUGIN_PATH", completed.stderr)
+            self.assertFalse(marker.exists())
+
+    def test_qwen_config_requires_adapter_even_with_custom_served_alias(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            tokenizer = self.create_tokenizer_directory(root)
+            model = root / "renamed.gguf"
+            model.write_bytes(b"")
+            (root / "config.json").write_text(
+                '{"model_type": "qwen3_5"}',
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [str(self.script)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self.environment(
+                    VLLM_BIN="/bin/true",
+                    VLLM_MODEL_PATH=str(model),
+                    VLLM_TOKENIZER_PATH=str(tokenizer),
+                    LOCAL_GENERATION_MODEL="renamed/local-model",
+                ),
+            )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("VLLM_GGUF_PLUGIN_PATH", completed.stderr)
+
+    def test_default_qwen_gguf_rejects_wrong_or_dirty_adapter_checkout(self):
+        rejected_adapters = {
+            "wrong commit": ({"commit": "0" * 40}, "pinned to commit"),
+            "dirty checkout": ({"status": "?? unexpected.py\n"}, "clean"),
+            "unreadable status": ({"status_exit": "1"}, "Unable to verify"),
+        }
+        for label, (adapter_overrides, expected_error) in rejected_adapters.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                tokenizer = self.create_tokenizer_directory(root)
+                _, adapter_environment = self.create_qwen_adapter_checkout(
+                    root,
+                    **adapter_overrides,
+                )
+                model = root / "qwen.gguf"
+                model.write_bytes(b"")
+                (root / "config.json").write_text("{}", encoding="utf-8")
+
+                completed = subprocess.run(
+                    [str(self.script)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=self.environment(
+                        VLLM_BIN="/bin/true",
+                        VLLM_MODEL_PATH=str(model),
+                        VLLM_TOKENIZER_PATH=str(tokenizer),
+                        **adapter_environment,
+                    ),
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn(expected_error, completed.stderr)
+
+    def test_non_gguf_model_does_not_require_qwen_adapter_checkout(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            model = Path(temporary_directory) / "qwen.safetensors"
+            model.write_bytes(b"")
+
+            completed = subprocess.run(
+                [str(self.script)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self.environment(
+                    VLLM_BIN="/bin/true",
+                    VLLM_MODEL_PATH=str(model),
+                ),
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_numeric_boundaries_reject_values_outside_the_contract(self):
         invalid_values = {
