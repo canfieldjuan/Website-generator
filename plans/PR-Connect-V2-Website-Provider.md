@@ -256,6 +256,20 @@ as any other invalid token.
 
 ## Verification
 
+- `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest -v
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_uses_shared_admission_gate
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_enforces_identity_and_phone_substitutions
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_gates_field_owned_claim_families
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_footer_address_to_source
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_tenure_claims_to_source_values
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_ibew_claim_to_exact_local
+  tests.test_generation.BodyAssemblyTests.test_body_admission_restricts_inline_styles_to_declared_properties
+  tests.test_generation.VllmStartupScriptTests.test_generator_workflow_tracks_the_active_vllm_launcher
+  tests.test_connect_provider.GenerationSeamTests`
+  passed: 28 current-head core/Connect seam tests in 4.421 seconds. This proves
+  the stacked provider reuses the source-bound build preparation and local
+  generation boundary after the tenure, inline-style, and workflow corrections.
+
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest tests.test_generation.GenerationConfigTests tests.test_generation.VllmStartupScriptTests tests.test_generation.ProviderBoundaryTests tests.test_connect_provider.ConcurrencyAndFailureTests.test_invalid_input_and_model_unavailability_have_distinct_failures tests.test_connect_provider.GenerationSeamTests.test_connect_client_bypasses_environment_proxies`
   passed: 42 affected runtime/Connect tests in 1.329 seconds, including the
   empty-body vLLM health contract and the retryable vLLM recovery instruction.
