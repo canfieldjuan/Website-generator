@@ -174,6 +174,35 @@ class EntitlementActivationTests(unittest.TestCase):
                     )
             self.assertFalse((root / "local-connect").exists())
 
+    def test_source_byte_boundaries_reject_too_small_and_accept_exact_maximum(self):
+        for content in (b"", b"x", b"{}"):
+            with self.subTest(size=len(content)), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "selected-entitlement.json"
+                source.write_bytes(content)
+                gate = self.gate(root)
+                self.assert_activation_error(
+                    SOURCE_INVALID_CODE,
+                    lambda: install_entitlement(source, gate),
+                )
+                self.assertFalse((root / "local-connect").exists())
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = self.source(root)
+            active = source.read_bytes()
+            self.assertLess(len(active), MAX_ENTITLEMENT_BYTES)
+            maximum = active + (b" " * (MAX_ENTITLEMENT_BYTES - len(active)))
+            source.write_bytes(maximum)
+            gate = self.gate(root)
+
+            self.assertEqual(
+                install_entitlement(source, gate),
+                {"state": "active", "active": True},
+            )
+            assert gate.path is not None
+            self.assertEqual(gate.path.read_bytes(), maximum)
+
     def test_missing_authority_fails_before_source_or_destination_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

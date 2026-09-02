@@ -88,8 +88,9 @@ before runtime-directory resolution and local-model preflight.
 ## Verification
 
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest tests.test_entitlement_activation tests.test_connect_provider.EntitlementTests`
-  - 17 tests passed after rollback and restrictive-umask alignment with the
-    ecosystem reference implementation.
+  - The suites passed separately after one combined-run teardown stall: 14
+    activation boundary tests and 4 existing verifier/route tests passed after
+    rollback, restrictive-umask, and byte-boundary alignment.
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests -v`
   - 220 tests passed before the post-promotion rollback alignment; GitHub's
     required unit check reruns the complete suite at the published head.
@@ -110,6 +111,6 @@ before runtime-directory resolution and local-model preflight.
 
 ## Estimated diff size
 
-Five files, approximately 980 additions and 4 deletions. About half is focused
+Five files, approximately 1,010 additions and 4 deletions. About half is focused
 boundary/failure-path coverage; the overage is intentional for the indivisible
 activation security contract described above.
