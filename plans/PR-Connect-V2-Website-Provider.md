@@ -223,7 +223,7 @@ as any other invalid token.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests`
-  passed: 172 tests in 8.319 seconds on the updated combined tree, including
+  passed: 172 tests in 5.544 seconds on the updated combined tree, including
   direct `llama.cpp` preflight, loopback proxy bypass, startup boundaries, and
   the Connect retryable runtime instruction plus the exact-head review
   regressions, including truthy and falsy malformed optional display names.
