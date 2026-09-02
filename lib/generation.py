@@ -170,7 +170,7 @@ CITY_STATE_CLAIM_PATTERN = re.compile(
     r"\s*(?P<state>[A-Z]{2})(?![A-Za-z])",
 )
 SERVICE_PLACE_CLAIM_PATTERN = re.compile(
-    r"(?i:\b(?:serving|based\s+in|located\s+in)\s+)"
+    r"(?i:\b(?:serv(?:e|es|ing)|based\s+in|located\s+in)\s+)"
     r"(?P<place>[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3}?)"
     r"(?=\s*(?:,|&|\band\b|\barea\b|\bregion\b|\bcommunities\b|[.!?]|$))",
     re.IGNORECASE,
