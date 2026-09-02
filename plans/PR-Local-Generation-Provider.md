@@ -17,7 +17,7 @@ soft target primarily because the new tests cover both sides of every provider
 and output boundary; splitting those tests from the guard would ship an
 unproved admission rule.
 
-### Runtime replacement contract
+### Superseded LM Studio to llama.cpp contract (historical)
 
 The local provider must talk directly to a standalone `llama-server`. The
 current implementation is coupled to LM Studio's model-list client, native chat
@@ -127,7 +127,7 @@ non-breaking space, another Unicode whitespace code point, and a clean nearby
 label. This must not broaden the denied-claim catalog, rewrite generated output,
 or change placeholder, provider, assembly, or deployment behavior.
 
-### GPU-runtime revision
+### Superseded llama.cpp GPU-runtime revision (historical)
 
 The controlled fixture used `LLAMA_CPP_GPU_LAYERS=all`, but the launcher still
 defaults that setting to `auto`. On the supported workstation the 27B Qwen GGUF
@@ -381,7 +381,7 @@ model output, change source-evidence rules, alter customer-facing copy owned by
 the trusted template, change provider/runtime selection, or touch image, email,
 deployment, and Connect transport behavior. The exact plumber fixture and both
 zero-count safety scans must pass on the resulting combined head through CUDA
-llama.cpp before the contract is considered satisfied.
+vLLM before the contract is considered satisfied.
 
 ### vLLM runtime replacement contract
 
@@ -423,6 +423,37 @@ request fields. Final acceptance still requires a controlled CUDA vLLM fixture,
 both fabrication scans, and explicit runtime unload; prior llama.cpp fixture
 evidence remains historical rather than proof of the new runtime.
 
+### Structured source-ownership contract
+
+Exact-head review exposed two content-integrity gaps in the build caller. The
+shared body validator source-binds phone, email, form action, and reviews, but
+the generated footer address has no corresponding expected-value contract.
+Separately, the field-gated claim table treats any positive
+`ibew_local_number` as permission to emit the generic word `IBEW`; it never
+binds the rendered chapter number to the source value. A model can therefore
+emit a physical address when none exists, substitute a different address, or
+replace one verified IBEW local with another while still passing admission.
+
+The correct fix must give generated-body admission the source-owned address
+and exact triggered-claim expectations. When an address is absent, the
+generated address component must be absent. When present, exactly one footer
+address component must begin with the complete normalized source address before
+any optional hours or availability text. Street-address-shaped text in any
+rendered or decoded-attribute surface must likewise be absent without source
+data or belong to that complete supplied address, so moving a fabricated
+location outside the footer cannot bypass the component check. When an IBEW
+local is verified, every rendered or attribute-exposed `IBEW` occurrence must contain the exact
+`IBEW Local <source value>` phrase; a different or generic affiliation must
+fail. The response prompt must describe those same boundaries so the model is
+not asked to produce output the validator rejects. Tests must prove absent,
+wrong, and exact address paths; absent, generic, wrong-number, exact-number,
+split-inline, and attribute-exposed IBEW paths.
+
+This correction must not change the other service-claim families, address
+sanitization, customer-facing layout or styling, generated/Connect schemas,
+provider selection, vLLM/OpenRouter transport, image/email/deployment behavior,
+or the existing phone, email, form, and review contracts.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -439,7 +470,7 @@ evidence remains historical rather than proof of the new runtime.
 6. Keep every wired HTML-generation prompt aligned with body-only admission and
    deterministic document composition.
 7. Add focused unit tests, CI enrollment, and operator documentation.
-8. Replace the LM Studio transport with direct loopback `llama.cpp` health,
+8. Replace the legacy local transport with direct loopback vLLM health,
    model-discovery, and chat-completion contracts plus a guarded startup script.
 9. Enforce locality at both local request entry points and exclude head metadata
    from generated bodies while preserving SVG titles; local requests never use
@@ -454,8 +485,8 @@ evidence remains historical rather than proof of the new runtime.
     visible text.
 13. Preserve uncatalogued-trade builds with the existing generic document-color
     fallback while retaining explicit-brand and supported-trade precedence.
-14. Default the standalone llama.cpp launcher to all GPU layers, with explicit
-    overrides preserved and no CPU or cloud fallback.
+14. Default the standalone vLLM launcher to one explicit CUDA device with zero
+    CPU offload and no cloud fallback.
 15. Enforce exact class counts for the unconditional from-scratch page skeleton
     and the shared footer structure so prompt omissions cannot ship.
 16. Give the mandatory services component an exact markup contract while
@@ -470,7 +501,7 @@ evidence remains historical rather than proof of the new runtime.
     when present, `0` when absent) while leaving every other count unchanged.
 20a. Reject case variants of every required class so zero-count requirements
      cannot be bypassed and positive requirements cannot admit unstyled names.
-21. Disable redirects on every shared loopback llama.cpp request so a local
+21. Disable redirects on every shared loopback vLLM request so a local
     response cannot replay prompts or preflight traffic to a remote target.
 22. Scan ordered visual and accessibility exposure streams in both normalized
     and compact forms so CSS, replacement text, and markup segmentation cannot
@@ -537,6 +568,11 @@ evidence remains historical rather than proof of the new runtime.
     fragments across semantic block boundaries.
 50. Require exactly one generated contact form, its exact verified action (or
     the explicit `#` fallback), and no conflicting per-control `formaction`.
+51. Bind the optional footer address component to the complete source address,
+    or require that component to be absent when no address is verified.
+52. Bind parameterized source claims to their exact source value, beginning
+    with the IBEW local number, instead of treating the claim family as a
+    boolean permission.
 
 ### Files touched
 
@@ -711,6 +747,16 @@ override before assembly.
   — passed with wrong form action, missing fallback action, and mixed
   verified-form/unverified-button `formaction` cases rejected; exact verified
   form and button actions and the explicit `#` fallback remain accepted.
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_gates_field_owned_claim_families
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_footer_address_to_source
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_ibew_claim_to_exact_local
+  tests.test_generation.AtomicWriteAndCliTests.test_build_claim_allowlist_preserves_exact_ibew_local`
+  — 4 tests passed in 1.028 seconds. The boundary set covers absent, wrong,
+  missing, and exact split-line address components; address-shaped content
+  moved outside the component or into a decoded attribute; generic,
+  wrong-number, exact split-inline, and conflicting attribute-exposed IBEW
+  claims; and the exact source phrase supplied to the model.
 - The duplicate-attribute and no-phone probes failed against the prior head,
   then `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m
   unittest tests.test_generation.BodyAssemblyTests.test_body_admission_rejects_duplicate_raw_attributes
@@ -800,7 +846,7 @@ override before assembly.
 - The standalone runtime was stopped after validation. The GPU compute-process
   query was empty.
 - Mocked local transport tests prove the configured request reaches the
-  `llama.cpp` chat route once, disables thinking, preserves finish status, and
+  vLLM chat route once, disables thinking, preserves finish status, and
   fails closed on malformed, reasoning, tool, and multi-choice responses.
 
 ## Estimated diff size
