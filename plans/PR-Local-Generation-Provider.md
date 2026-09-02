@@ -353,6 +353,32 @@ lead form is unrelated and must remain required. The verified-phone path,
 contact form routing, trust content, design system, providers, runtime, and all
 image, email, deployment, and Connect contracts must remain unchanged.
 
+### Final source-claim prompt contract revision
+
+The mandatory final-head plumber fixture reached the CUDA model and then failed
+closed because Qwen emitted the unsupported `Not a Franchise` claim while
+`prospect.locally_owned` was not verified. The validator is correct; the root
+cause is that source-gated examples live in the large static catalog while the
+final response boundary does not give the model an exhaustive, prospect-specific
+allowlist from the same evidence authority used by admission.
+
+The correct fix must derive one final source-gated claim allowlist from the
+existing verification function and place it at the response edge before model
+generation. Only claim phrases whose required prospect field or service-promise
+evidence is present may enter that allowlist. The instruction must explicitly
+forbid inferring, paraphrasing, or combining other ownership, franchise-status,
+credential, availability, scheduling, estimate, pricing, billing, or
+owner-availability claims from adjacent data or static examples. Boundary tests
+must prove both sides: unsupported claims stay out while newly verified field and
+service-promise claims enter.
+
+This correction must not weaken final generated-body admission, retry rejected
+model output, change source-evidence rules, alter customer-facing copy owned by
+the trusted template, change provider/runtime selection, or touch image, email,
+deployment, and Connect transport behavior. The exact plumber fixture and both
+zero-count safety scans must pass on the resulting combined head through CUDA
+llama.cpp before the contract is considered satisfied.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and

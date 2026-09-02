@@ -560,6 +560,27 @@ def unverified_service_claim_phrases(prospect):
     return tuple(dict.fromkeys((*unsupported_service_claims, *unsupported_field_claims)))
 
 
+def verified_source_claim_phrases(prospect):
+    """Return the exhaustive source-gated claim phrases admitted for a prospect."""
+    all_claims = tuple(GATED_SERVICE_CLAIMS) + tuple(
+        claim for claims in FIELD_GATED_CLAIMS.values() for claim in claims
+    )
+    unsupported = frozenset(unverified_service_claim_phrases(prospect))
+    return tuple(dict.fromkeys(claim for claim in all_claims if claim not in unsupported))
+
+
+def source_claim_boundary_instruction(prospect):
+    allowed_claims = verified_source_claim_phrases(prospect)
+    return (
+        "SOURCE-GATED CLAIM ALLOWLIST (EXHAUSTIVE): "
+        f"{json.dumps(allowed_claims, ensure_ascii=False)}. "
+        "Only those listed source-gated phrases may be rendered. Do not output, "
+        "paraphrase, combine, or infer any other ownership, franchise-status, "
+        "credential, availability, same-day, estimate, pricing, billing, or "
+        "owner-availability claim from adjacent prospect data or earlier examples."
+    )
+
+
 def _field_claim_is_verified(prospect, field, normalized_promises):
     if field in BOOLEAN_CLAIM_FIELDS and prospect.get(field) is True:
         return True
@@ -1095,6 +1116,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{BUILD_SERVICES_RESPONSE_SCAFFOLD}\n"
         "MANDATORY EXACT SUBSTITUTIONS: "
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
+        f"{source_claim_boundary_instruction(prospect)}\n"
         f"{review_contract_instruction(review_contract)}\n"
         f"{phone_instruction}\n"
         f"{email_instruction}\n"
