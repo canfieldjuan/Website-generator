@@ -2520,6 +2520,18 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(attributed_testimonial)),
             )
 
+        ordinary_quotation = COMPLETE_BUILD_BODY.replace(
+            '<form class="contact-form-wrap"',
+            '<p>Ask about our “Comfort Club” plan.</p>'
+            '<form class="contact-form-wrap"',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(ordinary_quotation)),
+        )
+        self.assertIn("Ask about our “Comfort Club” plan.", html)
+
         unscored_widget = COMPLETE_BUILD_BODY.replace(
             "</nav>",
             '<span class="form-trust-stars">Stars</span></nav>',
@@ -2552,6 +2564,28 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(admitted_body)),
         )
         self.assertIn(admitted_body, html)
+
+        extra_root_text = admitted_body.replace(
+            '<div class="reviews-aggregate">',
+            '<div class="reviews-aggregate">“Best plumber in town.” — Jane D.',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid component hierarchy"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(extra_root_text)),
+            )
+
+        extra_cta_text = admitted_body.replace(
+            "Read All Reviews on Google",
+            "Read All Reviews on Google — Best plumber in town",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid CTA text"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(extra_cta_text)),
+            )
 
         exact_ambient = admitted_body.replace(
             "</nav>",
@@ -2665,6 +2699,40 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(admitted_body)),
         )
         self.assertIn(admitted_body, html)
+
+        extra_grid_text = admitted_body.replace(
+            '<div class="reviews-card-grid">',
+            '<div class="reviews-card-grid">Unexpected direct text',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid component hierarchy"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(extra_grid_text)),
+            )
+
+        extra_card_text = admitted_body.replace(
+            '<div class="review-card">',
+            '<div class="review-card">“Best plumber in town.” — Jane D.',
+            1,
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid component hierarchy"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(extra_card_text)),
+            )
+
+        extra_summary_text = admitted_body.replace(
+            '<div class="reviews-summary-row">',
+            '<div class="reviews-summary-row">“Best plumber in town.” — Jane D.',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid component hierarchy"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(extra_summary_text)),
+            )
 
         fabricated = [dict(review) for review in reviews]
         fabricated[1]["text"] = "Invented review copy."

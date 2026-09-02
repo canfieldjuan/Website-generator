@@ -132,10 +132,6 @@ UNSTRUCTURED_TESTIMONIAL_TAGS = frozenset(("blockquote", "cite"))
 REVIEW_ROOT_CLASSES = frozenset(
     ("review-card", "reviews-aggregate", "reviews-summary-row")
 )
-QUOTED_PROSE_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])[\"“'‘’]\s*\S(?:.{1,500}?\S)?\s*[\"”'‘’]",
-    re.DOTALL,
-)
 ATTRIBUTED_PROSE_PATTERN = re.compile(
     r"[.!?][\"”'‘’]?\s*[—–]\s*[A-Z][A-Za-z'.’\-]+"
     r"(?:\s+(?:[A-Z][A-Za-z'.’\-]+|[A-Z]\.)){0,3}\b"
@@ -1143,8 +1139,7 @@ def _validate_no_unstructured_testimonials(body_root: Tag) -> None:
         excluded_root_classes=REVIEW_ROOT_CLASSES,
     )
     if any(
-        QUOTED_PROSE_PATTERN.search(surface)
-        or ATTRIBUTED_PROSE_PATTERN.search(surface)
+        ATTRIBUTED_PROSE_PATTERN.search(surface)
         for surface in (*exposure_surfaces, inline_surface)
     ):
         raise GeneratedBodyError(
@@ -1197,11 +1192,22 @@ def _require_direct_components(
     parent: Tag,
     expected: tuple[Tag, ...],
     owner: str,
+    *,
+    allow_direct_text: bool = False,
 ) -> None:
-    actual = tuple(
-        child for child in parent.children if isinstance(child, Tag)
-    )
-    if actual != expected:
+    actual: list[Tag] = []
+    has_unexpected_content = False
+    for child in parent.children:
+        if isinstance(child, Tag):
+            actual.append(child)
+        elif isinstance(child, Comment):
+            has_unexpected_content = True
+        elif isinstance(child, NavigableString):
+            if child.strip() and not allow_direct_text:
+                has_unexpected_content = True
+        else:
+            has_unexpected_content = True
+    if tuple(actual) != expected or has_unexpected_content:
         raise GeneratedBodyError(
             f"Generated body {owner} has an invalid component hierarchy."
         )
@@ -1219,7 +1225,7 @@ def _canonical_star_component(
         owner,
         allowed_attributes=("style",),
     )
-    if stars.get_text("", strip=True) != "★★★★★":
+    if _normalized_plain_review_text(stars, owner) != "★★★★★":
         raise GeneratedBodyError(
             f"Generated body {owner} has invalid review star content."
         )
@@ -1251,6 +1257,17 @@ def _direct_text(element: Tag) -> str:
         for child in element.children
         if isinstance(child, NavigableString)
     )
+
+
+def _normalized_plain_review_text(element: Tag, owner: str) -> str:
+    if any(
+        isinstance(child, (Tag, Comment))
+        for child in element.children
+    ):
+        raise GeneratedBodyError(
+            f"Generated body {owner} must contain plain canonical review text."
+        )
+    return _normalize_claim_match_text(_direct_text(element))
 
 
 def _normalized_review_evidence(card: Tag) -> ReviewEvidence:
@@ -1292,19 +1309,18 @@ def _normalized_review_evidence(card: Tag) -> ReviewEvidence:
     )
     _require_direct_components(canonical_card, (stars, text, meta), "review card")
     _require_direct_components(meta, (author, platform), "review card")
-    _require_direct_components(author, (date,), "review card author")
-    if tuple(text.find_all(True)) or tuple(date.find_all(True)) or tuple(
-        platform.find_all(True)
-    ):
-        raise GeneratedBodyError(
-            "Generated body review card fields must contain plain source text."
-        )
+    _require_direct_components(
+        author,
+        (date,),
+        "review card author",
+        allow_direct_text=True,
+    )
     return ReviewEvidence(
         author=_normalize_claim_match_text(_direct_text(author)),
         rating=_score_style_value(stars, "review card"),
-        date=_normalize_claim_match_text(date.get_text(" ", strip=True)),
-        platform=_normalize_claim_match_text(platform.get_text(" ", strip=True)),
-        text=_normalize_claim_match_text(text.get_text(" ", strip=True)),
+        date=_normalized_plain_review_text(date, "review card date"),
+        platform=_normalized_plain_review_text(platform, "review card platform"),
+        text=_normalized_plain_review_text(text, "review card text"),
     )
 
 
@@ -1443,30 +1459,65 @@ def _validate_review_summary(
             "span",
             owner,
         )
-        _require_direct_components(score_element, (of_five,), owner)
+        _require_direct_components(
+            score_element,
+            (of_five,),
+            owner,
+            allow_direct_text=True,
+        )
         _require_direct_components(
             canonical_root,
             (stars, score_element, count_element, link),
             owner,
         )
+        if _normalize_claim_match_text(_direct_text(score_element)) != (
+            _normalize_claim_match_text(str(score))
+        ):
+            raise GeneratedBodyError(f"Generated body {owner} has the wrong review score.")
+        if _normalized_plain_review_text(of_five, owner) != "out of 5":
+            raise GeneratedBodyError(f"Generated body {owner} has invalid score text.")
+        if _normalized_plain_review_text(count_element, owner) != (
+            _normalize_claim_match_text(f"Based on {count} reviews on Google")
+        ):
+            raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
+        allowed_link_text = {
+            "read all reviews on google",
+            "read all reviews on google →",
+        }
     else:
         strong_elements = tuple(score_element.find_all("strong", recursive=False))
         if len(strong_elements) != 1 or strong_elements[0].attrs:
             raise GeneratedBodyError(
                 "Generated body review summary has an invalid score element."
             )
-        _require_direct_components(score_element, strong_elements, owner)
+        _require_direct_components(
+            score_element,
+            strong_elements,
+            owner,
+            allow_direct_text=True,
+        )
         _require_direct_components(
             canonical_root,
             (stars, score_element, link),
             owner,
         )
-    score_text = score_element.get_text(" ", strip=True)
-    if not _contains_complete_token_sequence(score_text, str(score)):
-        raise GeneratedBodyError(f"Generated body {owner} has the wrong review score.")
-    count_text = count_element.get_text(" ", strip=True)
-    if not _contains_complete_token_sequence(count_text, str(count)):
-        raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
+        if _normalized_plain_review_text(
+            strong_elements[0], owner
+        ) != _normalize_claim_match_text(f"{score} out of 5"):
+            raise GeneratedBodyError(f"Generated body {owner} has the wrong review score.")
+        summary_count_text = _normalize_claim_match_text(
+            _direct_text(score_element)
+        ).removeprefix("·").strip()
+        if summary_count_text != _normalize_claim_match_text(
+            f"Based on {count} Google Reviews"
+        ):
+            raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
+        allowed_link_text = {
+            "read all on google",
+            "read all on google →",
+        }
+    if _normalized_plain_review_text(link, owner) not in allowed_link_text:
+        raise GeneratedBodyError(f"Generated body {owner} has invalid CTA text.")
     if link.get("href") != contract.reviews_url:
         raise GeneratedBodyError(f"Generated body {owner} has the wrong reviews URL.")
 
@@ -1491,16 +1542,18 @@ def _validate_review_contract(
     if contract.mode != "cards" or len(contract.source_reviews) < 3:
         raise GeneratedBodyError("Expected review admission contract is invalid.")
 
-    grids = _elements_with_class(body_root, "reviews-card-grid")
-    if len(grids) != 1:
-        raise GeneratedBodyError(
-            "Generated body review cards must contain exactly one reviews-card-grid."
-        )
-    cards = _elements_with_class(grids[0], "review-card")
+    grid = _canonical_component(
+        body_root,
+        "reviews-card-grid",
+        "div",
+        "review cards",
+    )
+    cards = _elements_with_class(grid, "review-card")
     if len(cards) != 3:
         raise GeneratedBodyError(
             "Generated body review cards must contain exactly three review cards."
         )
+    _require_direct_components(grid, tuple(cards), "review cards")
     available = [
         _normalized_source_review(review) for review in contract.source_reviews
     ]
