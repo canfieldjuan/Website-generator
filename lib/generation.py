@@ -168,11 +168,10 @@ SERVICE_RADIUS_CLAIM_PATTERN = re.compile(
 CITY_STATE_CLAIM_PATTERN = re.compile(
     r"(?<!\w)(?P<city>[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3}),"
     r"\s*(?P<state>[A-Z]{2})(?![A-Za-z])",
-    re.IGNORECASE,
 )
 SERVICE_PLACE_CLAIM_PATTERN = re.compile(
     r"(?i:\b(?:serving|based\s+in|located\s+in)\s+)"
-    r"(?P<place>[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3})"
+    r"(?P<place>[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3}?)"
     r"(?=\s*(?:,|&|\band\b|\barea\b|\bregion\b|\bcommunities\b|[.!?]|$))",
     re.IGNORECASE,
 )
@@ -2154,6 +2153,8 @@ def _validate_location_claims(
                 )
         for match in SERVICE_PLACE_CLAIM_PATTERN.finditer(raw_surface):
             place = match.group("place").strip()
+            if place.casefold().startswith("the "):
+                place = place[4:].lstrip()
             normalized_place = _normalize_claim_match_text(place)
             if normalized_place in GENERIC_SERVICE_PLACE_VALUES:
                 continue

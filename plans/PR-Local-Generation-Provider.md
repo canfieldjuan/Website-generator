@@ -685,6 +685,31 @@ tenure copy, change layout/copy/CSS, alter provider/runtime behavior, or affect
 image acquisition, deployment, and email-send effects. Same-document `#`
 destinations remain allowed without becoming source data.
 
+### City/state classifier boundary revision
+
+The exact Qwen fixture exposed a false rejection in generated-location
+admission. `CITY_STATE_CLAIM_PATTERN` applies case-insensitive matching to both
+the title-cased city shape and the two-letter postal-state shape, so ordinary
+comma clauses such as `Call today, or request service online` are interpreted
+as an unsupported `Call today, OR` location. The model then receives the same
+misclassified finding on its one correction attempt and cannot produce an
+admissible result even though it did not invent a location.
+
+The correct boundary must continue to admit the exact verified `City, ST`
+shape and reject an unverified title-cased city with an uppercase postal state,
+while ordinary lowercase prose after a comma must not be classified as a
+location. A deterministic scan of the prior accepted fixture also proves that
+the contextual matcher captures `the Effingham` as the place in
+`serving the Effingham area`; its greedy word repetition can additionally
+consume the terminal `area` token. That matcher must treat the optional leading
+article and terminal `area`/`region`/`communities` grammar outside the verified
+place while continuing to reject unsupported locations, including lowercase
+`serving springfield` output. The correction is limited to these two location
+matchers and failing-before/passing-after boundary coverage. Service-radius
+checks, source-location construction, prompt contract, retries, provider
+transport, Connect schemas/jobs, action destinations, and all external-effect
+paths remain unchanged.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -804,6 +829,11 @@ destinations remain allowed without becoming source data.
 52. Bind parameterized source claims to their exact source value, beginning
     with the IBEW local number, instead of treating the claim family as a
     boolean permission.
+53. Keep the literal `City, ST` classifier case-sensitive so ordinary
+    comma-delimited prose cannot be mistaken for an unsupported location, and
+    keep an optional leading article plus terminal area noun outside the
+    contextual matcher's captured place so source-owned `serving the City area`
+    claims remain admissible.
 
 ### Files touched
 
@@ -1137,6 +1167,36 @@ override before assembly.
   `CUDA error: unspecified launch failure`; immediately afterward `nvidia-smi`
   reported `Unable to determine the device handle for GPU0`. No CPU or cloud
   fallback was used.
+- The resumed vLLM fixture first failed closed on ordinary comma prose parsed
+  as a city/state claim. The added location regression failed with three
+  `Generated body location does not match verified location data` errors before
+  the city/state matcher correction. A deterministic scan then reproduced the
+  second boundary: `serving the Effingham area` was captured as the unsupported
+  place `the Effingham`; the article-location regression failed before the
+  contextual matcher correction.
+- `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
+  -m unittest
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_location_and_radius_claims_to_source`
+  — passed after both corrections (`Ran 1 test ... OK`). Its cases admit the
+  exact source location, source-owned article form, and ordinary comma prose,
+  while rejecting wrong, article-prefixed wrong, lowercase wrong, and
+  wrong-radius claims.
+- `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8000/v1
+  GENERATION_TIMEOUT_SECONDS=7200
+  /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
+  build.py examples/prospect-plumber-template.json --skip-image-gen
+  --skip-email-draft --skip-deploy` completed against
+  `local:qwen/qwen3.8-27b` after the boundary corrections. The output recorded
+  `Build complete`; image generation, email drafting, and Vercel deployment
+  remained skipped. During the proof, `nvidia-smi` reported the vLLM engine
+  holding 21,990 MiB on the NVIDIA GeForce RTX 3090.
+- The pre-run artifact was 72,828 bytes with SHA-256
+  `9b7b478e7151879a1536525639b08ea06ed00aefdbdbd16adb1fdebeda43da7a`.
+  The successful fixture replaced it with a 73,121-byte artifact at
+  `outputs/builds/drees-plumbing-inc/index.html`, SHA-256
+  `e9ff4c2827b62be4a1b7f24f26169de39b4f6d68f96b7606cfd3a454a853ddf8`.
+  The required unresolved-placeholder and fabricated-claim grep scans each
+  returned `0` matches.
 - The standalone runtime was stopped after validation. The GPU compute-process
   query was empty.
 - Mocked local transport tests prove the configured request reaches the
