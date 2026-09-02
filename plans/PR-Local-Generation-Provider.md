@@ -364,13 +364,17 @@ allowlist from the same evidence authority used by admission.
 
 The correct fix must derive one final source-gated claim allowlist from the
 existing verification function and place it at the response edge before model
-generation. Only claim phrases whose required prospect field or service-promise
-evidence is present may enter that allowlist. The instruction must explicitly
-forbid inferring, paraphrasing, or combining other ownership, franchise-status,
-credential, availability, scheduling, estimate, pricing, billing, or
-owner-availability claims from adjacent data or static examples. Boundary tests
-must prove both sides: unsupported claims stay out while newly verified field and
-service-promise claims enter.
+generation. It must also project the large system/catalog prompt through that
+same authority so literal examples for unverified claims never enter the actual
+model request; a late negative instruction is not sufficient when the static
+catalog repeatedly seeds the forbidden copy. Only claim phrases whose required
+prospect field or service-promise evidence is present may remain in the prompt or
+enter the allowlist. The instruction must explicitly forbid inferring,
+paraphrasing, or combining other ownership, franchise-status, credential,
+availability, scheduling, estimate, pricing, billing, or owner-availability
+claims from adjacent data or static examples. Boundary tests must prove both
+sides: unsupported claims are removed while newly verified field and
+service-promise claims remain available.
 
 This correction must not weaken final generated-body admission, retry rejected
 model output, change source-evidence rules, alter customer-facing copy owned by

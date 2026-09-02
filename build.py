@@ -553,6 +553,21 @@ def source_claim_boundary_instruction(prospect):
     )
 
 
+def filter_unverified_claim_examples(prompt_text, prospect):
+    """Remove literal output examples the prospect evidence does not admit."""
+    filtered = prompt_text
+    for claim in sorted(
+        unverified_service_claim_phrases(prospect), key=len, reverse=True
+    ):
+        filtered = re.sub(
+            rf"(?<![\w]){re.escape(claim)}(?![\w])",
+            "source-backed wording",
+            filtered,
+            flags=re.IGNORECASE,
+        )
+    return filtered
+
+
 def _field_claim_is_verified(prospect, field, normalized_promises):
     if field in BOOLEAN_CLAIM_FIELDS and prospect.get(field) is True:
         return True
@@ -973,6 +988,8 @@ def generate_build_html(prospect, generation_config=None, client=None):
         system_prompt = f.read()
     with open(INDUSTRY_DEFAULTS_PATH, "r") as f:
         industry_defaults = f.read()
+    system_prompt = filter_unverified_claim_examples(system_prompt, prospect)
+    industry_defaults = filter_unverified_claim_examples(industry_defaults, prospect)
     with open(THEMES_CATALOG_PATH, "r") as f:
         themes_catalog = f.read()
     with open(SECTION_ORDERS_PATH, "r") as f:
