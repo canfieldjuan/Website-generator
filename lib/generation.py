@@ -973,10 +973,14 @@ def _email_like_values(value: str) -> set[str]:
     }
 
 
-def _canonical_email_value(value: str) -> str | None:
-    candidate = unicodedata.normalize("NFKC", unquote(value)).strip()
+def canonical_email_address(value: str) -> str | None:
+    candidate = unicodedata.normalize("NFKC", value).strip()
     match = EMAIL_LIKE_PATTERN.fullmatch(candidate)
     return match.group(1).casefold() if match else None
+
+
+def _canonical_email_value(value: str) -> str | None:
+    return canonical_email_address(unquote(value))
 
 
 def _claim_exposure_texts(

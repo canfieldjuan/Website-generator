@@ -706,10 +706,24 @@ class GenerationSeamTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "strings or null"):
                     build.prepare_prospect(source)
 
-        for valid in ("owner@example.test", "", None):
+        for invalid in ("", "   ", "not-an-email", "owner@example", "owner%40example.test"):
+            with self.subTest(invalid=invalid):
+                source = {**PROSPECT, "owner_email": invalid}
+                with self.assertRaisesRegex(ValueError, "valid email address or null"):
+                    build.prepare_prospect(source)
+
+        for valid, expected in (
+            ("owner@example.test", "owner@example.test"),
+            ("  Owner@Example.test  ", "Owner@Example.test"),
+            ("owner@example.com", None),
+            (None, None),
+        ):
             with self.subTest(valid=valid):
                 source = {**PROSPECT, "owner_email": valid}
-                self.assertEqual(build.prepare_prospect(source)["owner_email"], valid)
+                self.assertEqual(
+                    build.prepare_prospect(source)["owner_email"],
+                    expected,
+                )
 
     def test_malformed_optional_display_name_is_nonretryable_before_generation(self):
         for invalid in (123, 0):
@@ -735,7 +749,18 @@ class GenerationSeamTests(unittest.TestCase):
                         runtime.close()
 
     def test_malformed_owner_email_is_nonretryable_before_generation(self):
-        for invalid in (123, 0, False, [], {}):
+        for invalid in (
+            123,
+            0,
+            False,
+            [],
+            {},
+            "",
+            "   ",
+            "not-an-email",
+            "owner@example",
+            "owner%40example.test",
+        ):
             with self.subTest(invalid=invalid):
                 source = {**PROSPECT, "owner_email": invalid}
                 data = json.dumps(source).encode("utf-8")

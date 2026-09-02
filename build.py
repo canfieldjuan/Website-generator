@@ -40,6 +40,7 @@ from lib.generation import (
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
+    canonical_email_address,
     extract_homepage_class_names,
     extract_interior_only_class_names,
     extract_square_placeholder_tokens,
@@ -469,6 +470,14 @@ def prepare_prospect(prospect, build_date=None):
             f"{', '.join(invalid_optional_strings)}"
         )
     sanitize_placeholders(prospect)
+    owner_email = prospect.get("owner_email")
+    if isinstance(owner_email, str):
+        owner_email = owner_email.strip()
+        if canonical_email_address(owner_email) is None:
+            raise ValueError(
+                "Prospect JSON owner_email must be a valid email address or null."
+            )
+        prospect["owner_email"] = owner_email
     sanitize_reviews(prospect)
     build_date = build_date or date.today()
     prospect["build_date"] = build_date.isoformat()

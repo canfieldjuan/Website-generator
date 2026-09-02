@@ -127,6 +127,30 @@ prospect fields. The repository-mandated plumber fixture and both zero-count
 content-safety scans must then be rerun on the final combined head using the CUDA
 vLLM runtime before the slice is called verified.
 
+### Owner-email syntax admission revision
+
+Exact-head review proved that the prior optional-field correction validates only
+the `owner_email` JSON type. Non-email and whitespace-only strings still cross
+the expensive generation boundary, then fail the source-owned output validator
+as retryable `MODEL_RESPONSE_INVALID`. The root cause is two separate notions of
+email validity: prospect preparation checks string-or-null while final body
+admission owns the actual mailbox syntax.
+
+The correct fix must expose one shared mailbox canonicalizer from generated-body
+admission and use it during `prepare_prospect` before any provider call. Null
+remains absent; a valid string is trimmed but otherwise preserved for source
+copy; empty, whitespace-only, percent-encoded, or syntactically invalid values
+must fail as deterministic input and retain Connect's non-retryable
+`INPUT_INVALID` classification. Existing recognized placeholder values must
+still be sanitized to null before syntax admission. Final visible and `mailto:`
+comparisons must continue using the same canonical mailbox semantics.
+
+Tests must prove invalid type and syntax values never call generation, valid and
+trimmed values reach preparation, and downstream email ownership behavior is
+unchanged. This correction must not change other prospect fields, capability or
+job schemas, provider/runtime behavior, generated copy, or image, deployment,
+and email-send effects.
+
 ## Scope (this PR)
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
@@ -255,6 +279,17 @@ as any other invalid token.
   exist.
 
 ## Verification
+
+- `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935
+  /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
+  -m unittest -v
+  tests.test_connect_provider.GenerationSeamTests.test_optional_owner_email_must_be_string_or_null
+  tests.test_connect_provider.GenerationSeamTests.test_malformed_owner_email_is_nonretryable_before_generation
+  tests.test_connect_provider.GenerationSeamTests.test_in_memory_preparation_matches_file_loading_without_mutating_input
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_every_business_email_to_source`
+  passed: 4 tests in 1.400 seconds. Invalid type, empty, whitespace,
+  malformed-domain, and percent-encoded mailbox inputs fail before generation;
+  valid/trimmed and placeholder-null paths plus final source ownership pass.
 
 - `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest -v
   tests.test_generation.AtomicWriteAndCliTests.test_build_generator_uses_shared_admission_gate
