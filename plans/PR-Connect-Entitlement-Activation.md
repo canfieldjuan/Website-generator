@@ -1,64 +1,103 @@
 # PR plan: Connect entitlement activation
 
-## Problem-derived contract
-
-### Root cause
+## Why this slice exists
 
 The Website Redesign provider enforces the signed `entitlement-v1` decision on
 every Local Connect route, but the application has no local operation that can
 report that decision or install an acquired entitlement. A user therefore
-cannot complete the accepted activation flow from this application; manually
-placing the shared file would bypass the activation contract's admission,
-locking, permissions, and atomicity requirements. The missing behavior is the
-application-local activation boundary, not the provider route gate or the
-generation pipeline.
+cannot complete the accepted ADR-0004 activation flow from this application;
+manual placement would omit the contract's admission, locking, permissions,
+and atomicity requirements. This closes the application-local implementation
+portion of issue #27 without weakening the provider gate.
 
-### Correct fix
+This slice exceeds the repository's 400-line soft cap because activation is a
+single security and data-integrity boundary: source admission, cross-app
+serialization, atomic persistence, local command dispatch, and the tests that
+prove both sides must land together. Splitting out the tests or publishing only
+part of the installer would leave an unproved or unusable activation path.
+
+## Scope (this PR)
 
 1. Expose a status operation that evaluates the existing shared verifier and
    returns only its stable state plus an `active` boolean.
 2. Expose an install operation that reads a user-selected regular source file
    without following its final symlink, bounds the read, and admits only a
    currently active entitlement under the existing compiled authority.
-3. Serialize all participating installers with the contract-owned persistent
-   lock, validate the destination directory and any existing lock/license as
-   owner-private regular filesystem objects, re-evaluate at commit time, and
-   replace the fixed shared entitlement path using a synced same-directory
-   temporary file and atomic rename.
-4. Preserve the prior entitlement byte-for-byte on all failures before the
-   atomic replacement; never claim success after a durability or installed
-   verification failure. Return the contract's stable activation error codes.
-5. Make these operations reachable through the application's trusted local CLI
-   adapter without requiring vLLM or starting the Connect HTTP provider.
-6. Add boundary tests for status privacy, missing authority, source type and
-   size, invalid and inactive candidates, destination safety, lock contention,
-   atomic replacement, unchanged-on-failure behavior, exact-byte installation,
-   and immediate visibility to the existing route gate.
-7. Document activation and the remaining release requirement for an official
-   public keyring and issuer-signed license.
+3. Serialize installers on the contract-owned persistent lock, validate the
+   destination directory and existing lock/license as owner-private regular
+   filesystem objects, re-evaluate at commit time, and replace the fixed shared
+   path using a synced same-directory temporary file and atomic rename.
+4. Preserve the prior entitlement byte-for-byte on pre-replacement failures;
+   return stable ADR-0004 errors and never report success after durability or
+   installed-verification failures.
+5. Route status/install through the trusted local CLI before generation
+   preflight so neither command needs vLLM or starts the provider.
+6. Add boundary tests and operator documentation.
 
-### Must not change
+### Files touched
 
-- Do not weaken, bypass, cache, or move the entitlement check on `/v2/manifest`,
-  `POST /v2/jobs`, or `GET /v2/jobs/{job_id}`.
-- Do not change Local Connect manifests, job/artifact schemas, authentication,
-  registration, durable job semantics, or capability identity.
-- Do not change JSON-to-HTML generation, provider/model selection, output
-  validation, standalone build behavior, image/email/deployment behavior, or
-  start vLLM during activation.
-- Do not create a signing authority, commit any private key, promote test keys,
-  add billing/account flows, or make the public keyring runtime-overridable.
-- Do not add a second entitlement format or persistence location. The shared
-  ADR-0003 path and existing verifier remain authoritative.
-- Do not claim production activation is complete until an official packaged
-  public keyring and active issuer-signed license are provisioned under issue
-  #27.
+- `lib/connect_entitlement.py`
+- `connect_provider.py`
+- `tests/test_entitlement_activation.py`
+- `README.md`
+- `plans/PR-Connect-Entitlement-Activation.md`
 
-## Verification contract
+## Mechanism
 
-- Focused activation and provider-route tests pass against the pinned canonical
-  entitlement fixtures.
-- The repository's documented local review and unit commands pass.
-- A cold diff audit maps every changed line to this contract and reports any
-  unmet requirement, out-of-scope change, or touched protected behavior before
-  completion.
+The existing `EntitlementGate` remains the only signature and claim verifier.
+The installer reads a fixed-size snapshot from a no-follow regular-file
+descriptor and checks it once before filesystem mutation and again after
+acquiring `$XDG_CONFIG_HOME/local-connect/.entitlement-v1.lock`. All destination
+operations use an opened owner-private directory descriptor. The exact source
+bytes go to an exclusive `0600` temporary file, are flushed and synced, replace
+only `entitlement-v1.json`, and are followed by a directory sync and installed
+status check while the lock remains held.
+
+`python connect_provider.py entitlement status` emits the privacy-bounded state
+document. `python connect_provider.py entitlement install PATH` emits that same
+document on success or a stable structured error on failure. Dispatch occurs
+before runtime-directory resolution and local-model preflight.
+
+## Intentional
+
+- Source checkouts remain `authority_unavailable`; no runtime key override or
+  test authority is added.
+- Inactive status is a successful status query with `active: false`, not a CLI
+  execution failure.
+- The first implementation targets Unix because the accepted activation
+  contract specifies Unix ownership, no-follow descriptors, `flock`, and
+  directory syncing.
+- The wire API is unchanged: activation commands are app-local operations, not
+  Connect routes.
+- Existing unsafe license and lock paths fail closed instead of being repaired
+  or overwritten implicitly.
+
+## Deferred
+
+- Issue #27 still owns official Ed25519 public-keyring packaging and an active
+  issuer-signed production license. No production activation claim is made
+  until both are provisioned and exercised.
+- Billing, account UI, renewal, revocation, device binding, non-Unix placement,
+  and private issuer-key custody remain outside this slice.
+- Generation, provider/model selection, Connect manifests/jobs/authentication,
+  image generation, email, and deployment behavior are unchanged.
+
+## Verification
+
+- `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest tests.test_entitlement_activation tests.test_connect_provider.EntitlementTests`
+  - 16 tests passed after the final installer resource-ordering change.
+- `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests -v`
+  - Full exact-head result recorded before PR publication.
+- `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m compileall -q build.py pipeline.py connect_provider.py lib tests`
+  - Passed.
+- `bash scripts/local_pr_review.sh`
+  - Passed against `origin/main`.
+- `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python connect_provider.py entitlement status`
+  - Returned `{"active":false,"state":"authority_unavailable"}` without model
+    preflight, accurately reflecting the source build.
+
+## Estimated diff size
+
+Five files, approximately 820 additions and 4 deletions. About half is focused
+boundary/failure-path coverage; the overage is intentional for the indivisible
+activation security contract described above.
