@@ -277,6 +277,10 @@ def _open_private_directory(path: Path) -> int:
         or fcntl is None
         or not hasattr(os, "geteuid")
         or any(not hasattr(os, flag) for flag in required_flags)
+        or os.mkdir not in os.supports_dir_fd
+        or os.chmod not in os.supports_dir_fd
+        or os.stat not in os.supports_dir_fd
+        or os.stat not in os.supports_follow_symlinks
     ):
         raise EntitlementActivationError(
             STORAGE_UNAVAILABLE_CODE,
@@ -284,11 +288,7 @@ def _open_private_directory(path: Path) -> int:
         )
     descriptor: int | None = None
     try:
-        _create_missing_private_directories(path)
-        descriptor = os.open(
-            path,
-            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY,
-        )
+        descriptor = _open_directory_path(path, create_missing=True)
         metadata = os.fstat(descriptor)
         if (
             not stat.S_ISDIR(metadata.st_mode)
@@ -307,33 +307,82 @@ def _open_private_directory(path: Path) -> int:
         ) from exc
 
 
-def _create_missing_private_directories(path: Path) -> None:
-    missing: list[Path] = []
-    current = path
-    while True:
-        try:
-            current.lstat()
-            break
-        except FileNotFoundError:
-            parent = current.parent
-            if parent == current:
-                raise OSError(errno.ENOENT, "no existing directory ancestor")
-            missing.append(current)
-            current = parent
+def _open_directory_path(path: Path, *, create_missing: bool) -> int:
+    if not path.is_absolute():
+        raise OSError(errno.EINVAL, "entitlement directory must be absolute")
+    components = path.parts
+    if not components or any(
+        component in ("", os.curdir, os.pardir) for component in components[1:]
+    ):
+        raise OSError(errno.EINVAL, "unsafe entitlement directory component")
 
-    for directory in reversed(missing):
-        try:
-            directory.mkdir(mode=0o700)
-        except FileExistsError:
-            continue
-        directory.chmod(0o700)
-        metadata = directory.lstat()
-        if (
-            not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != os.geteuid()
-            or metadata.st_mode & 0o777 != 0o700
-        ):
-            raise OSError(errno.EACCES, "unsafe created entitlement directory")
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
+    current = os.open(components[0], flags)
+    child: int | None = None
+    try:
+        for component in components[1:]:
+            require_private = False
+            created_identity: tuple[int, int] | None = None
+            try:
+                child = os.open(component, flags, dir_fd=current)
+            except FileNotFoundError:
+                if not create_missing:
+                    raise
+                _validate_creation_parent(current)
+                try:
+                    os.mkdir(component, 0o700, dir_fd=current)
+                    require_private = True
+                    created = os.stat(
+                        component,
+                        dir_fd=current,
+                        follow_symlinks=False,
+                    )
+                    if (
+                        not stat.S_ISDIR(created.st_mode)
+                        or created.st_uid != os.geteuid()
+                    ):
+                        raise OSError(
+                            errno.EACCES, "unsafe created entitlement directory"
+                        )
+                    created_identity = (created.st_dev, created.st_ino)
+                    os.chmod(component, 0o700, dir_fd=current)
+                except FileExistsError:
+                    require_private = True
+                child = os.open(component, flags, dir_fd=current)
+
+            metadata = os.fstat(child)
+            if created_identity is not None and (
+                metadata.st_dev,
+                metadata.st_ino,
+            ) != created_identity:
+                raise OSError(errno.EACCES, "created entitlement directory changed")
+            if require_private and (
+                metadata.st_uid != os.geteuid()
+                or metadata.st_mode & 0o777 != 0o700
+            ):
+                raise OSError(errno.EACCES, "unsafe created entitlement directory")
+
+            os.close(current)
+            current = child
+            child = None
+        return current
+    except Exception:
+        if child is not None:
+            with suppress(OSError):
+                os.close(child)
+        with suppress(OSError):
+            os.close(current)
+        raise
+
+
+def _validate_creation_parent(descriptor: int) -> None:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise OSError(errno.ENOTDIR, "entitlement parent is not a directory")
+    writable_by_others = metadata.st_mode & 0o022
+    sticky = metadata.st_mode & stat.S_ISVTX
+    if writable_by_others and not sticky:
+        raise OSError(errno.EACCES, "entitlement parent is not safe for creation")
 
 
 def _open_activation_lock(directory_fd: int) -> int:
@@ -447,13 +496,17 @@ def _installed_entitlement_status(
     if installed != candidate:
         raise OSError(errno.EIO, "installed entitlement bytes mismatch")
 
-    opened = os.fstat(directory_fd)
-    visible = os.stat(directory_path, follow_symlinks=False)
-    if (
-        not stat.S_ISDIR(visible.st_mode)
-        or (opened.st_dev, opened.st_ino) != (visible.st_dev, visible.st_ino)
-    ):
-        raise OSError(errno.EIO, "entitlement directory path changed")
+    visible_fd: int | None = None
+    try:
+        visible_fd = _open_directory_path(directory_path, create_missing=False)
+        opened = os.fstat(directory_fd)
+        visible = os.fstat(visible_fd)
+        if (opened.st_dev, opened.st_ino) != (visible.st_dev, visible.st_ino):
+            raise OSError(errno.EIO, "entitlement directory path changed")
+    finally:
+        if visible_fd is not None:
+            with suppress(OSError):
+                os.close(visible_fd)
 
     assert gate.keys is not None
     decision = _evaluate_entitlement(installed, gate.keys, gate.now())

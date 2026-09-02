@@ -25,9 +25,10 @@ part of the installer would leave an unproved or unusable activation path.
    currently active entitlement under the existing compiled authority.
 3. Serialize installers on the contract-owned persistent lock, validate the
    destination directory, any newly created config ancestors, and existing
-   lock/license as owner-private filesystem objects, re-evaluate at commit
-   time, and replace the fixed shared path using a synced same-directory
-   temporary file and atomic rename.
+   lock/license as owner-private filesystem objects, and traverse every config
+   path component without following symlinks. Re-evaluate at commit time and
+   replace the fixed shared path using a synced same-directory temporary file
+   and atomic rename.
 4. Preserve the prior entitlement byte-for-byte on pre-replacement failures,
    and restore it (or remove a newly promoted candidate) when durability or
    installed-verification fails after replacement. Final verification reads
@@ -57,11 +58,13 @@ bytes go to an exclusive `0600` temporary file, are flushed and synced, replace
 only `entitlement-v1.json`, and are followed by a directory sync and installed
 status check through that same descriptor while the lock remains held. Before
 success, the installer also confirms the configured pathname still identifies
-the opened directory. Missing config ancestors are created one at a time and
-made owner-private before creating their child, so a restrictive process umask
-cannot leave them inaccessible. The installer snapshots an existing license
-before promotion and restores that snapshot—or removes the candidate when no
-license existed—if a post-promotion check fails.
+the opened directory by walking it again without following any component
+symlinks. Missing config ancestors are created relative to pinned parent
+descriptors, made owner-private before creating their child, and rejected under
+a non-sticky shared parent. This prevents a restrictive process umask from
+leaving them inaccessible without reintroducing path redirection. The installer
+snapshots an existing license before promotion and restores that snapshot—or
+removes the candidate when no license existed—if a post-promotion check fails.
 
 `python connect_provider.py entitlement status` emits the privacy-bounded state
 document. `python connect_provider.py entitlement install PATH` emits that same
@@ -95,9 +98,10 @@ before runtime-directory resolution and local-model preflight.
 ## Verification
 
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest tests.test_entitlement_activation tests.test_connect_provider.EntitlementTests`
-  - The suites passed separately after one combined-run teardown stall: 16
+  - The suites passed separately after one combined-run teardown stall: 18
     activation boundary tests and 4 existing verifier/route tests passed after
-    rollback, restrictive-umask, path-identity, and byte-boundary alignment.
+    rollback, restrictive-umask, no-follow traversal, path-identity, and
+    byte-boundary alignment.
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests -v`
   - 220 tests passed before the post-promotion rollback alignment; GitHub's
     required unit check reruns the complete suite at the published head.

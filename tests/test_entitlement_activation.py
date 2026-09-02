@@ -157,6 +157,49 @@ class EntitlementActivationTests(unittest.TestCase):
             self.assertEqual(destination.parent.stat().st_mode & 0o777, 0o700)
             self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
 
+    def test_config_ancestor_symlink_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            actual_config = root / "actual-config"
+            actual_config.mkdir(mode=0o700)
+            linked_config = root / "linked-config"
+            linked_config.symlink_to(actual_config, target_is_directory=True)
+            destination = linked_config / "local-connect" / ENTITLEMENT_FILE_NAME
+            gate = EntitlementGate.for_test(
+                path=destination,
+                keyring_document=self.keyring,
+                now=self.now,
+            )
+            source = self.source(root)
+
+            self.assert_activation_error(
+                STORAGE_UNAVAILABLE_CODE,
+                lambda: install_entitlement(source, gate),
+            )
+            self.assertFalse((actual_config / "local-connect").exists())
+
+    def test_missing_component_under_shared_parent_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shared = root / "shared"
+            shared.mkdir(mode=0o700)
+            shared.chmod(0o777)
+            destination = (
+                shared / "missing-config" / "local-connect" / ENTITLEMENT_FILE_NAME
+            )
+            gate = EntitlementGate.for_test(
+                path=destination,
+                keyring_document=self.keyring,
+                now=self.now,
+            )
+            source = self.source(root)
+
+            self.assert_activation_error(
+                STORAGE_UNAVAILABLE_CODE,
+                lambda: install_entitlement(source, gate),
+            )
+            self.assertFalse((shared / "missing-config").exists())
+
     def test_invalid_and_inactive_sources_preserve_existing_entitlement(self):
         cases = (
             ("invalid/bad-signature.json", SOURCE_INVALID_CODE),
