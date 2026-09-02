@@ -254,7 +254,7 @@ as any other invalid token.
 ## Verification
 
 - `PYTHONWARNINGS=error::ResourceWarning CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests`
-  passed: 172 tests in 5.544 seconds on the updated combined tree, including
+  passed: 176 tests in 8.757 seconds on the updated combined tree, including
   direct `llama.cpp` preflight, loopback proxy bypass, startup boundaries, and
   the Connect retryable runtime instruction plus the exact-head review
   regressions, including truthy and falsy malformed optional display names.
@@ -284,6 +284,16 @@ as any other invalid token.
   deployment, email, image, or file-write side effect.
 - The llama.cpp server was stopped after acceptance; the post-run GPU query
   reported 15 MiB used and 0% utilization on the RTX 3090.
+- The mandated final-head plumber fixture was rerun on CUDA after the admission
+  fixes. GPU 0 reached 96% utilization at 387.79 W, but the existing prompt
+  still seeded the unsupported `Not a Franchise` claim and final admission
+  correctly rejected it. The prompt now removes unverified claim examples
+  through the same source-evidence authority; six focused boundary tests and
+  the combined 176-test suite pass. The next CUDA fixture request did not return
+  model output because `llama.cpp` aborted with `CUDA error: unspecified launch
+  failure`, after which `nvidia-smi` could not obtain a device handle for GPU 0.
+  The canonical fixture and its two zero-count scans therefore remain pending;
+  no CPU, cloud, deployment, email, or image fallback was used.
 
 ## Final diff size
 
