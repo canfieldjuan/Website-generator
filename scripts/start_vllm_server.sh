@@ -103,7 +103,8 @@ args=(
     --generation-config vllm
     --default-chat-template-kwargs '{"enable_thinking":false}'
     --enable-prefix-caching
-    --disable-log-requests
+    --no-enable-log-requests
+    --disable-uvicorn-access-log
 )
 if [[ -n "$api_key" ]]; then
     args+=(--api-key "$api_key")

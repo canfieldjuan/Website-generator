@@ -423,6 +423,23 @@ request fields. Final acceptance still requires a controlled CUDA vLLM fixture,
 both fabrication scans, and explicit runtime unload; prior llama.cpp fixture
 evidence remains historical rather than proof of the new runtime.
 
+### vLLM 0.28 request-log compatibility revision
+
+The controlled launch reached the installed GGUF-capable vLLM 0.28 CLI and
+failed before model loading because the launcher still passes the retired
+`--disable-log-requests` spelling from vLLM 0.16. The current runtime exposes a
+BooleanOptional request-log flag and a separate Uvicorn access-log control, so
+the old flag makes the only locally compatible runtime unusable and does not
+cover endpoint access logs.
+
+The correct fix must replace the retired argument with
+`--no-enable-log-requests` and also pass `--disable-uvicorn-access-log`. Launcher
+tests must assert both current flags and the absence of the retired spelling.
+This compatibility correction must not auto-detect or execute another runtime,
+change the model path or served alias, enable CPU offload, widen the loopback
+bind, change GPU/context/memory defaults, or alter application request payloads.
+The failed launch is not model evidence; the CUDA fixture remains required.
+
 ### Structured source-ownership contract
 
 Exact-head review exposed two content-integrity gaps in the build caller. The
@@ -754,6 +771,13 @@ override before assembly.
 
 ## Verification
 
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest -v
+  tests.test_generation.VllmStartupScriptTests.test_launcher_defaults_to_one_gpu_and_zero_cpu_offload`
+  — 1 test passed in 0.005 seconds. The launcher boundary proves the current
+  request-log and access-log suppression flags are forwarded, the retired
+  spelling is absent, GPU 0 remains the default, and CPU offload remains zero.
+- `bash -n scripts/start_vllm_server.sh` — passed after the vLLM launcher flag
+  correction.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest -v
   tests.test_generation.AtomicWriteAndCliTests.test_build_generator_uses_shared_admission_gate
   tests.test_generation.AtomicWriteAndCliTests.test_build_generator_enforces_identity_and_phone_substitutions
