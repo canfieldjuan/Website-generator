@@ -110,6 +110,6 @@ before runtime-directory resolution and local-model preflight.
 
 ## Estimated diff size
 
-Five files, approximately 820 additions and 4 deletions. About half is focused
+Five files, approximately 980 additions and 4 deletions. About half is focused
 boundary/failure-path coverage; the overage is intentional for the indivisible
 activation security contract described above.
