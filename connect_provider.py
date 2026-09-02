@@ -4,12 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 import socket
 import sys
 from pathlib import Path
 
 import uvicorn
 
+from lib.connect_entitlement import (
+    EntitlementActivationError,
+    entitlement_status,
+    install_entitlement,
+)
 from lib.connect_store import ConnectStore
 from lib.connect_v2 import (
     DEFAULT_LOCAL_MODEL,
@@ -31,7 +37,7 @@ from lib.generation import (
 )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Expose local JSON-to-HTML generation through Local Connect v2. "
@@ -48,7 +54,24 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Override the provider's durable state directory.",
     )
-    return parser.parse_args()
+    commands = parser.add_subparsers(dest="command")
+    entitlement = commands.add_parser(
+        "entitlement",
+        help="Inspect or install the shared Local Connect entitlement.",
+    )
+    entitlement_commands = entitlement.add_subparsers(
+        dest="entitlement_command", required=True
+    )
+    entitlement_commands.add_parser(
+        "status",
+        help="Report whether Local Connect capability exchange is active.",
+    )
+    install = entitlement_commands.add_parser(
+        "install",
+        help="Install an acquired signed entitlement from a selected file.",
+    )
+    install.add_argument("source", type=Path)
+    return parser.parse_args(argv)
 
 
 def bind_loopback_listener(backlog: int) -> socket.socket:
@@ -65,8 +88,30 @@ def bind_loopback_listener(backlog: int) -> socket.socket:
         raise
 
 
-def main() -> int:
-    args = parse_args()
+def _run_entitlement_command(args: argparse.Namespace) -> int:
+    try:
+        if args.entitlement_command == "status":
+            result = entitlement_status()
+        else:
+            result = install_entitlement(args.source)
+    except EntitlementActivationError as exc:
+        print(
+            json.dumps(
+                {"error": {"code": exc.code, "message": str(exc)}},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    if getattr(args, "command", None) == "entitlement":
+        return _run_entitlement_command(args)
     try:
         runtime_dir = args.runtime_dir or default_runtime_dir()
         state_dir = args.state_dir or default_state_dir()
