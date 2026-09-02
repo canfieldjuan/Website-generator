@@ -406,10 +406,29 @@ as any other invalid token.
   tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_location_and_radius_claims_to_source
   tests.test_connect_provider.GenerationSeamTests` passed 23 focused location
   and Connect adapter tests in 3.174 seconds on the merged branch.
+- At stacked generator code head `6afd020`, the required
+  `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8000/v1
+  GENERATION_TIMEOUT_SECONDS=7200
+  /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
+  build.py examples/prospect-plumber-template.json --skip-image-gen
+  --skip-email-draft --skip-deploy` fixture completed. The first candidate's
+  unsupported `Not a Franchise` claim failed admission; the one bounded local
+  correction then produced `Build complete`. Image generation, email drafting,
+  and deployment stayed disabled.
+- The pre-run stacked-worktree artifact was 74,579 bytes with SHA-256
+  `c6ac30df35b5e331c2cedbd84127bc5de5324868454858d45799ed0f57f6e0f9`.
+  The admitted replacement is 72,981 bytes with SHA-256
+  `450ca0462fcde22e776aa26069b04c6c75375ec03e0c34a9093cee4b7341b1fc`.
+  The prescribed unresolved-placeholder and fabricated-claim grep scans each
+  returned `0` matches. This is the exact canonical final-code fixture requested
+  by review; it does not convert the two failed durable Connect jobs above into
+  successful delivery evidence.
+- vLLM was stopped immediately after that fixture. The compute-process query was
+  empty, and the RTX 3090 reported 444 MiB used after unload.
 
 ## Final diff size
 
-Measured against the current provider base: 13 files changed, with 3,851
+Measured against the current provider base: 13 files changed, with 3,870
 insertions and 55 deletions across the durable provider and its contract,
 concurrency, and restart boundary suite. Removing those tests or persistence
 boundaries would make the advertised asynchronous capability unproved.
