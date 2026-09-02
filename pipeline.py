@@ -20,7 +20,9 @@ from lib.generation import (
     REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
+    ImageAdmissionContract,
     PromptPart,
+    SourceContactAdmissionContract,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -29,6 +31,8 @@ from lib.generation import (
     extract_square_placeholder_tokens,
     extract_template_class_names,
     generate_text,
+    generate_with_local_admission_retry,
+    image_contract_instruction,
     make_html_comment,
     preflight_generation_provider,
     resolve_generation_config,
@@ -59,6 +63,90 @@ REDESIGN_DEPLOYMENT_COMMENT_MARKERS = (
     "DEPLOY THIS MOCKUP:",
     "INTERIOR PAGES REMAINING:",
 )
+
+
+def _append_source_value(values, value):
+    if isinstance(value, str) and value.strip() and value.strip() not in values:
+        values.append(value.strip())
+
+
+def _redesign_contact_contract(site_json):
+    phones = []
+    emails = []
+    addresses = []
+    site = site_json.get("site") if isinstance(site_json.get("site"), dict) else {}
+    contact = site.get("contact") if isinstance(site.get("contact"), dict) else {}
+    contact_form = (
+        site_json.get("contact_form")
+        if isinstance(site_json.get("contact_form"), dict)
+        else {}
+    )
+    contact_info = (
+        contact_form.get("contact_info")
+        if isinstance(contact_form.get("contact_info"), dict)
+        else {}
+    )
+    contact_sources = [contact, contact_info]
+    conversion_profile = (
+        site_json.get("conversion_profile")
+        if isinstance(site_json.get("conversion_profile"), dict)
+        else {}
+    )
+    contact_sources.append(conversion_profile)
+    single_page_sections = site_json.get("single_page_sections")
+    for section in (
+        single_page_sections if isinstance(single_page_sections, list) else ()
+    ):
+        if not isinstance(section, dict):
+            continue
+        content = section.get("content")
+        if not isinstance(content, dict):
+            continue
+        section_contact = content.get("contact_info")
+        if isinstance(section_contact, dict):
+            contact_sources.append(section_contact)
+    for source in contact_sources:
+        _append_source_value(phones, source.get("phone"))
+        _append_source_value(emails, source.get("email"))
+        _append_source_value(addresses, source.get("address"))
+        source_addresses = source.get("addresses")
+        if isinstance(source_addresses, list):
+            for address in source_addresses:
+                _append_source_value(addresses, address)
+    return SourceContactAdmissionContract(
+        phones=tuple(phones),
+        emails=tuple(emails),
+        addresses=tuple(addresses),
+    )
+
+
+def _redesign_image_contract(site_json):
+    allowed_urls = []
+    brand = site_json.get("brand") if isinstance(site_json.get("brand"), dict) else {}
+    logo_url = brand.get("logo_url")
+    _append_source_value(allowed_urls, logo_url)
+    images = site_json.get("images")
+    for image in images if isinstance(images, list) else ():
+        if isinstance(image, dict):
+            _append_source_value(allowed_urls, image.get("url"))
+            if (
+                not isinstance(logo_url, str) or not logo_url.strip()
+            ) and image.get("context") == "logo":
+                logo_url = image.get("url")
+
+    def collect_named_image_values(value):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key in {"image_url", "logo_url"}:
+                    _append_source_value(allowed_urls, nested)
+                collect_named_image_values(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect_named_image_values(nested)
+
+    collect_named_image_values(site_json)
+    normalized_logo = logo_url.strip() if isinstance(logo_url, str) and logo_url.strip() else None
+    return ImageAdmissionContract(tuple(allowed_urls), nav_logo_url=normalized_logo)
 
 
 def _six_digit_hex(value):
@@ -456,6 +544,7 @@ def generate_redesign(
     homepage_classes = extract_homepage_class_names(base_template)
     class_catalog = "\n".join(homepage_classes)
     interior_only_classes = extract_interior_only_class_names(base_template)
+    image_contract = _redesign_image_contract(site_json)
 
     user_prompt = f"""THEME: {theme}
 COLOR_MODE: {color_mode}
@@ -471,46 +560,56 @@ ALLOWED BODY CLASSES:
 RESPONSE BOUNDARY: Begin immediately with <body and end immediately with
 </body>. Emit no leading comment, deployment metadata, markdown fence, trailing
 text, HTML head metadata, or unresolved template token.
+
+{image_contract_instruction(image_contract)}
 """
 
-    result = generate_text(
+    site_name = site_json.get("site", {}).get("name") or "Website"
+    contact_contract = _redesign_contact_contract(site_json)
+
+    def admit(candidate):
+        return assemble_generated_html(
+            candidate,
+            base_template=base_template,
+            theme_catalog=theme_catalog,
+            theme_name=theme,
+            colors=_resolve_site_document_colors(site_json),
+            title=site_name,
+            body_theme=_site_body_theme(site_json),
+            trusted_head_comment=redesign_deployment_comment(
+                site_json,
+                theme=theme,
+                source_url=source_url,
+                site_slug=site_slug,
+            ),
+            forbidden_square_placeholders=extract_square_placeholder_tokens(
+                system_prompt,
+                class_catalog,
+            ),
+            forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+            forbidden_class_names=interior_only_classes,
+            allowed_class_names=homepage_classes,
+            source_contacts=contact_contract,
+            expected_images=image_contract,
+            required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+            required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+        )
+
+    _result, html = generate_with_local_admission_retry(
         body_generation_config(config),
         system_prompt=system_prompt,
         user_parts=(PromptPart(user_prompt),),
         temperature=0.4,
+        admit=admit,
         client=generation_client,
     )
-
-    site_name = site_json.get("site", {}).get("name") or "Website"
-    return assemble_generated_html(
-        result,
-        base_template=base_template,
-        theme_catalog=theme_catalog,
-        theme_name=theme,
-        colors=_resolve_site_document_colors(site_json),
-        title=site_name,
-        body_theme=_site_body_theme(site_json),
-        trusted_head_comment=redesign_deployment_comment(
-            site_json,
-            theme=theme,
-            source_url=source_url,
-            site_slug=site_slug,
-        ),
-        forbidden_square_placeholders=extract_square_placeholder_tokens(
-            system_prompt,
-            class_catalog,
-        ),
-        forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
-        forbidden_class_names=interior_only_classes,
-        allowed_class_names=homepage_classes,
-        required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
-        required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
-    )
+    return html
 
 def generate_interior_page(
     site_json,
     page_type,
     page_url=None,
+    source_content=None,
     theme="warm",
     color_mode="brand",
     generation_config=None,
@@ -526,8 +625,13 @@ def generate_interior_page(
         theme_catalog = f.read()
     template_classes = extract_template_class_names(base_template)
     class_catalog = "\n".join(template_classes)
+    image_contract = _redesign_image_contract(site_json)
         
-    if page_url:
+    if source_content is not None:
+        if not isinstance(source_content, str):
+            raise ValueError("Interior source content must be text.")
+        content_source = "fetched-page" if page_url else "provided-source"
+    elif page_url:
         print(f"[*] Fetching interior page content from {page_url}...")
         source_content = fetch_and_clean_html(page_url)
         content_source = "fetched-page"
@@ -556,35 +660,69 @@ ALLOWED BODY CLASSES:
 SOURCE CONTENT:
 {source_content}
 ---
+
+{image_contract_instruction(image_contract)}
 """
 
     config = generation_config or resolve_generation_config()
-    result = generate_text(
+    site_name = site_json.get("site", {}).get("name") or "Website"
+    contact_contract = _redesign_contact_contract(site_json)
+    page_label = page_type.replace("-", " ").title()
+
+    def admit(candidate):
+        return assemble_generated_html(
+            candidate,
+            base_template=base_template,
+            theme_catalog=theme_catalog,
+            theme_name=theme,
+            colors=_resolve_site_document_colors(site_json),
+            title=f"{page_label} | {site_name}",
+            body_theme=_site_body_theme(site_json),
+            forbidden_square_placeholders=extract_square_placeholder_tokens(
+                system_prompt,
+                class_catalog,
+            ),
+            forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+            allowed_class_names=template_classes,
+            source_contacts=contact_contract,
+            expected_images=image_contract,
+            required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+            required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+        )
+
+    _result, html = generate_with_local_admission_retry(
         body_generation_config(config),
         system_prompt=system_prompt,
         user_parts=(PromptPart(user_prompt[:120000]),),
         temperature=0.1,
+        admit=admit,
         client=generation_client,
     )
+    return html
 
-    site_name = site_json.get("site", {}).get("name") or "Website"
-    page_label = page_type.replace("-", " ").title()
-    return assemble_generated_html(
-        result,
-        base_template=base_template,
-        theme_catalog=theme_catalog,
-        theme_name=theme,
-        colors=_resolve_site_document_colors(site_json),
-        title=f"{page_label} | {site_name}",
-        body_theme=_site_body_theme(site_json),
-        forbidden_square_placeholders=extract_square_placeholder_tokens(
-            system_prompt,
-            class_catalog,
-        ),
-        forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
-        allowed_class_names=template_classes,
-        required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
-        required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+
+def _generate_contact_page(site_json, contact_page, theme, generation_config):
+    contact_url = contact_page.get("url")
+    if contact_page.get("fetchable") is True and contact_url:
+        try:
+            contact_source = fetch_and_clean_html(contact_url)
+        except Exception as error:
+            print(f"[!] Contact page fetch failed for {contact_url}: {error}")
+            print("[*] Falling back to homepage-section content for contact page.")
+        else:
+            return generate_interior_page(
+                site_json,
+                "contact",
+                page_url=contact_url,
+                source_content=contact_source,
+                theme=theme,
+                generation_config=generation_config,
+            )
+    return generate_interior_page(
+        site_json,
+        "contact",
+        theme=theme,
+        generation_config=generation_config,
     )
 
 
@@ -687,28 +825,12 @@ def main(
     pages_to_fetch = site_json.get("pages_to_fetch", [])
     contact_pages = [p for p in pages_to_fetch if p.get("page_type") == "contact"]
     if contact_pages:
-        contact_url = contact_pages[0].get("url")
-        contact_fetchable = contact_pages[0].get("fetchable", False)
-        contact_html = None
-        if contact_fetchable and contact_url:
-            try:
-                contact_html = generate_interior_page(
-                    site_json,
-                    "contact",
-                    page_url=contact_url,
-                    theme=theme,
-                    generation_config=generation_config,
-                )
-            except Exception as e:
-                print(f"[!] Contact page fetch/generation failed for {contact_url}: {e}")
-                print("[*] Falling back to homepage-section content for contact page.")
-        if contact_html is None:
-            contact_html = generate_interior_page(
-                site_json,
-                "contact",
-                theme=theme,
-                generation_config=generation_config,
-            )
+        contact_html = _generate_contact_page(
+            site_json,
+            contact_pages[0],
+            theme,
+            generation_config,
+        )
         pages_to_deploy["contact.html"] = contact_html
 
     # Save files locally first so they can be reviewed

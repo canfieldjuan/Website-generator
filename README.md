@@ -76,8 +76,16 @@ The pitch email is generated as a Markdown draft with `[VERCEL_URL_PLACEHOLDER]`
 # Python deps
 pip install -r requirements.txt
 
-# Local HTML generation (install vLLM first)
-export VLLM_MODEL_PATH=/absolute/path/to/Qwen3.8-27B-Q4_K_M.gguf
+# Local HTML generation (install vLLM first). For GGUF, keep the model and
+# config.json in a text-only directory with no sibling mmproj file.
+export VLLM_MODEL_PATH=/absolute/text-only/path/Qwen3.8-27B-Q4_K_M.gguf
+# Pin the matching Qwen tokenizer files locally; startup never downloads them.
+export VLLM_TOKENIZER_PATH=/absolute/path/to/Qwen3.8-27B-tokenizer
+# One-time tokenizer setup (metadata only, not model weights):
+hf download Qwen/Qwen3.8-27B \
+  --revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 \
+  --include config.json chat_template.jinja merges.txt tokenizer.json tokenizer_config.json vocab.json \
+  --local-dir "$VLLM_TOKENIZER_PATH"
 # Only needed when vllm is not on PATH:
 export VLLM_BIN=/absolute/path/to/vllm
 # The launcher defaults to CUDA device 0 and explicitly disables CPU offload.
