@@ -32,6 +32,8 @@ from lib.generation import (
     REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
     REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
+    ImageAdmissionContract,
+    LocationAdmissionContract,
     PromptPart,
     ReviewAdmissionContract,
     ReviewEvidence,
@@ -43,10 +45,13 @@ from lib.generation import (
     extract_interior_only_class_names,
     extract_square_placeholder_tokens,
     generate_text,
+    generate_with_local_admission_retry,
+    image_contract_instruction,
     make_html_comment,
     preflight_generation_provider,
     require_complete_text,
     resolve_generation_config,
+    short_text_generation_config,
 )
 # lib.email.send_pitch_email is intentionally NOT imported here. The
 # from-scratch build flow uses the manual email_draft.md workflow
@@ -615,6 +620,55 @@ def tenure_contract_instruction(contract):
     return " ".join(instructions)
 
 
+def expected_location_contract(prospect):
+    service_area = prospect.get("service_radius")
+    if not isinstance(service_area, str) or not service_area.strip():
+        service_area = None
+    address = prospect.get("address")
+    addresses = (
+        (address.strip(),)
+        if isinstance(address, str) and address.strip()
+        else ()
+    )
+    return LocationAdmissionContract(
+        city=prospect["city"],
+        state=prospect["state"],
+        service_area=service_area,
+        addresses=addresses,
+    )
+
+
+def location_contract_instruction(contract):
+    source_values = [contract.city, contract.state]
+    if contract.service_area:
+        source_values.append(contract.service_area)
+    source_values.extend(contract.addresses)
+    return (
+        "LOCATION CLAIM CONTRACT (OPTIONAL OUTPUT): Use only location names, "
+        "state values, and mileage copied from these verified source values: "
+        f"{json.dumps(source_values, ensure_ascii=False)}. Do not infer or "
+        "substitute another city, state, service area, or mileage."
+    )
+
+
+def expected_image_contract(prospect, logo_url):
+    allowed_urls = []
+    if isinstance(logo_url, str) and logo_url.strip():
+        allowed_urls.append(logo_url.strip())
+        logo_url = logo_url.strip()
+    else:
+        logo_url = None
+    photos = prospect.get("photos")
+    for photo in photos if isinstance(photos, list) else ():
+        if not isinstance(photo, dict):
+            continue
+        for field in ("url", "src", "path"):
+            value = photo.get(field)
+            if isinstance(value, str) and value.strip() and value.strip() not in allowed_urls:
+                allowed_urls.append(value.strip())
+    return ImageAdmissionContract(tuple(allowed_urls), nav_logo_url=logo_url)
+
+
 def source_claim_boundary_instruction(prospect):
     allowed_claims = verified_source_claim_phrases(prospect)
     return (
@@ -799,6 +853,28 @@ def select_hero_shape(prospect):
         )
         return DEFAULT_HERO_SHAPE
     return shape
+
+
+def hero_asset_url(prospect):
+    photos = prospect.get("photos")
+    for photo in photos if isinstance(photos, list) else ():
+        if not isinstance(photo, dict) or photo.get("context") not in {
+            "hero",
+            "background",
+        }:
+            continue
+        for field in ("url", "src", "path"):
+            value = photo.get(field)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def resolve_hero_shape_for_assets(prospect):
+    selected = prospect.get("_computed_hero_shape") or DEFAULT_HERO_SHAPE
+    if selected in {"fullbleed", "split"} and hero_asset_url(prospect) is None:
+        return "gradient"
+    return selected
 
 
 def _extract_trade_palette_variants(trade):
@@ -1156,6 +1232,8 @@ def generate_build_html(prospect, generation_config=None, client=None):
             "physical location."
         )
     tenure_contract = expected_tenure_contract(prospect)
+    location_contract = expected_location_contract(prospect)
+    image_contract = expected_image_contract(prospect, logo_url)
     review_contract = expected_review_contract(prospect)
     required_class_counts = required_build_class_counts(prospect)
     if logo_url:
@@ -1180,6 +1258,8 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
         f"{source_claim_boundary_instruction(prospect)}\n"
         f"{tenure_contract_instruction(tenure_contract)}\n"
+        f"{location_contract_instruction(location_contract)}\n"
+        f"{image_contract_instruction(image_contract)}\n"
         f"{review_contract_instruction(review_contract)}\n"
         f"{phone_instruction}\n"
         f"{email_instruction}\n"
@@ -1187,15 +1267,55 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{logo_instruction}"
     )
 
-    result = generate_text(
+    generation_parts = (
+        PromptPart(static_block, cacheable=True),
+        PromptPart(prospect_block),
+        PromptPart(response_boundary),
+    )
+
+    def admit(candidate):
+        return assemble_generated_html(
+            candidate,
+            base_template=base_template,
+            theme_catalog=themes_catalog,
+            theme_name=prospect.get("_computed_theme") or DEFAULT_THEME,
+            colors=_resolve_build_document_colors(prospect),
+            title=prospect.get("display_name") or prospect["business_name"],
+            body_theme="theme-light",
+            trusted_head_comment=build_deployment_comment(prospect),
+            forbidden_square_placeholders=extract_square_placeholder_tokens(
+                system_prompt,
+                static_block,
+                response_boundary,
+            ),
+            forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
+            forbidden_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
+            forbidden_class_names=interior_only_classes,
+            allowed_class_names=homepage_classes,
+            required_exposed_values=tuple(
+                (name, value)
+                for name, value in required_substitutions.items()
+                if isinstance(value, str) and value
+            ),
+            expected_phone=prospect.get("phone"),
+            expected_email=prospect.get("owner_email") or None,
+            expected_address=prospect.get("address") or None,
+            expected_location=location_contract,
+            expected_images=image_contract,
+            expected_tenure=tenure_contract,
+            exact_source_claims=exact_source_claim_contracts(prospect),
+            expected_form_action=expected_build_form_action(prospect),
+            expected_reviews=review_contract,
+            required_class_counts=required_class_counts,
+            required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
+        )
+
+    result, html = generate_with_local_admission_retry(
         body_generation_config(config),
         system_prompt=system_prompt,
-        user_parts=(
-            PromptPart(static_block, cacheable=True),
-            PromptPart(prospect_block),
-            PromptPart(response_boundary),
-        ),
+        user_parts=generation_parts,
         temperature=BUILD_TEMPERATURE,
+        admit=admit,
         cache_system_prompt=True,
         client=client,
     )
@@ -1223,39 +1343,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
     else:
         print(f"[*] Cache: no hits (cold or invalidated). total_prompt={prompt_total} tokens")
 
-    return assemble_generated_html(
-        result,
-        base_template=base_template,
-        theme_catalog=themes_catalog,
-        theme_name=prospect.get("_computed_theme") or DEFAULT_THEME,
-        colors=_resolve_build_document_colors(prospect),
-        title=prospect.get("display_name") or prospect["business_name"],
-        body_theme="theme-light",
-        trusted_head_comment=build_deployment_comment(prospect),
-        forbidden_square_placeholders=extract_square_placeholder_tokens(
-            system_prompt,
-            static_block,
-            response_boundary,
-        ),
-        forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
-        forbidden_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
-        forbidden_class_names=interior_only_classes,
-        allowed_class_names=homepage_classes,
-        required_exposed_values=tuple(
-            (name, value)
-            for name, value in required_substitutions.items()
-            if isinstance(value, str) and value
-        ),
-        expected_phone=prospect.get("phone"),
-        expected_email=prospect.get("owner_email") or None,
-        expected_address=prospect.get("address") or None,
-        expected_tenure=tenure_contract,
-        exact_source_claims=exact_source_claim_contracts(prospect),
-        expected_form_action=expected_build_form_action(prospect),
-        expected_reviews=review_contract,
-        required_class_counts=required_class_counts,
-        required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
-    )
+    return html
 
 
 def generate_email_draft(prospect, generation_config=None, client=None):
@@ -1278,7 +1366,7 @@ def generate_email_draft(prospect, generation_config=None, client=None):
 
     config = generation_config or resolve_generation_config()
     result = generate_text(
-        config,
+        short_text_generation_config(config),
         system_prompt=system_prompt,
         user_parts=(PromptPart(user_prompt),),
         temperature=EMAIL_TEMPERATURE,
@@ -1362,10 +1450,7 @@ def main(
         # unused in the output dir and the deployed bundle. Issue #16.
         print("[*] Skipping hero image generation: _computed_hero_shape='gradient' renders no photo.")
     else:
-        existing_hero = any(
-            p.get("context") in ("hero", "background")
-            for p in prospect.get("photos", []) if isinstance(p, dict)
-        )
+        existing_hero = hero_asset_url(prospect) is not None
         if not existing_hero:
             trade = prospect.get("trade", "")
             unsplash_hero = fetch_unsplash_hero(trade, output_dir)
@@ -1391,6 +1476,14 @@ def main(
                         "context": "hero",
                         "source": "flux",
                     })
+
+    resolved_hero_shape = resolve_hero_shape_for_assets(prospect)
+    if resolved_hero_shape != prospect["_computed_hero_shape"]:
+        print(
+            "[*] No verified hero asset is available; using the existing "
+            "gradient hero fallback."
+        )
+        prospect["_computed_hero_shape"] = resolved_hero_shape
 
     html = generate_build_html(prospect, generation_config)
 

@@ -440,6 +440,68 @@ change the model path or served alias, enable CPU offload, widen the loopback
 bind, change GPU/context/memory defaults, or alter application request payloads.
 The failed launch is not model evidence; the CUDA fixture remains required.
 
+### Embedded GGUF chat-template contract revision
+
+The live vLLM chat request reached the exact model server but was rejected
+before inference because the GGUF plugin loaded weights and config without a
+usable tokenizer: raw tokenization of `hello` returned zero tokens. The
+plugin's documented GGUF path requires a separate Hugging Face tokenizer. For
+GGUF models, the launcher must require a complete local tokenizer directory,
+pass it and its chat template explicitly, and use the model directory's local
+`config.json`. Because the Website Generator is text-only, a sibling multimodal
+projector must also fail before model load instead of silently selecting the
+larger vision architecture. Missing assets must fail before loading the model. The pinned
+tokenizer is provisioned separately; normal launches must not download it,
+substitute a generic ChatML template, enable request-supplied templates, or add
+a CPU/cloud fallback.
+
+### Local admission-recovery contract revision
+
+The first complete vLLM fixture reached the exact CUDA model and completed
+inference, but the generated candidate contained a misnested closing tag and
+the unchanged admission boundary correctly rejected it. The root defect is the
+single-shot local execution path: a stochastic, locally correctable formatting
+miss is terminal even though a second local generation has no provider charge.
+After a `GeneratedBodyError`, generation may make exactly one local-only
+correction request containing the rejected candidate and the exact admission
+error, then must re-run the complete unchanged admission/assembly callback.
+The second failure remains terminal. This must not auto-repair HTML, weaken or
+bypass any validator, retry transport/provider failures, retry OpenRouter, or
+change image, email, deployment, extraction, or source-truth behavior.
+
+### Image-manifest prompt symmetry revision
+
+The correction fixture exposed a pre-existing prompt contradiction. Static
+build guidance tells the model to use an `images/hero.<ext>` example when no
+hero photo exists, while final admission now correctly permits only URLs and
+paths in the source-owned image manifest. The harness also retained a
+photo-dependent hero shape after image acquisition was skipped or failed. Each
+HTML prompt must receive the exhaustive allowed-image manifest and forbid all
+other `src`, `srcset`, `poster`, SVG reference, and CSS `url()` values. When a
+photo-dependent build shape has no actual hero/background asset, the harness
+must select the existing gradient fallback before generation. Normal theme
+selection, supplied or acquired photos, image acquisition, admission rules,
+and deployment behavior must otherwise remain unchanged.
+
+### RTX 3090 vLLM startup contract revision
+
+The exact Qwen3.8 GGUF now reaches the installed vLLM 0.28 CUDA loader through
+the isolated upstream Qwen adapter, but two optional startup optimizations fail
+before the API becomes ready. FlashInfer's sampling-kernel JIT is incompatible
+with the installed CUDA/CUB headers, and disabling that sampler advances startup
+to CUDA-graph profiling, where the graph workspace exhausts the 24 GB RTX 3090
+after the model weights have loaded.
+
+The correct launcher must default `VLLM_USE_FLASHINFER_SAMPLER` to `0` and pass
+`--enforce-eager`. These settings disable the failing optional sampler and CUDA
+graph capture only; model loading, attention, KV cache, and inference must remain
+on CUDA device 0 with zero CPU offload. An operator-supplied sampler setting may
+override the default, but the safe standalone command must work without it.
+Launcher tests must prove both controls reach the executed vLLM process and that
+CPU offload, model alias, context length, loopback binding, and single-device
+defaults do not change. A successful API startup and generation fixture is still
+required; loading weights followed by a failed warmup is not acceptance proof.
+
 ### Structured source-ownership contract
 
 Exact-head review exposed two content-integrity gaps in the build caller. The
@@ -514,6 +576,45 @@ prospect normalization, other source-claim families, generated layout/copy,
 provider requests, launcher arguments, Connect schemas/jobs, or
 image/email/deployment behavior. The controlled CUDA vLLM fixture remains a
 separate final acceptance item and cannot be replaced by mocked tests.
+
+### Complete generated-source boundary revision
+
+The remaining review failures share one root cause: generated output is checked
+against a collection of optional, caller-specific values rather than a complete
+manifest of source-owned content. The from-scratch caller binds one address but
+does not bind service-area or image claims; the redesign callers do not forward
+their extracted contact or image evidence at all. Address discovery also relies
+only on a finite road-suffix list, and unstructured testimonial detection binds
+proper-name attribution but not anonymous customer attribution. Separately,
+the email caller reuses the historical 65,536-token default even though the
+standalone vLLM server's entire context window is 49,152 tokens. The contact-page
+fallback catches fetch and generation failures in the same block, so a failed
+or rejected generation can dispatch a second request.
+
+The correct fix must:
+
+- apply a bounded non-HTML output configuration to the pitch-email request,
+  below the server context budget, without reducing the body-generation budget;
+- carry typed source-owned location and image contracts from the prospect JSON
+  into final body admission, validating radius/location claims, every generated
+  image URL surface, and the nav-logo URL when present;
+- carry the redesign JSON's extracted phone, email, addresses, logo, and image
+  URLs into the same admission boundary for both homepage and interior pages,
+  allowing only values present in that source evidence;
+- recognize complete US postal-address shapes without requiring a catalogued
+  road suffix, while retaining the short-address suffix check;
+- reject anonymous customer-style testimonial attribution outside canonical
+  source-bound review components without rejecting ordinary quoted product or
+  program names; and
+- isolate contact-page fetching from generation so only a source-fetch failure
+  selects the homepage-content fallback and every generation request occurs at
+  most once.
+
+This correction must not change extraction models or schemas, fetch additional
+sources, invent or normalize customer data, change generated copy/layout/CSS,
+alter image acquisition or mirroring, add model retries, enable CPU or cloud
+fallback, change deployment/email-send behavior, or weaken the existing phone,
+email, address, tenure, review, form-action, class, and HTML-structure gates.
 
 ## Scope (this PR)
 
@@ -770,6 +871,30 @@ override before assembly.
   remain outside this milestone.
 
 ## Verification
+
+- The matching Qwen tokenizer metadata was pinned locally from
+  `Qwen/Qwen3.8-27B` revision
+  `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`; the launcher requires all
+  runtime assets and performs no startup download.
+- A live vLLM process loaded the exact Qwen3.8 27B Q4_K_M GGUF as
+  `Qwen3_5ForCausalLM` on CUDA with zero CPU offload. `/tokenize` returned one
+  token for `hello`, `/v1/chat/completions` returned `OK`, and the engine used
+  21994 MiB of GPU memory during the final fixture.
+- The focused generation/admission suite passed 22 tests, and the final
+  launcher boundary suite passed 11 tests after the tokenizer and text-only
+  model-directory guards were added.
+- A real local `build.py examples/prospect-plumber-template.json
+  --skip-image-gen --skip-email-draft --skip-deploy` fixture completed through
+  vLLM. The first malformed candidate was rejected, one local correction was
+  admitted, and the runtime reported 33334 prompt tokens for the correction.
+- The emitted `outputs/builds/drees-plumbing-inc/index.html` was 72828 bytes
+  with SHA-256
+  `9b7b478e7151879a1536525639b08ea06ed00aefdbdbd16adb1fdebeda43da7a`.
+  Typed admission passed; scans found no unresolved placeholders, unsupported
+  same-day claims, or image values; the one contact form retained the verified
+  source action.
+- The vLLM server was stopped after acceptance; the final GPU compute-process
+  query returned no active process.
 
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest -v
   tests.test_generation.VllmStartupScriptTests.test_launcher_defaults_to_one_gpu_and_zero_cpu_offload`

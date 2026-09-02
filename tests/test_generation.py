@@ -17,12 +17,15 @@ from lib.generation import (
     DEFAULT_LOCAL_MODEL,
     DEFAULT_LOCAL_TIMEOUT_SECONDS,
     DEFAULT_MAX_OUTPUT_TOKENS,
+    MAX_SHORT_TEXT_OUTPUT_TOKENS,
     MAX_GENERATED_BODY_BYTES,
     MAX_GENERATED_BODY_TOKENS,
     DEFAULT_TIMEOUT_SECONDS,
     MAX_HTML_BYTES,
     REQUIRED_FOOTER_CLASS_COUNTS,
     DocumentColors,
+    ImageAdmissionContract,
+    LocationAdmissionContract,
     GeneratedBodyError,
     GeneratedHtmlError,
     GenerationConfig,
@@ -42,9 +45,11 @@ from lib.generation import (
     extract_template_body_scaffold,
     extract_template_class_names,
     generate_text,
+    generate_with_local_admission_retry,
     make_html_comment,
     preflight_generation_provider,
     resolve_generation_config,
+    short_text_generation_config,
     validate_generated_body,
     validate_generated_html,
 )
@@ -442,6 +447,19 @@ class VllmStartupScriptTests(unittest.TestCase):
         environment.update(overrides)
         return environment
 
+    @staticmethod
+    def create_tokenizer_directory(root):
+        tokenizer = root / "Qwen tokenizer"
+        tokenizer.mkdir()
+        (tokenizer / "config.json").write_text("{}", encoding="utf-8")
+        (tokenizer / "tokenizer.json").write_text("{}", encoding="utf-8")
+        (tokenizer / "tokenizer_config.json").write_text("{}", encoding="utf-8")
+        (tokenizer / "chat_template.jinja").write_text(
+            "{{ messages }}",
+            encoding="utf-8",
+        )
+        return tokenizer
+
     def test_help_does_not_require_or_load_a_model(self):
         completed = subprocess.run(
             [str(self.script), "--help"],
@@ -506,16 +524,20 @@ class VllmStartupScriptTests(unittest.TestCase):
     def test_launcher_defaults_to_one_gpu_and_zero_cpu_offload(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
+            tokenizer = self.create_tokenizer_directory(root)
             fake_server = root / "fake-vllm"
             fake_server.write_text(
                 '#!/usr/bin/env bash\n'
                 'printf "CUDA_VISIBLE_DEVICES=%s\\n" "${CUDA_VISIBLE_DEVICES-}"\n'
+                'printf "VLLM_USE_FLASHINFER_SAMPLER=%s\\n" '
+                '"${VLLM_USE_FLASHINFER_SAMPLER-}"\n'
                 'printf "%s\\n" "$@"\n',
                 encoding="utf-8",
             )
             fake_server.chmod(0o755)
             model = root / "qwen.gguf"
             model.write_bytes(b"")
+            (root / "config.json").write_text("{}", encoding="utf-8")
             completed = subprocess.run(
                 [str(self.script)],
                 check=False,
@@ -524,13 +546,15 @@ class VllmStartupScriptTests(unittest.TestCase):
                 env=self.environment(
                     VLLM_BIN=str(fake_server),
                     VLLM_MODEL_PATH=str(model),
+                    VLLM_TOKENIZER_PATH=str(tokenizer),
                 ),
             )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         arguments = completed.stdout.splitlines()
         self.assertEqual(arguments[0], "CUDA_VISIBLE_DEVICES=0")
-        self.assertEqual(arguments[1:3], ["serve", str(model)])
+        self.assertEqual(arguments[1], "VLLM_USE_FLASHINFER_SAMPLER=0")
+        self.assertEqual(arguments[2:4], ["serve", str(model)])
         self.assertEqual(
             arguments[arguments.index("--tensor-parallel-size") + 1], "1"
         )
@@ -544,6 +568,17 @@ class VllmStartupScriptTests(unittest.TestCase):
         )
         self.assertIn("--no-enable-log-requests", arguments)
         self.assertIn("--disable-uvicorn-access-log", arguments)
+        self.assertIn("--enforce-eager", arguments)
+        self.assertEqual(
+            arguments[arguments.index("--chat-template") + 1],
+            str(tokenizer / "chat_template.jinja"),
+        )
+        self.assertEqual(
+            arguments[arguments.index("--tokenizer") + 1], str(tokenizer)
+        )
+        self.assertEqual(
+            arguments[arguments.index("--hf-config-path") + 1], str(root)
+        )
         self.assertNotIn("--disable-log-requests", arguments)
         self.assertNotIn("--api-key", arguments)
 
@@ -556,6 +591,7 @@ class VllmStartupScriptTests(unittest.TestCase):
             "GPU fraction above one": {"VLLM_GPU_MEMORY_UTILIZATION": "1.01"},
             "zero tensor parallelism": {"VLLM_TENSOR_PARALLEL_SIZE": "0"},
             "malformed CUDA list": {"VLLM_CUDA_VISIBLE_DEVICES": "0, 1"},
+            "invalid sampler toggle": {"VLLM_USE_FLASHINFER_SAMPLER": "yes"},
             "more workers than visible GPUs": {
                 "VLLM_TENSOR_PARALLEL_SIZE": "2",
                 "VLLM_CUDA_VISIBLE_DEVICES": "0",
@@ -609,6 +645,7 @@ class VllmStartupScriptTests(unittest.TestCase):
     def test_safe_runtime_contract_is_forwarded_without_word_splitting(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
+            tokenizer = self.create_tokenizer_directory(root)
             fake_server = root / "fake vllm"
             fake_server.write_text(
                 '#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n',
@@ -617,6 +654,7 @@ class VllmStartupScriptTests(unittest.TestCase):
             fake_server.chmod(0o755)
             model = root / "Qwen model.gguf"
             model.write_bytes(b"")
+            (root / "config.json").write_text("{}", encoding="utf-8")
             completed = subprocess.run(
                 [str(self.script)],
                 check=False,
@@ -625,12 +663,14 @@ class VllmStartupScriptTests(unittest.TestCase):
                 env=self.environment(
                     VLLM_BIN=str(fake_server),
                     VLLM_MODEL_PATH=str(model),
+                    VLLM_TOKENIZER_PATH=str(tokenizer),
                     VLLM_HOST="127.0.0.1",
                     VLLM_PORT="18080",
                     VLLM_MAX_MODEL_LEN="1024",
                     VLLM_GPU_MEMORY_UTILIZATION="0.75",
                     VLLM_TENSOR_PARALLEL_SIZE="2",
                     VLLM_CUDA_VISIBLE_DEVICES="0,1",
+                    VLLM_USE_FLASHINFER_SAMPLER="1",
                     LOCAL_GENERATION_MODEL="local/test-model",
                     LOCAL_GENERATION_API_KEY="test-key",
                 ),
@@ -653,6 +693,71 @@ class VllmStartupScriptTests(unittest.TestCase):
             arguments[arguments.index("--tensor-parallel-size") + 1], "2"
         )
         self.assertEqual(arguments[arguments.index("--api-key") + 1], "test-key")
+        self.assertEqual(
+            arguments[arguments.index("--chat-template") + 1],
+            str(tokenizer / "chat_template.jinja"),
+        )
+        self.assertIn("--enforce-eager", arguments)
+
+    def test_gguf_without_complete_local_tokenizer_fails_before_launch(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fake_server = root / "fake-vllm"
+            fake_server.write_text(
+                "#!/usr/bin/env bash\nexit 0\n",
+                encoding="utf-8",
+            )
+            fake_server.chmod(0o755)
+            model = root / "qwen.gguf"
+            model.write_bytes(b"")
+            (root / "config.json").write_text("{}", encoding="utf-8")
+            tokenizer = self.create_tokenizer_directory(root)
+            (tokenizer / "chat_template.jinja").unlink()
+
+            completed = subprocess.run(
+                [str(self.script)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self.environment(
+                    VLLM_BIN=str(fake_server),
+                    VLLM_MODEL_PATH=str(model),
+                    VLLM_TOKENIZER_PATH=str(tokenizer),
+                ),
+            )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("chat_template.jinja", completed.stderr)
+
+    def test_gguf_with_mmproj_sibling_fails_before_launch(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fake_server = root / "fake-vllm"
+            fake_server.write_text(
+                "#!/usr/bin/env bash\nexit 0\n",
+                encoding="utf-8",
+            )
+            fake_server.chmod(0o755)
+            model = root / "qwen.gguf"
+            model.write_bytes(b"")
+            (root / "config.json").write_text("{}", encoding="utf-8")
+            (root / "mmproj-qwen.gguf").write_bytes(b"")
+            tokenizer = self.create_tokenizer_directory(root)
+
+            completed = subprocess.run(
+                [str(self.script)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self.environment(
+                    VLLM_BIN=str(fake_server),
+                    VLLM_MODEL_PATH=str(model),
+                    VLLM_TOKENIZER_PATH=str(tokenizer),
+                ),
+            )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("text-only GGUF directory", completed.stderr)
 
 
 class ProviderBoundaryTests(unittest.TestCase):
@@ -1053,6 +1158,90 @@ class ProviderBoundaryTests(unittest.TestCase):
 
         self.assertEqual(len(client.calls), 1)
 
+    def test_local_admission_failure_gets_one_source_preserving_retry(self):
+        first = body_result("<body><div></body>")
+        corrected = body_result()
+        original_part = PromptPart("original source contract", cacheable=True)
+
+        def admit(candidate):
+            if candidate is first:
+                raise GeneratedBodyError("misnested closing tag")
+            return "accepted"
+
+        with patch(
+            "lib.generation.generate_text",
+            side_effect=(first, corrected),
+        ) as generator:
+            final_result, admitted = generate_with_local_admission_retry(
+                config(),
+                system_prompt="system",
+                user_parts=(original_part,),
+                temperature=0.4,
+                admit=admit,
+                cache_system_prompt=True,
+            )
+
+        self.assertIs(final_result, corrected)
+        self.assertEqual(admitted, "accepted")
+        self.assertEqual(generator.call_count, 2)
+        retry_parts = generator.call_args_list[1].kwargs["user_parts"]
+        self.assertEqual(retry_parts[0], original_part)
+        self.assertIn("misnested closing tag", retry_parts[-1].text)
+        self.assertIn("<body><div></body>", retry_parts[-1].text)
+        self.assertTrue(generator.call_args_list[1].kwargs["cache_system_prompt"])
+
+    def test_second_local_admission_failure_is_terminal(self):
+        attempts = (body_result("first"), body_result("second"))
+        admission_attempt = 0
+
+        def reject(_candidate):
+            nonlocal admission_attempt
+            admission_attempt += 1
+            raise GeneratedBodyError(f"rejected attempt {admission_attempt}")
+
+        with patch(
+            "lib.generation.generate_text",
+            side_effect=attempts,
+        ) as generator, self.assertRaisesRegex(
+            GeneratedBodyError,
+            "rejected attempt 2",
+        ):
+            generate_with_local_admission_retry(
+                config(),
+                system_prompt="system",
+                user_parts=(PromptPart("source"),),
+                temperature=0.4,
+                admit=reject,
+            )
+
+        self.assertEqual(generator.call_count, 2)
+
+    def test_openrouter_admission_failure_does_not_retry(self):
+        candidate = GenerationResult(
+            provider="openrouter",
+            model="anthropic/example",
+            content="invalid",
+            finish_reason="stop",
+            usage={},
+        )
+
+        def reject(_candidate):
+            raise GeneratedBodyError("invalid body")
+
+        with patch(
+            "lib.generation.generate_text",
+            return_value=candidate,
+        ) as generator, self.assertRaisesRegex(GeneratedBodyError, "invalid body"):
+            generate_with_local_admission_retry(
+                config("openrouter", "anthropic/example"),
+                system_prompt="system",
+                user_parts=(PromptPart("source"),),
+                temperature=0.4,
+                admit=reject,
+            )
+
+        self.assertEqual(generator.call_count, 1)
+
     def test_openrouter_request_keeps_cache_metadata(self):
         client = FakeClient()
 
@@ -1107,6 +1296,26 @@ class BodyAssemblyTests(unittest.TestCase):
         )
         self.assertEqual(
             body_generation_config(smaller_config).max_output_tokens,
+            1024,
+        )
+
+    def test_short_text_cap_stays_below_the_local_context_window(self):
+        default_config = config()
+        smaller_config = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            max_output_tokens=1024,
+        )
+
+        self.assertEqual(
+            short_text_generation_config(default_config).max_output_tokens,
+            MAX_SHORT_TEXT_OUTPUT_TOKENS,
+        )
+        self.assertLess(MAX_SHORT_TEXT_OUTPUT_TOKENS, 49152)
+        self.assertEqual(
+            short_text_generation_config(smaller_config).max_output_tokens,
             1024,
         )
 
@@ -2113,6 +2322,27 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertEqual(args.generation_provider, "local")
         self.assertIsNone(args.generation_model)
 
+    def test_pitch_email_uses_the_bounded_short_text_budget(self):
+        client = FakeLocalClient(
+            local_chat_payload("Subject: A local website\n\n[VERCEL_URL_PLACEHOLDER]")
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+
+        draft = build.generate_email_draft(prospect, config(), client)
+
+        self.assertIn("[VERCEL_URL_PLACEHOLDER]", draft)
+        request = next(call for call in client.calls if call[0] == "POST")
+        self.assertEqual(
+            request[2]["json"]["max_tokens"],
+            MAX_SHORT_TEXT_OUTPUT_TOKENS,
+        )
+
     def test_build_generator_uses_shared_admission_gate(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         prospect = {
@@ -2672,6 +2902,26 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 config(),
                 FakeLocalClient(local_chat_payload(attributed_testimonial)),
             )
+
+        for attribution in (
+            "a happy customer",
+            "a very loyal repeat customer",
+            "loyal client",
+            "THE SATISFIED HOMEOWNER",
+        ):
+            with self.subTest(attribution=attribution), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "unstructured testimonial",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(
+                        local_chat_payload(
+                            ordinary_testimonial.replace("Jane D.", attribution)
+                        )
+                    ),
+                )
 
         ordinary_quotation = COMPLETE_BUILD_BODY.replace(
             '<form class="contact-form-wrap"',
@@ -3281,6 +3531,28 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 config(),
                 FakeLocalClient(local_chat_payload(moved_invented)),
             )
+        uncatalogued_suffix = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">Visit us at 123 Market Place, '
+            'Effingham, IL 62401.</section>',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unexpected physical address"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(uncatalogued_suffix)),
+            )
+        unpunctuated_full_address = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">Visit us at 123 Market Place '
+            'Effingham IL 62401.</section>',
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unexpected physical address"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unpunctuated_full_address)),
+            )
 
         prospect["address"] = "100 W Elm St, Dieterich, IL 62424"
         with self.assertRaisesRegex(GeneratedBodyError, "does not match"):
@@ -3402,6 +3674,61 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn("2-year parts warranty", html)
 
+    def test_build_generator_binds_location_and_radius_claims_to_source(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "service_radius": (
+                "Effingham and surrounding communities within 25 miles"
+            ),
+        }
+
+        def with_location(value):
+            return COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero">{value}</section>',
+            )
+
+        exact = with_location(
+            "Serving Effingham and surrounding communities within 25 miles."
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(exact)),
+        )
+        self.assertIn("within 25 miles", html)
+
+        adverse = (
+            ("Serving Springfield and surrounding communities within 25 miles.", "service location"),
+            ("serving springfield and surrounding communities within 25 miles.", "service location"),
+            ("Serving Effingham and surrounding communities within 50 miles.", "service radius"),
+            ("Located in Springfield, IL.", "location"),
+        )
+        for claim, message in adverse:
+            with self.subTest(claim=claim), self.assertRaisesRegex(
+                GeneratedBodyError,
+                message,
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(with_location(claim))),
+                )
+
+        no_radius = {**prospect, "service_radius": None}
+        with self.assertRaisesRegex(GeneratedBodyError, "service radius"):
+            build.generate_build_html(
+                no_radius,
+                config(),
+                FakeLocalClient(
+                    local_chat_payload(with_location("A 25-mile service area."))
+                ),
+            )
+
     def test_build_tenure_instruction_uses_only_verified_values(self):
         absent = build.tenure_contract_instruction(
             build.expected_tenure_contract({})
@@ -3416,6 +3743,110 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn("exactly 2011", exact)
         self.assertIn("exactly 12 years", exact)
+
+    def test_build_generator_binds_every_image_surface_to_source_assets(self):
+        logo_url = "https://assets.example.test/logo.png"
+        hero_url = "images/hero.webp"
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "logo_url": logo_url,
+            "photos": [{"url": hero_url, "context": "hero"}],
+        }
+        exact = COMPLETE_BUILD_BODY.replace(
+            "<span>Test Business</span>",
+            f'<img class="nav-logo" src="{logo_url}" alt="Test Business">',
+        ).replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero" '
+            f'style="background-image: url(\'{hero_url}\');"></section>',
+        )
+        client = FakeLocalClient(local_chat_payload(exact))
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            client,
+        )
+        self.assertIn(hero_url, html)
+        request = next(call for call in client.calls if call[0] == "POST")
+        prompt = request[2]["json"]["messages"][1]["content"]
+        self.assertIn("IMAGE SOURCE CONTRACT (EXHAUSTIVE)", prompt)
+        self.assertIn(logo_url, prompt)
+        self.assertIn(hero_url, prompt)
+
+        adverse = (
+            exact.replace(logo_url, "https://example.invalid/logo.png"),
+            exact.replace(hero_url, "https://example.invalid/hero.png"),
+            exact.replace(
+                f'src="{logo_url}"',
+                f'src="{logo_url}" srcset="{logo_url} 1x, '
+                'https://example.invalid/logo@2x.png 2x"',
+            ),
+        )
+        for body in adverse:
+            with self.subTest(body=body), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "image URL outside source-owned assets",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+
+        without_logo = dict(prospect)
+        without_logo.pop("logo_url")
+        with self.assertRaisesRegex(GeneratedBodyError, "nav logo"):
+            build.generate_build_html(
+                without_logo,
+                config(),
+                FakeLocalClient(
+                    local_chat_payload(
+                        COMPLETE_BUILD_BODY.replace(
+                            "<span>Test Business</span>",
+                            f'<img class="nav-logo" src="{hero_url}" '
+                            'alt="Test Business">',
+                        )
+                    )
+                ),
+            )
+
+    def test_photo_dependent_hero_shape_falls_back_only_without_asset(self):
+        self.assertEqual(
+            build.resolve_hero_shape_for_assets(
+                {"_computed_hero_shape": "fullbleed", "photos": []}
+            ),
+            "gradient",
+        )
+        self.assertEqual(
+            build.resolve_hero_shape_for_assets(
+                {
+                    "_computed_hero_shape": "split",
+                    "photos": [{"context": "logo", "url": "images/logo.png"}],
+                }
+            ),
+            "gradient",
+        )
+        self.assertEqual(
+            build.resolve_hero_shape_for_assets(
+                {"_computed_hero_shape": "gradient", "photos": []}
+            ),
+            "gradient",
+        )
+        self.assertEqual(
+            build.resolve_hero_shape_for_assets(
+                {
+                    "_computed_hero_shape": "fullbleed",
+                    "photos": [
+                        {"context": "hero", "url": "images/hero.webp"}
+                    ],
+                }
+            ),
+            "fullbleed",
+        )
 
     def test_build_generator_binds_ibew_claim_to_exact_local(self):
         prospect = {
@@ -3693,6 +4124,198 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("WEBSITE REDESIGN MOCKUP", html)
         self.assertIn('class="site-footer"', html)
         self.assertIn('<body class="theme-dark">', html)
+
+    def test_contact_fallback_only_handles_source_fetch_failures(self):
+        page = {
+            "page_type": "contact",
+            "url": "https://current.test/contact",
+            "fetchable": True,
+        }
+        site_json = {"site": {"name": "Current Business"}}
+        with patch(
+            "pipeline.fetch_and_clean_html",
+            return_value="<main>Verified contact source</main>",
+        ), patch(
+            "pipeline.generate_interior_page",
+            side_effect=GenerationResponseError("rejected generated body"),
+        ) as generator:
+            with self.assertRaisesRegex(
+                GenerationResponseError,
+                "rejected generated body",
+            ):
+                pipeline._generate_contact_page(
+                    site_json,
+                    page,
+                    "minimal",
+                    config(),
+                )
+        self.assertEqual(generator.call_count, 1)
+        self.assertEqual(
+            generator.call_args.kwargs["source_content"],
+            "<main>Verified contact source</main>",
+        )
+
+        with patch(
+            "pipeline.fetch_and_clean_html",
+            side_effect=RuntimeError("source unavailable"),
+        ), patch(
+            "pipeline.generate_interior_page",
+            return_value="fallback page",
+        ) as generator:
+            result = pipeline._generate_contact_page(
+                site_json,
+                page,
+                "minimal",
+                config(),
+            )
+        self.assertEqual(result, "fallback page")
+        generator.assert_called_once_with(
+            site_json,
+            "contact",
+            theme="minimal",
+            generation_config=config(),
+        )
+
+    def test_redesign_generators_bind_contacts_and_images_to_extracted_json(self):
+        logo_url = "https://assets.example.test/logo.png"
+        hero_url = "images/hero.webp"
+        site_json = {
+            "site": {
+                "name": "Current Business",
+                "contact": {
+                    "phone": "217-555-0100",
+                    "email": "office@current.test",
+                    "addresses": [
+                        "123 Market Place, Effingham, IL 62401",
+                    ],
+                },
+            },
+            "brand": {"logo_url": logo_url},
+            "images": [{"url": hero_url, "context": "hero"}],
+        }
+        exact_body = COMPLETE_PAGE_BODY.replace(
+            '<main>Ready</main>',
+            '<main style="background-image: url(\'images/hero.webp\');">'
+            f'<img class="nav-logo" src="{logo_url}" alt="Current Business">'
+            '<a href="tel:2175550100">217-555-0100</a>'
+            '<a href="mailto:office@current.test">office@current.test</a>'
+            '<div class="ft-address">123 Market Place, Effingham, IL 62401</div>'
+            '</main>',
+        )
+
+        def generators(body):
+            return (
+                lambda: pipeline.generate_redesign(
+                    site_json,
+                    theme="minimal",
+                    generation_config=config(),
+                    generation_client=FakeLocalClient(local_chat_payload(body)),
+                ),
+                lambda: pipeline.generate_interior_page(
+                    site_json,
+                    "contact",
+                    theme="warm",
+                    generation_config=config(),
+                    generation_client=FakeLocalClient(local_chat_payload(body)),
+                ),
+            )
+
+        for generator in generators(exact_body):
+            with self.subTest(path="exact"):
+                html = generator()
+                self.assertIn("office@current.test", html)
+                self.assertIn(hero_url, html)
+
+        adverse = (
+            (
+                exact_body.replace("217-555-0100", "217-555-0199").replace(
+                    "2175550100", "2175550199"
+                ),
+                "phone outside extracted source data",
+            ),
+            (
+                exact_body.replace("office@current.test", "other@example.test"),
+                "email outside extracted source data",
+            ),
+            (
+                exact_body.replace(
+                    "123 Market Place, Effingham, IL 62401",
+                    "999 Invented Plaza, Springfield, IL 62701",
+                ),
+                "footer address is outside extracted source data",
+            ),
+            (
+                exact_body.replace(hero_url, "https://example.invalid/hero.png"),
+                "image URL outside source-owned assets",
+            ),
+        )
+        for body, message in adverse:
+            for generator in generators(body):
+                with self.subTest(message=message), self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    message,
+                ):
+                    generator()
+
+        image_logo_contract = pipeline._redesign_image_contract(
+            {
+                "brand": {"logo_url": ""},
+                "images": [{"url": logo_url, "context": "logo"}],
+            }
+        )
+        self.assertEqual(image_logo_contract.nav_logo_url, logo_url)
+
+    def test_redesign_contact_contract_covers_every_structured_source(self):
+        contract = pipeline._redesign_contact_contract(
+            {
+                "site": {
+                    "contact": {
+                        "phone": "217-555-0100",
+                        "email": "primary@example.test",
+                        "addresses": ["1 Primary Place, Effingham, IL 62401"],
+                    }
+                },
+                "conversion_profile": {"phone": "217-555-0101"},
+                "contact_form": {
+                    "contact_info": {
+                        "email": "form@example.test",
+                        "address": "2 Form Place, Effingham, IL 62401",
+                    }
+                },
+                "single_page_sections": [
+                    {
+                        "content": {
+                            "contact_info": {
+                                "phone": "217-555-0102",
+                                "email": "section@example.test",
+                                "address": "3 Section Place, Effingham, IL 62401",
+                            }
+                        }
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            contract.phones,
+            ("217-555-0100", "217-555-0101", "217-555-0102"),
+        )
+        self.assertEqual(
+            contract.emails,
+            (
+                "primary@example.test",
+                "form@example.test",
+                "section@example.test",
+            ),
+        )
+        self.assertEqual(
+            contract.addresses,
+            (
+                "1 Primary Place, Effingham, IL 62401",
+                "2 Form Place, Effingham, IL 62401",
+                "3 Section Place, Effingham, IL 62401",
+            ),
+        )
 
     def test_generators_reject_model_authored_deployment_comments(self):
         build_body = COMPLETE_BUILD_BODY.replace(

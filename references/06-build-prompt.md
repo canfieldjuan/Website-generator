@@ -207,10 +207,11 @@ The per-section rules:
 
    **`_computed_hero_shape: "fullbleed"`** -- historical default. Full-
    bleed photo with dark overlay, white text. The background image is
-   `prospect.photos[].context=="hero"` if present, otherwise the
-   generated hero at `images/hero.<ext>`.
+   the exact source-owned value in `prospect.photos[]` whose context is
+   `"hero"` or `"background"`. If no such asset exists, the harness changes
+   the effective shape to `gradient`; never invent an image path.
    ```html
-   <section class="dual-cta-hero hero-fullbleed" style="background-image: url('images/hero.jpg');">
+   <section class="dual-cta-hero hero-fullbleed" style="background-image: url('[VERIFIED_HERO_URL]');">
      <div class="dual-cta-hero-inner">
        <h1 class="dual-cta-headline">...</h1>
        <p class="dual-cta-sub">...</p>
@@ -232,7 +233,7 @@ The per-section rules:
          <p class="dual-cta-sub">...</p>
          <div class="dual-cta-row">...CTAs...</div>
        </div>
-       <div class="hero-split-photo" style="background-image: url('images/hero.jpg');"></div>
+       <div class="hero-split-photo" style="background-image: url('[VERIFIED_HERO_URL]');"></div>
      </div>
    </section>
    ```

@@ -10,12 +10,14 @@ Required:
 
 Optional:
   VLLM_BIN                     vLLM executable (default: vllm on PATH)
+  VLLM_TOKENIZER_PATH          Local tokenizer directory (required for GGUF)
   VLLM_HOST                    Loopback bind host (default: 127.0.0.1)
   VLLM_PORT                    Port (default: 8000)
   VLLM_MAX_MODEL_LEN           Maximum context tokens (default: 49152)
   VLLM_GPU_MEMORY_UTILIZATION  GPU memory fraction, >0 through 1 (default: 0.90)
   VLLM_TENSOR_PARALLEL_SIZE    GPU count used by vLLM (default: 1)
   VLLM_CUDA_VISIBLE_DEVICES    Comma-separated CUDA device indexes (default: 0)
+  VLLM_USE_FLASHINFER_SAMPLER  Optional sampler toggle (default: 0)
   LOCAL_GENERATION_MODEL       Served model alias (default: qwen/qwen3.8-27b)
   LOCAL_GENERATION_API_KEY     Optional bearer key; also used by the generator
   VLLM_API_KEY                 Alias for LOCAL_GENERATION_API_KEY
@@ -43,6 +45,7 @@ max_model_len="${VLLM_MAX_MODEL_LEN:-49152}"
 gpu_memory_utilization="${VLLM_GPU_MEMORY_UTILIZATION:-0.90}"
 tensor_parallel_size="${VLLM_TENSOR_PARALLEL_SIZE:-1}"
 cuda_visible_devices="${VLLM_CUDA_VISIBLE_DEVICES:-0}"
+use_flashinfer_sampler="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 model_alias="${LOCAL_GENERATION_MODEL:-qwen/qwen3.8-27b}"
 api_key="${LOCAL_GENERATION_API_KEY:-${VLLM_API_KEY:-}}"
 
@@ -84,10 +87,50 @@ if [[ ! "$cuda_visible_devices" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
     printf 'VLLM_CUDA_VISIBLE_DEVICES must be comma-separated CUDA device indexes.\n' >&2
     exit 2
 fi
+if [[ "$use_flashinfer_sampler" != "0" && "$use_flashinfer_sampler" != "1" ]]; then
+    printf 'VLLM_USE_FLASHINFER_SAMPLER must be 0 or 1.\n' >&2
+    exit 2
+fi
 IFS=',' read -r -a visible_devices <<< "$cuda_visible_devices"
 if (( tensor_parallel_size > ${#visible_devices[@]} )); then
     printf 'VLLM_TENSOR_PARALLEL_SIZE cannot exceed visible CUDA devices.\n' >&2
     exit 2
+fi
+
+configured_tokenizer_path="${VLLM_TOKENIZER_PATH:-}"
+tokenizer_path=""
+hf_config_path=""
+chat_template_path=""
+if [[ "${model_path,,}" == *.gguf ]]; then
+    if [[ -z "$configured_tokenizer_path" || ! -d "$configured_tokenizer_path" ]]; then
+        printf 'Set VLLM_TOKENIZER_PATH to a local tokenizer directory for GGUF.\n' >&2
+        exit 2
+    fi
+    tokenizer_path="$configured_tokenizer_path"
+    for required_tokenizer_file in \
+        config.json tokenizer.json tokenizer_config.json chat_template.jinja
+    do
+        if [[ ! -f "$tokenizer_path/$required_tokenizer_file" ]]; then
+            printf 'VLLM_TOKENIZER_PATH is missing %s.\n' \
+                "$required_tokenizer_file" >&2
+            exit 2
+        fi
+    done
+    hf_config_path="$(dirname "$model_path")"
+    if [[ ! -f "$hf_config_path/config.json" ]]; then
+        printf 'The GGUF model directory must contain config.json.\n' >&2
+        exit 2
+    fi
+    shopt -s nullglob nocaseglob
+    mmproj_siblings=("$hf_config_path"/*mmproj*.gguf)
+    shopt -u nullglob nocaseglob
+    if (( ${#mmproj_siblings[@]} != 0 )); then
+        printf '%s\n' \
+            'The Website Generator requires a text-only GGUF directory without mmproj files.' \
+            'Place the model and config.json in a separate local directory.' >&2
+        exit 2
+    fi
+    chat_template_path="$tokenizer_path/chat_template.jinja"
 fi
 
 args=(
@@ -103,13 +146,22 @@ args=(
     --generation-config vllm
     --default-chat-template-kwargs '{"enable_thinking":false}'
     --enable-prefix-caching
+    --enforce-eager
     --no-enable-log-requests
     --disable-uvicorn-access-log
 )
+if [[ -n "$tokenizer_path" ]]; then
+    args+=(
+        --tokenizer "$tokenizer_path"
+        --hf-config-path "$hf_config_path"
+        --chat-template "$chat_template_path"
+    )
+fi
 if [[ -n "$api_key" ]]; then
     args+=(--api-key "$api_key")
 fi
 
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES="$cuda_visible_devices"
+export VLLM_USE_FLASHINFER_SAMPLER="$use_flashinfer_sampler"
 exec "${args[@]}"
