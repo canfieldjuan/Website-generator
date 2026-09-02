@@ -87,7 +87,7 @@ before runtime-directory resolution and local-model preflight.
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest tests.test_entitlement_activation tests.test_connect_provider.EntitlementTests`
   - 16 tests passed after the final installer resource-ordering change.
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests -v`
-  - Full exact-head result recorded before PR publication.
+  - 220 tests passed at the committed implementation head.
 - `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m compileall -q build.py pipeline.py connect_provider.py lib tests`
   - Passed.
 - `bash scripts/local_pr_review.sh`
