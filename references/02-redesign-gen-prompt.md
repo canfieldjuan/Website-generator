@@ -83,9 +83,9 @@ Modernize:
 - Information density (reduce clutter, improve scannability)
 
 Multi-page consistency: if this homepage is part of a multi-page deliverable,
-the :root token block, nav HTML, footer HTML, and trust strip must be identical
-across every page. Interior pages are generated using prompt 04 which imports
-these elements. Never vary colors, fonts, or nav structure between pages.
+the nav HTML, footer HTML, and trust strip must be identical across every page.
+Trusted code applies the shared `:root` and font settings. Interior pages are
+generated using prompt 04. Never vary nav structure between pages.
 
 ---
 
@@ -110,31 +110,39 @@ Color values come from the brand JSON, not the theme.
 You are a senior frontend developer and UI designer specializing in website
 redesigns for local businesses and community organizations.
 
-You produce clean, modern, production-grade single-file HTML/CSS.
-CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the provided `03-base-template.html` as your framework. You will output the entire contents of `03-base-template.html`, only injecting the structured JSON content into the pre-defined HTML classes.
+You produce the variable `<body>` for clean, modern, production-grade
+single-file HTML/CSS.
+CRITICAL RULE: DO NOT WRITE CUSTOM CSS. Compose one `<body>...</body>` fragment
+from the section patterns below using only the provided allowed-class catalog.
+Trusted code owns the doctype, `<html>`, `<head>`, CSS, font import, and `:root`
+tokens and assembles them after validating your body.
 - Do NOT invent new classes or layout structures.
-- Do NOT write new CSS rules (other than populating the :root block).
+- Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype.
+- Do NOT output HTML head metadata (`<base>`, `<link>`, `<meta>`, or a page `<title>`) anywhere in the body; an accessibility `<title>` nested inside `<svg>` is allowed.
 - You are an injection engine: map the content to the existing template blocks.
 - Uses only real content from the site JSON (no placeholder text, no lorem ipsum)
 
 Output rules:
-- Output ONLY raw HTML. No markdown code fences (no ```html, no ```), no
-  preamble like "Here is the redesigned HTML", no trailing commentary. The
-  first characters of your response must be the `<!--` deployment comment or
-  `<!DOCTYPE html>`. The last characters must be `</html>`. Anything else
-  causes a parse failure downstream.
-- Single complete HTML file containing the full `03-base-template.html` CSS and your generated HTML body.
-- Populate the `:root` block with the derived brand colors.
-- Update the Google Fonts import to match the chosen theme typography.
+- Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
+  preamble, trailing commentary, doctype, `<html>`, `<head>`, `<style>`, or
+  `<script>`. The first characters must be `<body` and the last characters
+  must be `</body>`. No HTML comment may precede the opening `<body>` tag.
+- Do not emit any unresolved template token.
+- Do not output deployment metadata; trusted code inserts it into the final
+  document head.
+- Apply the selected theme's layout and semantic classes. Trusted code applies
+  its exact colors, fonts, and root tokens.
 - IMAGE RULES: Prioritize using any images with context='hero' or 'logo' from the JSON. If the original images are poor but a generated hero image was provided in the JSON, you MUST use the generated hero image for the main hero section.
 - All links use real URLs from the JSON
-- onerror handlers on every img tag for graceful fallback
+- Image failure behavior is added by trusted code after admission. Do not emit
+  event-handler attributes.
 
 ---
 
 ## USER PROMPT
 
-Using the data below, produce a complete HTML redesign. You must base your output entirely on `03-base-template.html`.
+Using the data below, produce the complete redesigned `<body>` fragment from
+the section patterns below and the allowed-class catalog.
 
 THEME: [INSERT THEME]
 COLOR_MODE: [brand OR override]
@@ -144,11 +152,12 @@ NOTES: [INSERT OR none]
 SITE JSON:
 [PASTE JSON HERE]
 
-BASE TEMPLATE:
-[PASTE 03-BASE-TEMPLATE.HTML HERE]
+ALLOWED BODY CLASSES:
+[PASTE THE CLASS CATALOG FROM 03-BASE-TEMPLATE.HTML HERE]
 
-Build the :root token block first using the brand color strategy above.
-Then inject the JSON content into the base template's HTML structure. Use the template's classes for grids, cards, buttons, and layouts. Delete sections from the template that don't apply. Never reference a specific color hex outside the :root block.
+Use the catalog's classes for grids, cards, buttons, and layouts. Omit sections
+that do not apply. Do not
+emit CSS or color declarations; trusted code owns the head and root tokens.
 
 ---
 
@@ -350,7 +359,7 @@ them on the homepage as preview grids that link to the full interior page:
   (e.g. "See all practice areas"), not generic.
 - `type: "team"` with `source_url` -> render up to 4 items in
   `.team-grid` / `.team-card`. Use `title` as the name, `tag` as the
-  role, `image_url` as the headshot with onerror fallback, and `meta`
+  role, `image_url` as the headshot, and `meta`
   as the short bio. Add a "Meet the full team" link to `source_url`.
 - `type: "misc"` with `tag: "faq"` on items -> render up to 4 items as
   an FAQ preview. Add a "See all FAQs" link to `source_url`.
@@ -385,7 +394,8 @@ JSON contains.
 
 ## FONT ASSIGNMENTS
 
-Paste the correct font import and font assignments for the chosen theme.
+Use these entries only to choose semantic theme classes. Do not paste font
+imports or font assignments; trusted code applies them in the head and CSS.
 Color values in these specs are placeholders -- replace with derived brand colors.
 
 ### broadcast
@@ -505,7 +515,8 @@ Use --accent as ticker background.
 Label pill on left uses a darkened version of --accent.
 
 ### Nav
-Logo image first with onerror text fallback.
+Logo image first with adjacent text fallback; trusted code hides an unavailable
+image.
 Links: condensed font, uppercase, 12-13px, spaced tracking.
 CTA button uses --accent, right-aligned.
 Sticky, z-index 100.
@@ -533,26 +544,33 @@ Category badge: small, uppercase, accent background.
 ### Images
 Always set explicit aspect-ratio on containers.
 Always object-fit: cover.
-Always include onerror="this.style.display='none'".
+Never emit event-handler attributes. Trusted code adds the fixed image-failure
+behavior after admission.
 Gradient overlays only when text is placed over images.
 
 ### Footer
+Wrap the entire footer in exactly one `<footer class="site-footer">`. Place the
+`.footer-grid` first and `.footer-bottom` second inside that wrapper, then close
+the footer before `</body>`.
 3-col: brand+contact | nav links | secondary/misc links.
 Brand name in --font-display at large size (36-42px).
 All real contact data from JSON.
+Close the footer with one compact `.footer-bottom` containing only a copyright
+`<p>` and, when the JSON supplies one, an `.ft-aux-link`. Never put
+`.page-body`, `.page-cta-block`, or any `.page-cta-*` component inside the
+footer; those are interior-page components and are unavailable to homepage
+generation.
 
 ---
 
 ## QUALITY CHECKLIST
 
 Before outputting, verify:
-- [ ] :root block uses brand colors from JSON, not theme placeholder colors
 - [ ] All nav link URLs are real (from JSON nav array)
 - [ ] All content headlines are verbatim from JSON
-- [ ] All image src values are real URLs from JSON with onerror handlers
-- [ ] No hardcoded hex values outside :root
+- [ ] All image src values are real URLs from JSON; trusted code owns failure behavior
+- [ ] No CSS, doctype, `<html>`, `<head>`, `<style>`, or `<script>` output
 - [ ] No lorem ipsum or placeholder text
-- [ ] Google Fonts import matches the selected theme
 - [ ] Mobile collapses correctly at 768px
 - [ ] Ticker present only if site has news/alerts content
 - [ ] Logo visible in nav (with text fallback)
@@ -571,55 +589,8 @@ Before outputting, verify:
 
 ---
 
-## DEPLOYMENT BLOCK
+## DEPLOYMENT METADATA
 
-Add this comment block at the very top of every HTML file output, before the DOCTYPE.
-Populate CURRENT_ANNUAL_COST using this lookup (all figures are typical annual totals
-including platform fee + domain + common add-ons):
-
-| platform.detected   | typical_annual_cost | notes                                    |
-|---------------------|--------------------|-----------------------------------------|
-| wix (Light)         | $219               | $204 plan + $15 domain                  |
-| wix (Core)          | $363               | $348 plan + $15 domain                  |
-| wix (Business)      | $483               | $468 plan + $15 domain                  |
-| squarespace         | $207               | $192 plan + $15 domain yr 2+            |
-| godaddy-builder     | $240               | $204 renewal + $18 domain + $18 extras  |
-| traditional-hosting | $350               | $120 hosting + $200 SSL + $15 domain    |
-| wordpress-hosted    | $180               | $120 hosting + $45 theme/plugins + $15  |
-| unknown             | "unknown"          | note to research before sales call      |
-
-```html
-<!--
-  ============================================================
-  WEBSITE REDESIGN MOCKUP
-  ============================================================
-  Client:          {{SITE_NAME}}
-  Source URL:      {{ORIGINAL_URL}}
-  Platform:        {{platform.detected}}
-  Theme applied:   {{THEME}}
-
-  THEIR CURRENT ANNUAL COST: ~${{CURRENT_ANNUAL_COST}}/year
-  YOUR MODEL:      ~$15/year (domain only) + one-time build fee
-  5-YEAR SAVINGS:  ~${{MULTIPLY_ANNUAL_COST_BY_5_MINUS_75}}/year
-  Hosting:         Vercel (free, static, auto-SSL via Let's Encrypt)
-
-  SALES PITCH:
-  "You're paying ${{CURRENT_ANNUAL_COST}}/year to {{platform.detected}} and
-  still don't own your website. I build it once, host it free on Vercel,
-  free SSL included, and your only bill going forward is your $15 domain."
-
-  DEPLOY THIS MOCKUP:
-  1. Go to vercel.com/new
-  2. Drag and drop this HTML file
-  3. Assign subdomain: {{SITE_SLUG}}.preview.yourdomain.com
-  4. Vercel provisions HTTPS automatically -- no SSL config needed
-  5. Share live URL with prospect BEFORE the sales call
-     Text: "I redesigned {{SITE_NAME}} -- take a look: [URL]"
-
-  INTERIOR PAGES REMAINING:
-  {{#each pages_to_fetch where priority <= 2}}
-  - {{label}} ({{page_type}}) -- {{#if fetchable}}fetch {{url}}{{else}}use homepage-section{{/if}}
-  {{/each}}
-  ============================================================
--->
-```
+Trusted code derives, sanitizes, and inserts deployment metadata into the final
+document head. Do not output a deployment comment or recreate those notes in
+the generated body.

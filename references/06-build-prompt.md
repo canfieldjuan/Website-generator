@@ -7,7 +7,8 @@ NO current online presence. Driven by:
 - The trade-specific defaults file (`07-industry-defaults.md`)
 - The shared base template (`03-base-template.html`)
 
-Output: one complete HTML file, the prospect's homepage.
+The caller combines your generated body with the trusted template head to
+produce one complete HTML file.
 
 This prompt is the from-scratch sibling of `02-redesign-gen-prompt.md`. It
 deliberately skips concepts that only matter when there IS an existing site:
@@ -34,14 +35,16 @@ website for a local-business prospect that does not currently have a
 website online. The deliverable is a sales asset: the salesperson will
 send the live URL to the prospect before a 5-minute discovery call.
 
-You produce clean, modern, production-grade single-file HTML/CSS.
+You produce the variable `<body>` for clean, modern, production-grade
+single-file HTML/CSS.
 
-CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the
-provided `03-base-template.html` as your framework. You output the
-entire contents of `03-base-template.html`, only injecting content into
-the pre-defined HTML classes.
+CRITICAL RULE: DO NOT WRITE CUSTOM CSS. Compose one `<body>...</body>` fragment
+from the section patterns below using only the provided allowed-class catalog.
+The caller owns the doctype, `<html>`, `<head>`, CSS, font import, and `:root`
+tokens and assembles them after validating your body.
 - Do NOT invent new classes or layout structures.
-- Do NOT write new CSS rules (other than populating the :root block).
+- Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype.
+- Do NOT output HTML head metadata (`<base>`, `<link>`, `<meta>`, or a page `<title>`) anywhere in the body; an accessibility `<title>` nested inside `<svg>` is allowed.
 - You are an injection engine.
 
 Content source rules:
@@ -83,13 +86,15 @@ Trade display rule:
   extended.
 
 Output rules:
-- Output ONLY raw HTML. No markdown code fences (no ```html, no ```),
-  no preamble like "Here is the website", no trailing commentary. The
-  first characters must be `<!DOCTYPE html>` (or a leading HTML comment).
-  The last characters must be `</html>`.
-- Single complete HTML file containing the full `03-base-template.html`
-  CSS and the generated HTML body.
-- Populate the `:root` block in this priority order:
+- Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
+  preamble, trailing commentary, doctype, `<html>`, `<head>`, `<style>`, or
+  `<script>`. The first characters must be `<body` and the last characters
+  must be `</body>`. No HTML comment may precede the opening `<body>` tag.
+- Do not emit any unresolved template token.
+- Do not output deployment metadata; trusted code inserts it into the final
+  document head.
+- Choose body content using this color priority; trusted code applies the
+  resulting values to `:root`:
     1. If `prospect.brand_colors` is provided, use those values
        verbatim (this is the explicit-brand path; the harness skips
        palette selection in this case).
@@ -103,10 +108,12 @@ Output rules:
        for that trade (the historical default). Only fires when the
        harness fails to populate `_computed_palette` -- normally a
        configuration bug worth investigating.
-- Update the Google Fonts import to match the chosen theme typography.
+- Use the chosen theme's classes and style notes; trusted code applies its
+  Google Fonts import and root typography tokens.
 - All links use real URLs from PROSPECT_JSON. The form action MUST be
   the prospect.formspree_endpoint value verbatim.
-- onerror handlers on every img tag for graceful fallback.
+- Image failure behavior is added by trusted code after admission. Do not emit
+  event-handler attributes.
 
 ---
 
@@ -124,8 +131,8 @@ THEMES:
 SECTION ORDERS:
 { ...10-section-orders.md contents... }
 
-BASE TEMPLATE:
-{ ...03-base-template.html contents... }
+ALLOWED BODY CLASSES:
+{ ...the class catalog extracted from 03-base-template.html... }
 
 PROSPECT JSON:
 { ...json... }
@@ -135,14 +142,14 @@ The first four blocks are cacheable static content; the prospect
 JSON varies per build and is sent uncached. Read `THEMES` to
 resolve `prospect._computed_theme` (one of `warm`, `civic`,
 `minimal`, `broadcast`, `editorial`, `brand-forward`) to the
-matching Google Fonts import + `:root` overrides + style notes,
-and apply those to the rendered HTML. Read `SECTION ORDERS` to
+matching style notes, and apply those to the rendered body. Trusted code owns
+the matching Google Fonts import and `:root` overrides. Read `SECTION ORDERS` to
 resolve `prospect._computed_section_order` (one of `default`,
 `services-led`, `reviews-led`) to the matching named ordering,
 and render sections in that order. See THEME & TYPOGRAPHY and
 SECTION ARCHITECTURE below.
 
-Output: the complete HTML file.
+Output: one complete `<body>...</body>` fragment.
 
 ---
 
@@ -178,7 +185,9 @@ before injecting; this fallback shouldn't fire in practice).
 The per-section rules:
 
 1. Sticky nav -- business name (no logo unless prospect provided one),
-   phone number with `tel:` link, single CTA button anchored to `#contact`.
+   single CTA button anchored to `#contact`. If `prospect.phone` is set,
+   also render that exact phone with a matching `tel:` link; otherwise omit
+   the nav phone and every business-phone action.
 2. Trust strip (placement varies by `_computed_section_order`; the
    `default` ordering places it directly under the nav, `services-led`
    places it AFTER the services grid, `reviews-led` places it after
@@ -198,10 +207,11 @@ The per-section rules:
 
    **`_computed_hero_shape: "fullbleed"`** -- historical default. Full-
    bleed photo with dark overlay, white text. The background image is
-   `prospect.photos[].context=="hero"` if present, otherwise the
-   generated hero at `images/hero.<ext>`.
+   the exact source-owned value in `prospect.photos[]` whose context is
+   `"hero"` or `"background"`. If no such asset exists, the harness changes
+   the effective shape to `gradient`; never invent an image path.
    ```html
-   <section class="dual-cta-hero hero-fullbleed" style="background-image: url('images/hero.jpg');">
+   <section class="dual-cta-hero hero-fullbleed" style="background-image: url('[VERIFIED_HERO_URL]');">
      <div class="dual-cta-hero-inner">
        <h1 class="dual-cta-headline">...</h1>
        <p class="dual-cta-sub">...</p>
@@ -223,7 +233,7 @@ The per-section rules:
          <p class="dual-cta-sub">...</p>
          <div class="dual-cta-row">...CTAs...</div>
        </div>
-       <div class="hero-split-photo" style="background-image: url('images/hero.jpg');"></div>
+       <div class="hero-split-photo" style="background-image: url('[VERIFIED_HERO_URL]');"></div>
      </div>
    </section>
    ```
@@ -274,6 +284,41 @@ The per-section rules:
    6 with highest commercial value per INDUSTRY_DEFAULTS guidance. If
    fewer than 6, augment from the canonical service catalog. Each
    card: service name, one-line description.
+
+   Markup (replace every square-bracket token; render all 6 cards):
+   ```html
+   <div class="page-wrap section-gap">
+     <div class="sec-hd">
+       <span class="sec-title"><span class="sec-dot"></span>Services</span>
+     </div>
+     <div class="services-grid">
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_1_NAME]</div>
+         <p class="service-card-desc">[SERVICE_1_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_2_NAME]</div>
+         <p class="service-card-desc">[SERVICE_2_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_3_NAME]</div>
+         <p class="service-card-desc">[SERVICE_3_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_4_NAME]</div>
+         <p class="service-card-desc">[SERVICE_4_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_5_NAME]</div>
+         <p class="service-card-desc">[SERVICE_5_DESCRIPTION]</p>
+       </div>
+       <div class="service-card">
+         <div class="service-card-name">[SERVICE_6_NAME]</div>
+         <p class="service-card-desc">[SERVICE_6_DESCRIPTION]</p>
+       </div>
+     </div>
+   </div>
+   ```
 6. Why choose us -- EXACTLY 3 differentiators (the `.benefits-grid` is
    a 3-column desktop grid; 4 cards leaves an orphan trailing cell).
    Wrap the whole section in `<section class="section-band">` instead
@@ -337,21 +382,22 @@ The per-section rules:
    `Family Owned` + `Locally Owned`), consolidate into a single
    card and pull one more from the next priority bucket.
 
-   **Anti-pattern from PR #6 review (do not repeat).** Earlier
-   builds rendered `Upfront Flat-Rate Pricing` as a benefit card
-   even though `prospect.service_promises: []`. That bullet now sits
-   in the verified-service-promise category and may not render
-   without a matching entry. The same discipline applies to every
-   business-practice claim in 07's positive-signals list.
+   **Anti-pattern from PR #6 review (do not repeat).** Earlier builds rendered
+   an unsupported pricing promise even though `prospect.service_promises: []`.
+   A service-promise card may not render without a matching entry. The same
+   discipline applies to every business-practice claim in 07's
+   positive-signals list.
 7. Customer Reviews -- branching logic based on what prospect data
    contains. Three possible renderings:
 
    **Branch A -- prospect.reviews has 3+ entries**: render the
-   card-grid treatment. Three reviews maximum (use the strongest 3
-   if the array has more). Each review object MUST have the shape
-   `{author, rating, date, platform, text}`. Below the cards, a
-   single inline summary row with the aggregate score and a Google
-   link. Markup:
+   card-grid treatment. Three reviews maximum (use any 3 complete
+   source entries if the array has more). Each review object MUST have the shape
+   `{author, rating, date, platform, text}`. Copy every field exactly;
+   never combine or rewrite entries. If both aggregate score and count
+   are present and valid, add one inline summary row with the aggregate
+   score and Google link. Otherwise omit the summary row. Markup when
+   aggregate evidence is present:
    ```html
    <div class="page-wrap section-gap">
      <div class="sec-hd">
@@ -377,7 +423,8 @@ The per-section rules:
    ```
 
    **Branch B -- prospect.reviews is empty OR has fewer than 3 entries,
-   BUT prospect.google_review_score is a number**: fall back to the
+   BUT prospect.google_review_score is a number AND
+   prospect.google_review_count is a positive integer**: fall back to the
    centered aggregate widget. The card grid is skipped entirely.
    Showing 1 or 2 cards is forbidden -- it reads as "we couldn't find
    a third good one." Markup:
@@ -397,11 +444,12 @@ The per-section rules:
    </div>
    ```
 
-   **Branch C -- both reviews empty AND google_review_score is null**:
+   **Branch C -- fewer than 3 complete reviews AND no complete numeric
+   score/count pair**:
    OMIT the entire Customer Reviews section. Do NOT render the section
    header alone.
 
-   **For `google_reviews_url` in either Branch A or B**: use
+   **For `google_reviews_url` in Branch B or a Branch A summary**: use
    prospect.google_business_url verbatim if present. Otherwise fall
    back to a Google Maps search URL:
    `https://www.google.com/maps/search/?api=1&query=[business_name]+[city]+[state]`
@@ -409,7 +457,8 @@ The per-section rules:
 
    **NEVER fabricate review text, ratings, dates, authors, or
    platforms.** If prospect.reviews has fewer than 3 entries, use
-   Branch B -- do NOT invent additional reviews to fill the grid.
+   Branch B only when its complete aggregate evidence exists; otherwise
+   use Branch C. Do NOT invent additional reviews to fill the grid.
 8. Inline contact form (`.contact-form-wrap`) -- see CONTACT FORM RULE.
 9. Footer (3-col) -- see FOOTER ARCHITECTURE.
 
@@ -517,7 +566,8 @@ Rules:
 
 ## HERO CTA ARCHITECTURE
 
-Plumbers default to urgency_type = "emergency". Render the dual CTA as:
+Plumbers default to urgency_type = "emergency" when `prospect.phone` is set.
+In that case, render the dual CTA as:
 
 - PRIMARY (`.cta-emergency`): large click-to-call button. Phone number
   visible in the button. Badge logic, in this order:
@@ -529,6 +579,10 @@ Plumbers default to urgency_type = "emergency". Render the dual CTA as:
        button content.
   `href="tel:[PROSPECT.phone with digits only]"`.
 - SECONDARY (`.cta-planned`): "Request Service" anchored to `#contact`.
+
+When `prospect.phone` is null or empty, omit `.cta-emergency` and `.cta-or`
+entirely. Render `.cta-planned` as the sole hero CTA anchored to `#contact`;
+do not invent a phone value or any `tel:`, `sms:`, or messaging-phone action.
 
 Never claim 24/7 availability the prospect didn't promise, and never
 default to a `Same-Day Service` badge without a verified
@@ -567,15 +621,10 @@ For each build:
 
 1. Locate the theme named by `prospect._computed_theme` in the
    inlined `THEMES:` section.
-2. Insert that theme's Google Fonts `<link>` tag in the document `<head>`.
-3. In the `:root` block, override `--font-display`, `--font-body`,
-   `--font-serif`, and `--card-radius` with the values from that theme.
-   Color tokens (`--accent`, `--accent-dark`, `--secondary`, etc.) come
-   from `prospect.brand_colors` if set, otherwise the trade's `Color
-   defaults` in 07 -- the theme does NOT supply color values, only
-   typography and layout feel.
-4. Apply the theme's style notes (card style, headline style, badge
+2. Apply the theme's style notes (card style, headline style, badge
    style) consistently across the section components.
+3. Do not emit font links or root tokens. Trusted code applies the catalog's
+   exact Google Fonts and `:root` values after body admission.
 
 If `prospect._computed_theme` is missing or names a theme not present
 in 09, fall back to `warm` and emit a warning in the report (this
@@ -603,6 +652,10 @@ looks surprising, but the harness is authoritative.
 ---
 
 ## FOOTER ARCHITECTURE
+
+Wrap the entire footer in exactly one `<footer class="site-footer">`. Place the
+`.footer-grid` first and `.footer-bottom` second inside that wrapper, then close
+the footer before `</body>`.
 
 Three-column grid (`.footer-grid` with `grid-template-columns: 1.5fr 1fr 1fr`).
 The brand column on the left gets a structured vertical stack -- do NOT
@@ -645,6 +698,18 @@ lists. Typical content: middle column = Hours OR Services list, right
 column = Service Area list OR Social links. Tailor to what the prospect
 data supports.
 
+Close the footer with exactly one compact copyright row after `.footer-grid`:
+
+```html
+<div class="footer-bottom">
+  <p>&copy; [PROSPECT.build_date year] [legal business name]. All rights reserved.</p>
+</div>
+```
+
+Never place `.page-body`, `.page-cta-block`, or any `.page-cta-*` component in
+the footer. Those are interior-page components and are unavailable to homepage
+generation. Do not add a second call-to-action to `.footer-bottom`.
+
 When the right column is "Service Area", render a small `.ft-coverage-map`
 SVG above the `.ft-links` list. The SVG visualises the coverage radius
 as concentric dashed/solid circles with a center pin in --accent. The
@@ -675,55 +740,12 @@ mile count like 20 -- that misrepresents coverage.) Markup:
 
 ---
 
-## DEPLOYMENT COMMENT BLOCK
+## DEPLOYMENT METADATA
 
-Add this comment block at the very top of the output, before DOCTYPE.
-Use `prospect.build_date` verbatim for the Generated line -- do NOT
-guess or fabricate a date. If `prospect.build_date` is absent, omit the
-Generated line entirely rather than inventing a value.
-
-```html
-<!--
-  ============================================================
-  NEW WEBSITE BUILD -- FROM SCRATCH
-  ============================================================
-  Prospect:        [PROSPECT.business_name]
-  Trade:           [PROSPECT.trade]
-  Location:        [PROSPECT.city], [PROSPECT.state]
-  Generated:       [PROSPECT.build_date]
-
-  HOSTING:         Vercel (free, static, auto-SSL via Let's Encrypt)
-  LEAD HANDLER:    Formspree (free tier 50 submissions/mo)
-  ONGOING COST:    ~$15/yr (domain renewal only)
-
-  HERO PHOTO:      [credit_name] via Unsplash ([credit_url])
-  PHOTO ID:        [photo_id]
-  PHOTO LICENSE:   Unsplash License (free, no on-page attribution required;
-                   credited here per Unsplash API terms of service)
-
-  DEPLOY:
-  1. Confirm prospect.formspree_endpoint is set on the form action.
-  2. Run from project root: vercel --prod --yes --name [SITE_SLUG]
-  3. Custom domain: add it in Vercel dashboard, point DNS.
-  ============================================================
--->
-```
-
-**HERO PHOTO / PHOTO ID / PHOTO LICENSE lines**: include these THREE
-lines only when `prospect.photos[0]` carries `credit_name`,
-`credit_url`, and `photo_id` fields (i.e. the photo was fetched from
-Unsplash). When the hero is a Flux-generated image or a manually-
-uploaded photo without credit metadata, OMIT these three lines
-entirely. The Unsplash API terms of service require credit somewhere
-in the source (a non-visible HTML comment is sufficient and is the
-preferred placement since the prospect's brand owns the page surface,
-not the photographer).
-
-**SALES PITCH line was removed from the template** -- it was a
-canned line about Roto-Rooter saturation that violated the 08
-fabrication guards (specific national-chain claims, unverified SERP
-observations). The salesperson writes the sales pitch when they send
-the email_draft.md, not in the deployment comment.
+Trusted code derives, sanitizes, and inserts deployment metadata and optional
+Unsplash credit into the final document head. Do not output a deployment
+comment or recreate those notes in the generated body. Sales copy remains in
+the separate email draft workflow.
 
 ## STAR WIDGET RENDERING
 
@@ -765,14 +787,15 @@ NEVER invent dates, years, or "since" claims. Specifically:
 ## QUALITY CHECKLIST
 
 Before outputting, verify:
-- [ ] `<!DOCTYPE html>` at top (after the comment block), `</html>` at bottom
+- [ ] `<body` is first and `</body>` is last; no deployment comment is output
 - [ ] No markdown fences, no preamble text
-- [ ] :root block populated with theme + brand colors
-- [ ] Google Fonts import matches the trade's theme
+- [ ] No doctype, `<html>`, `<head>`, `<style>`, or `<script>` output
 - [ ] All section IDs / classes come from the base template, no inventions
 - [ ] Contact form action == prospect.formspree_endpoint verbatim (or
       action="#" with the TODO comment if endpoint not provided)
-- [ ] Phone number is a `tel:` link in nav, hero, and footer
+- [ ] If prospect.phone is set, that exact phone is a matching `tel:` link in
+      nav, hero, and footer; otherwise no business phone value or phone action
+      is emitted and the hero uses only "Request Service" anchored to `#contact`
 - [ ] No fabricated reviews, awards, or year claims
 - [ ] No mission-statement copy ("We believe", "Our mission", "Dedicated")
 - [ ] Headline follows one of the INDUSTRY_DEFAULTS templates

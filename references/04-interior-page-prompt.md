@@ -2,7 +2,8 @@
 
 Run this once per interior page you want to redesign.
 Requires the homepage JSON from step 01 to stay design-consistent.
-Produces a complete HTML page that shares the same design system as the homepage.
+Produces the variable body for a complete HTML page that shares the same design
+system as the homepage. Trusted code supplies the shared document head and CSS.
 
 ---
 
@@ -63,12 +64,15 @@ For `fetchable: false` items: use Mode B with the matching single_page_sections 
 
 You are a senior frontend developer specializing in multi-page website redesigns.
 You are given either a fetched interior page OR a section extracted from the homepage,
-plus the homepage design JSON. Your job is to produce a complete HTML redesign of
-an interior page.
+plus the homepage design JSON. Your job is to produce the complete
+`<body>...</body>` redesign of an interior page.
 
-CRITICAL RULE: DO NOT WRITE CUSTOM CSS. You must strictly use the provided `03-base-template.html` as your framework. You will output the entire contents of `03-base-template.html`, only injecting the structured JSON content into the pre-defined HTML classes.
+CRITICAL RULE: DO NOT WRITE CUSTOM CSS. Compose one `<body>...</body>` fragment
+from the page patterns below using only the provided allowed-class catalog.
+Trusted code owns the doctype, `<html>`, `<head>`, CSS, fonts, and `:root` tokens.
 - Do NOT invent new classes or layout structures.
-- Do NOT write new CSS rules (other than populating the :root block).
+- Do NOT output `<style>`, `<script>`, `<head>`, `<html>`, or a doctype.
+- Do NOT output HTML head metadata (`<base>`, `<link>`, `<meta>`, or a page `<title>`) anywhere in the body; an accessibility `<title>` nested inside `<svg>` is allowed.
 - You are an injection engine: map the content to the existing template blocks.
 - Uses only real content from the provided source.
 
@@ -82,16 +86,17 @@ Use the full fetched page content. Extract all headings, body text, lists,
 form fields, images, and contact information present.
 
 In both modes:
-- Output ONLY raw HTML. No markdown code fences (no ```html, no ```), no
-  preamble like "Here is the interior page", no trailing commentary. The
-  first characters of your response must be `<!DOCTYPE html>` (or a leading
-  comment). The last characters must be `</html>`. Anything else causes a
-  parse failure downstream.
+- Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
+  preamble, trailing commentary, doctype, `<html>`, `<head>`, `<style>`, or
+  `<script>`. The first characters must be `<body` and the last characters
+  must be `</body>`. No HTML comment may precede the opening `<body>` tag.
+- Do not emit any unresolved template token.
 - The nav and footer must match the homepage exactly (same links, same brand treatment)
+- The footer must be one `<footer class="site-footer">` containing
+  `.footer-grid` followed by `.footer-bottom`, closed before `</body>`.
 - Only the main content area changes per page type
-- Populate the :root token block verbatim from the homepage generation output
 - Apply the same `class="theme-light"` or `class="theme-dark"` to the `<body>` as the homepage
-- Same Google Fonts import as the homepage
+- Trusted code applies the same root tokens and Google Fonts as the homepage
 
 ---
 
@@ -105,8 +110,8 @@ NOTES: [any client-specific instructions or "none"]
 HOMEPAGE DESIGN JSON:
 [PASTE FULL JSON FROM STEP 01 HERE]
 
-BASE TEMPLATE:
-[PASTE 03-BASE-TEMPLATE.HTML HERE]
+ALLOWED BODY CLASSES:
+[PASTE THE CLASS CATALOG FROM 03-BASE-TEMPLATE.HTML HERE]
 
 ---
 SOURCE CONTENT:
@@ -126,7 +131,7 @@ All layouts share: sticky nav (from homepage) + trust strip (from homepage) + fo
 ### CONTACT PAGE
 
 Above the fold:
-- Headline: "Get in Touch" or "Contact {{SITE_NAME}}" -- short, not clever
+- Headline: "Get in Touch" or "Contact [SITE_NAME]" -- short, not clever
 - Subheadline: response time promise if available ("We respond within 2 hours")
   or hours of operation
 - Trust strip (same as homepage)
@@ -169,7 +174,8 @@ SECTION 1 -- Story/Mission:
 - Key stat callouts inline: years in business, customers served, etc. as large numbers
 
 SECTION 2 -- Team grid (if team info present):
-- Card per team member: photo (with onerror fallback), name, title, short bio
+- Card per team member: photo, name, title, short bio; trusted code owns image
+  failure behavior
 - Grid: 3-col on desktop, 1-col on mobile
 - If no team info: skip this section
 
@@ -298,8 +304,10 @@ CTA at bottom:
 
 Nav: exact same HTML and CSS as the homepage. Same links, same logo, same CTA.
 Footer: exact same HTML and CSS as the homepage.
-:root block: copy verbatim from homepage generation output.
+Root tokens and fonts are applied by trusted code from the homepage settings;
+do not emit them in the body.
 Trust strip: same as homepage. Present on every page.
 Mobile breakpoint: 768px, same rules as homepage.
-Image error handling: onerror="this.style.display='none'" on every img tag.
+Image failure behavior is added by trusted code after admission. Do not emit
+event-handler attributes.
 No placeholder text anywhere. If content does not exist on the fetched page, omit the section.

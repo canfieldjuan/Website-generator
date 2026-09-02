@@ -2,18 +2,43 @@ import os
 import json
 import re
 import urllib.parse
+import argparse
 import requests
 from bs4 import BeautifulSoup
 
 from lib.clients import (
-    openai_client as client,
     EXTRACTION_MODEL,
-    GENERATION_MODEL,
     extract_json_object as _extract_json_object,
+    get_openrouter_client,
 )
 from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
+from lib.generation import (
+    ActionUrlAdmissionContract,
+    DEFAULT_DOCUMENT_ACCENT,
+    DEFAULT_DOCUMENT_SECONDARY,
+    REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+    REQUIRED_FOOTER_CLASS_COUNTS,
+    DocumentColors,
+    ImageAdmissionContract,
+    PromptPart,
+    SourceContactAdmissionContract,
+    action_url_contract_instruction,
+    assemble_generated_html,
+    atomic_write_text,
+    body_generation_config,
+    extract_homepage_class_names,
+    extract_interior_only_class_names,
+    extract_square_placeholder_tokens,
+    extract_template_class_names,
+    generate_text,
+    generate_with_local_admission_retry,
+    image_contract_instruction,
+    make_html_comment,
+    preflight_generation_provider,
+    resolve_generation_config,
+)
 
 # Enrichment pass: fetches priority-1/2 interior pages identified in the
 # homepage analysis and merges their extracted JSON back into site_json so
@@ -24,6 +49,284 @@ ENRICHMENT_HTML_TRUNCATE = 120000
 ENRICHMENT_PRIORITY_THRESHOLD = 2
 ENRICHABLE_PAGE_TYPES = {"services", "single-service", "team", "about", "faq", "contact"}
 ENRICHMENT_PROMPT_PATH = "references/05-enrichment-prompt.md"
+BASE_TEMPLATE_PATH = "references/03-base-template.html"
+THEMES_CATALOG_PATH = "references/09-themes.md"
+REDESIGN_DEPLOYMENT_COMMENT_MARKERS = (
+    "WEBSITE REDESIGN MOCKUP",
+    "Client:",
+    "Source URL:",
+    "Platform:",
+    "Theme applied:",
+    "THEIR CURRENT ANNUAL COST:",
+    "YOUR MODEL:",
+    "5-YEAR SAVINGS:",
+    "Hosting:",
+    "SALES PITCH:",
+    "DEPLOY THIS MOCKUP:",
+    "INTERIOR PAGES REMAINING:",
+)
+
+
+def _append_source_value(values, value):
+    if isinstance(value, str) and value.strip() and value.strip() not in values:
+        values.append(value.strip())
+
+
+def _redesign_contact_contract(site_json):
+    phones = []
+    emails = []
+    addresses = []
+    site = site_json.get("site") if isinstance(site_json.get("site"), dict) else {}
+    contact = site.get("contact") if isinstance(site.get("contact"), dict) else {}
+    contact_form = (
+        site_json.get("contact_form")
+        if isinstance(site_json.get("contact_form"), dict)
+        else {}
+    )
+    contact_info = (
+        contact_form.get("contact_info")
+        if isinstance(contact_form.get("contact_info"), dict)
+        else {}
+    )
+    contact_sources = [contact, contact_info]
+    conversion_profile = (
+        site_json.get("conversion_profile")
+        if isinstance(site_json.get("conversion_profile"), dict)
+        else {}
+    )
+    contact_sources.append(conversion_profile)
+    single_page_sections = site_json.get("single_page_sections")
+    for section in (
+        single_page_sections if isinstance(single_page_sections, list) else ()
+    ):
+        if not isinstance(section, dict):
+            continue
+        content = section.get("content")
+        if not isinstance(content, dict):
+            continue
+        section_contact = content.get("contact_info")
+        if isinstance(section_contact, dict):
+            contact_sources.append(section_contact)
+    for source in contact_sources:
+        _append_source_value(phones, source.get("phone"))
+        _append_source_value(emails, source.get("email"))
+        _append_source_value(addresses, source.get("address"))
+        source_addresses = source.get("addresses")
+        if isinstance(source_addresses, list):
+            for address in source_addresses:
+                _append_source_value(addresses, address)
+    return SourceContactAdmissionContract(
+        phones=tuple(phones),
+        emails=tuple(emails),
+        addresses=tuple(addresses),
+    )
+
+
+def _redesign_action_url_contract(
+    site_json,
+    contact_contract,
+    *,
+    source_content=None,
+    extra_urls=(),
+):
+    allowed_urls = []
+
+    def collect_source_urls(value):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normalized_key = str(key).casefold()
+                if normalized_key in {
+                    "action",
+                    "anchor",
+                    "formaction",
+                    "href",
+                    "url",
+                } or normalized_key.endswith("_url"):
+                    _append_source_value(allowed_urls, nested)
+                collect_source_urls(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect_source_urls(nested)
+
+    collect_source_urls(site_json)
+    for url in extra_urls:
+        _append_source_value(allowed_urls, url)
+    if isinstance(source_content, str) and "<" in source_content:
+        source_root = BeautifulSoup(source_content, "html.parser")
+        for element in source_root.find_all(True):
+            for attribute in ("href", "action", "formaction", "xlink:href"):
+                _append_source_value(allowed_urls, element.get(attribute))
+    return ActionUrlAdmissionContract(
+        allowed_urls=tuple(allowed_urls),
+        phones=contact_contract.phones,
+        emails=contact_contract.emails,
+    )
+
+
+def _redesign_image_contract(site_json):
+    allowed_urls = []
+    brand = site_json.get("brand") if isinstance(site_json.get("brand"), dict) else {}
+    logo_url = brand.get("logo_url")
+    _append_source_value(allowed_urls, logo_url)
+    images = site_json.get("images")
+    for image in images if isinstance(images, list) else ():
+        if isinstance(image, dict):
+            _append_source_value(allowed_urls, image.get("url"))
+            if (
+                not isinstance(logo_url, str) or not logo_url.strip()
+            ) and image.get("context") == "logo":
+                logo_url = image.get("url")
+
+    def collect_named_image_values(value):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key in {"image_url", "logo_url"}:
+                    _append_source_value(allowed_urls, nested)
+                collect_named_image_values(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect_named_image_values(nested)
+
+    collect_named_image_values(site_json)
+    normalized_logo = logo_url.strip() if isinstance(logo_url, str) and logo_url.strip() else None
+    return ImageAdmissionContract(tuple(allowed_urls), nav_logo_url=normalized_logo)
+
+
+def _six_digit_hex(value):
+    return (
+        value
+        if isinstance(value, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", value)
+        else None
+    )
+
+
+def _darken_hex_color(value):
+    channels = [int(value[index : index + 2], 16) for index in (1, 3, 5)]
+    return "#" + "".join(f"{round(channel * 0.75):02X}" for channel in channels)
+
+
+def _resolve_site_document_colors(site_json):
+    brand = site_json.get("brand") if isinstance(site_json.get("brand"), dict) else {}
+    colors = brand.get("colors") if isinstance(brand.get("colors"), dict) else {}
+    raw_colors = colors.get("raw") if isinstance(colors.get("raw"), list) else []
+    primary = next(
+        (
+            color
+            for color in (
+                _six_digit_hex(colors.get("primary")),
+                _six_digit_hex(colors.get("button_bg")),
+                _six_digit_hex(colors.get("link")),
+                *(_six_digit_hex(item) for item in raw_colors),
+            )
+            if color
+        ),
+        DEFAULT_DOCUMENT_ACCENT,
+    )
+    secondary = next(
+        (
+            color
+            for color in (
+                _six_digit_hex(colors.get("secondary")),
+                _six_digit_hex(colors.get("nav_bg")),
+            )
+            if color
+        ),
+        DEFAULT_DOCUMENT_SECONDARY,
+    )
+    return DocumentColors(
+        accent=primary,
+        accent_dark=_darken_hex_color(primary),
+        secondary=secondary,
+    )
+
+
+def _site_body_theme(site_json):
+    brand = site_json.get("brand") if isinstance(site_json.get("brand"), dict) else {}
+    return "theme-dark" if brand.get("color_mode") == "dark" else "theme-light"
+
+
+_PLATFORM_ANNUAL_COSTS = {
+    "wix (light)": 219,
+    "wix (core)": 363,
+    "wix (business)": 483,
+    "squarespace": 207,
+    "godaddy-builder": 240,
+    "traditional-hosting": 350,
+    "wordpress-hosted": 180,
+}
+
+
+def redesign_deployment_comment(site_json, *, theme, source_url=None, site_slug=None):
+    """Render redesign metadata from extracted facts, never model output."""
+    site = site_json.get("site") if isinstance(site_json.get("site"), dict) else {}
+    site_name = site.get("name") or "Website"
+    platform = site_json.get("platform")
+    if isinstance(platform, dict):
+        platform_name = platform.get("detected")
+    elif isinstance(platform, str):
+        platform_name = platform
+    else:
+        platform_name = None
+    platform_name = platform_name.strip() if isinstance(platform_name, str) else "unknown"
+    if not platform_name:
+        platform_name = "unknown"
+    annual_cost = _PLATFORM_ANNUAL_COSTS.get(platform_name.casefold())
+    annual_cost_text = f"${annual_cost}" if annual_cost is not None else "unknown"
+    savings_text = f"${annual_cost * 5 - 75}" if annual_cost is not None else "unknown"
+
+    resolved_source = source_url or site_json.get("source_url") or "unknown"
+    if not site_slug:
+        parsed_host = urllib.parse.urlparse(str(resolved_source)).netloc.replace("www.", "")
+        site_slug = parsed_host.replace(".", "-") or re.sub(
+            r"[^a-z0-9]+", "-", str(site_name).lower()
+        ).strip("-") or "website"
+
+    lines = [
+        "============================================================",
+        "WEBSITE REDESIGN MOCKUP",
+        "============================================================",
+        f"Client:          {site_name}",
+        f"Source URL:      {resolved_source}",
+        f"Platform:        {platform_name}",
+        f"Theme applied:   {theme}",
+        "",
+        f"THEIR CURRENT ANNUAL COST: {annual_cost_text}/year" if annual_cost is not None else "THEIR CURRENT ANNUAL COST: unknown",
+        "YOUR MODEL:      ~$15/year (domain only) + one-time build fee",
+        f"5-YEAR SAVINGS:  {savings_text}" if annual_cost is not None else "5-YEAR SAVINGS:  unknown",
+        "Hosting:         Vercel (free, static, auto-SSL via Let's Encrypt)",
+        "",
+        "SALES PITCH:",
+        "Write manually from verified prospect facts; not model-generated.",
+        "",
+        "DEPLOY THIS MOCKUP:",
+        "1. Go to vercel.com/new",
+        "2. Drag and drop this HTML file",
+        f"3. Assign subdomain: {site_slug}.preview.yourdomain.com",
+        "4. Vercel provisions HTTPS automatically -- no SSL config needed",
+        "5. Share live URL with prospect before the sales call",
+        "",
+        "INTERIOR PAGES REMAINING:",
+    ]
+    pages = site_json.get("pages_to_fetch")
+    remaining = []
+    if isinstance(pages, list):
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            priority = page.get("priority")
+            if not isinstance(priority, (int, float)) or priority > 2:
+                continue
+            label = page.get("label") or page.get("page_type") or "Unnamed page"
+            page_type = page.get("page_type") or "other"
+            if page.get("fetchable") is True and page.get("url"):
+                action = f"fetch {page['url']}"
+            else:
+                action = "use homepage-section"
+            remaining.append(f"- {label} ({page_type}) -- {action}")
+    lines.extend(remaining or ["- None"])
+    lines.append("============================================================")
+    return make_html_comment("\n".join(lines))
+
 
 def _fetch_with_playwright(url):
     """Headless browser fetch for JS-rendered sites (Squarespace, Wix, Webflow)."""
@@ -141,7 +444,7 @@ def analyze_site(html_content):
     with open("references/01-site-analysis-prompt.md", "r") as f:
         system_prompt = f.read()
 
-    response = client.chat.completions.create(
+    response = get_openrouter_client().chat.completions.create(
         model=EXTRACTION_MODEL,
         response_format={ "type": "json_object" },
         messages=[
@@ -215,7 +518,7 @@ def enrich_site_json(site_json):
         )
 
         try:
-            response = client.chat.completions.create(
+            response = get_openrouter_client().chat.completions.create(
                 model=EXTRACTION_MODEL,
                 response_format={"type": "json_object"},
                 messages=[
@@ -260,51 +563,128 @@ def enrich_site_json(site_json):
 
     return site_json
 
-def generate_redesign(site_json, theme="minimal", color_mode="brand"):
-    print(f"[*] Generating modernized HTML with theme '{theme}' using {GENERATION_MODEL}...")
+def generate_redesign(
+    site_json,
+    theme="minimal",
+    color_mode="brand",
+    generation_config=None,
+    generation_client=None,
+    source_url=None,
+    site_slug=None,
+):
+    config = generation_config or resolve_generation_config()
+    print(
+        f"[*] Generating modernized HTML with theme '{theme}' using "
+        f"{config.provider}:{config.model}..."
+    )
     with open("references/02-redesign-gen-prompt.md", "r") as f:
         system_prompt = f.read()
 
-    with open("references/03-base-template.html", "r") as f:
+    with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
+    with open(THEMES_CATALOG_PATH, "r") as f:
+        theme_catalog = f.read()
+    homepage_classes = extract_homepage_class_names(base_template)
+    class_catalog = "\n".join(homepage_classes)
+    interior_only_classes = extract_interior_only_class_names(base_template)
+    image_contract = _redesign_image_contract(site_json)
+    site_name = site_json.get("site", {}).get("name") or "Website"
+    contact_contract = _redesign_contact_contract(site_json)
+    action_url_contract = _redesign_action_url_contract(
+        site_json,
+        contact_contract,
+    )
 
     user_prompt = f"""THEME: {theme}
 COLOR_MODE: {color_mode}
 ACCENT_OVERRIDE: none
 NOTES: none
 
+MANDATORY BUSINESS IDENTITY: Visibly render this exact extracted business name:
+{json.dumps(site_name, ensure_ascii=False)}
+
+{action_url_contract_instruction(action_url_contract)}
+
 SITE JSON:
 {json.dumps(site_json, indent=2)}
 
-BASE TEMPLATE:
-{base_template}
+ALLOWED BODY CLASSES:
+{class_catalog}
+
+RESPONSE BOUNDARY: Begin immediately with <body and end immediately with
+</body>. Emit no leading comment, deployment metadata, markdown fence, trailing
+text, HTML head metadata, or unresolved template token.
+
+{image_contract_instruction(image_contract)}
 """
 
-    response = client.chat.completions.create(
-        model=GENERATION_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.4
-    )
-    
-    html = response.choices[0].message.content
-    # Strip markdown code blocks if the LLM output them
-    html = re.sub(r"^```html\n?", "", html)
-    html = re.sub(r"^```\n?", "", html)
-    html = re.sub(r"```$", "", html)
-    return html.strip()
+    def admit(candidate):
+        return assemble_generated_html(
+            candidate,
+            base_template=base_template,
+            theme_catalog=theme_catalog,
+            theme_name=theme,
+            colors=_resolve_site_document_colors(site_json),
+            title=site_name,
+            body_theme=_site_body_theme(site_json),
+            trusted_head_comment=redesign_deployment_comment(
+                site_json,
+                theme=theme,
+                source_url=source_url,
+                site_slug=site_slug,
+            ),
+            forbidden_square_placeholders=extract_square_placeholder_tokens(
+                system_prompt,
+                class_catalog,
+            ),
+            forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+            forbidden_class_names=interior_only_classes,
+            allowed_class_names=homepage_classes,
+            required_exposed_values=(("site_name", site_name),),
+            source_contacts=contact_contract,
+            expected_images=image_contract,
+            expected_action_urls=action_url_contract,
+            required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+            required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+        )
 
-def generate_interior_page(site_json, page_type, page_url=None, theme="warm", color_mode="brand"):
+    _result, html = generate_with_local_admission_retry(
+        body_generation_config(config),
+        system_prompt=system_prompt,
+        user_parts=(PromptPart(user_prompt),),
+        temperature=0.4,
+        admit=admit,
+        client=generation_client,
+    )
+    return html
+
+def generate_interior_page(
+    site_json,
+    page_type,
+    page_url=None,
+    source_content=None,
+    theme="warm",
+    color_mode="brand",
+    generation_config=None,
+    generation_client=None,
+):
     print(f"[*] Generating interior page '{page_type}'...")
     with open("references/04-interior-page-prompt.md", "r") as f:
         system_prompt = f.read()
         
-    with open("references/03-base-template.html", "r") as f:
+    with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
+    with open(THEMES_CATALOG_PATH, "r") as f:
+        theme_catalog = f.read()
+    template_classes = extract_template_class_names(base_template)
+    class_catalog = "\n".join(template_classes)
+    image_contract = _redesign_image_contract(site_json)
         
-    if page_url:
+    if source_content is not None:
+        if not isinstance(source_content, str):
+            raise ValueError("Interior source content must be text.")
+        content_source = "fetched-page" if page_url else "provided-source"
+    elif page_url:
         print(f"[*] Fetching interior page content from {page_url}...")
         source_content = fetch_and_clean_html(page_url)
         content_source = "fetched-page"
@@ -317,41 +697,116 @@ def generate_interior_page(site_json, page_type, page_url=None, theme="warm", co
         else:
             source_content = "{}"
         content_source = "homepage-section"
+
+    site_name = site_json.get("site", {}).get("name") or "Website"
+    contact_contract = _redesign_contact_contract(site_json)
+    action_url_contract = _redesign_action_url_contract(
+        site_json,
+        contact_contract,
+        source_content=source_content,
+        extra_urls=(page_url,),
+    )
         
     user_prompt = f"""PAGE TYPE: {page_type}
 PAGE URL: {page_url or 'n/a -- single-page site'}
 CONTENT_SOURCE: {content_source}
 NOTES: none
 
+MANDATORY BUSINESS IDENTITY: Visibly render this exact extracted business name:
+{json.dumps(site_name, ensure_ascii=False)}
+
+{action_url_contract_instruction(action_url_contract)}
+
 HOMEPAGE DESIGN JSON:
 {json.dumps(site_json, indent=2)}
 
-BASE TEMPLATE:
-{base_template}
+ALLOWED BODY CLASSES:
+{class_catalog}
 
 ---
 SOURCE CONTENT:
 {source_content}
 ---
+
+{image_contract_instruction(image_contract)}
 """
 
-    response = client.chat.completions.create(
-        model=GENERATION_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt[:120000]}
-        ],
-        temperature=0.1
+    config = generation_config or resolve_generation_config()
+    page_label = page_type.replace("-", " ").title()
+
+    def admit(candidate):
+        return assemble_generated_html(
+            candidate,
+            base_template=base_template,
+            theme_catalog=theme_catalog,
+            theme_name=theme,
+            colors=_resolve_site_document_colors(site_json),
+            title=f"{page_label} | {site_name}",
+            body_theme=_site_body_theme(site_json),
+            forbidden_square_placeholders=extract_square_placeholder_tokens(
+                system_prompt,
+                class_catalog,
+            ),
+            forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
+            allowed_class_names=template_classes,
+            required_exposed_values=(("site_name", site_name),),
+            source_contacts=contact_contract,
+            expected_images=image_contract,
+            expected_action_urls=action_url_contract,
+            required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
+            required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
+        )
+
+    _result, html = generate_with_local_admission_retry(
+        body_generation_config(config),
+        system_prompt=system_prompt,
+        user_parts=(PromptPart(user_prompt[:120000]),),
+        temperature=0.1,
+        admit=admit,
+        client=generation_client,
     )
-    
-    html = response.choices[0].message.content
-    html = re.sub(r"^```html\n?", "", html)
-    html = re.sub(r"^```\n?", "", html)
-    html = re.sub(r"```$", "", html)
-    return html.strip()
+    return html
 
 
-def main(url):
+def _generate_contact_page(site_json, contact_page, theme, generation_config):
+    contact_url = contact_page.get("url")
+    if contact_page.get("fetchable") is True and contact_url:
+        try:
+            contact_source = fetch_and_clean_html(contact_url)
+        except Exception as error:
+            print(f"[!] Contact page fetch failed for {contact_url}: {error}")
+            print("[*] Falling back to homepage-section content for contact page.")
+        else:
+            return generate_interior_page(
+                site_json,
+                "contact",
+                page_url=contact_url,
+                source_content=contact_source,
+                theme=theme,
+                generation_config=generation_config,
+            )
+    return generate_interior_page(
+        site_json,
+        "contact",
+        theme=theme,
+        generation_config=generation_config,
+    )
+
+
+def main(
+    url,
+    *,
+    generation_provider="local",
+    generation_model=None,
+    skip_deploy=False,
+    skip_email=False,
+    skip_image_gen=False,
+):
+    generation_config = resolve_generation_config(
+        generation_provider,
+        generation_model,
+    )
+    preflight_generation_provider(generation_config)
     # Determine a slug to use for the output folder and Vercel project
     domain = urllib.parse.urlparse(url).netloc.replace("www.", "")
     if not domain:
@@ -387,7 +842,7 @@ def main(url):
     # hero images. Force image generation if no good hero image is in the JSON.
     img_prompt = site_json.get("image_generation_prompt")
     hero_images = [img for img in site_json.get("images", []) if img.get("context") in ["hero", "background"]]
-    if "--skip-image-gen" in sys.argv:
+    if skip_image_gen:
         print("[*] Skipping hero image generation due to --skip-image-gen flag.")
     elif img_prompt or not hero_images:
         if not img_prompt:
@@ -422,7 +877,13 @@ def main(url):
     }
     theme = theme_map.get(site_type, "minimal")
     print(f"[*] Auto-selected theme '{theme}' for site type '{site_type}'")
-    redesign_html = generate_redesign(site_json, theme=theme)
+    redesign_html = generate_redesign(
+        site_json,
+        theme=theme,
+        generation_config=generation_config,
+        source_url=url,
+        site_slug=site_slug,
+    )
     pages_to_deploy = {"index.html": redesign_html}
     
     # 3.5 Generate Contact Page if available. Fail-soft: if the fetch 404s
@@ -431,30 +892,24 @@ def main(url):
     pages_to_fetch = site_json.get("pages_to_fetch", [])
     contact_pages = [p for p in pages_to_fetch if p.get("page_type") == "contact"]
     if contact_pages:
-        contact_url = contact_pages[0].get("url")
-        contact_fetchable = contact_pages[0].get("fetchable", False)
-        contact_html = None
-        if contact_fetchable and contact_url:
-            try:
-                contact_html = generate_interior_page(site_json, "contact", page_url=contact_url, theme=theme)
-            except Exception as e:
-                print(f"[!] Contact page fetch/generation failed for {contact_url}: {e}")
-                print("[*] Falling back to homepage-section content for contact page.")
-        if contact_html is None:
-            contact_html = generate_interior_page(site_json, "contact", theme=theme)
+        contact_html = _generate_contact_page(
+            site_json,
+            contact_pages[0],
+            theme,
+            generation_config,
+        )
         pages_to_deploy["contact.html"] = contact_html
 
     # Save files locally first so they can be reviewed
     for filename, html_content in pages_to_deploy.items():
-        with open(os.path.join(output_dir, filename), "w") as f:
-            f.write(html_content)
+        atomic_write_text(os.path.join(output_dir, filename), html_content)
             
     print(f"\n[+] Redesign generation complete!")
     print(f"[+] Files saved locally to: {output_dir}/")
     print(f"[+] Review them before deploying.")
     
     # Check flags for skipping
-    if "--skip-deploy" in sys.argv:
+    if skip_deploy:
         print("\n[*] Skipping Vercel deployment due to --skip-deploy flag.")
         return
         
@@ -469,7 +924,7 @@ def main(url):
     # 5. Send Email
     if vercel_url:
         if contact_email:
-            if "--skip-email" in sys.argv:
+            if skip_email:
                 print(f"\n[*] Skipping pitch email to {contact_email} due to --skip-email flag.")
                 print(f"[*] You can manually email the business at this link: {vercel_url}")
             else:
@@ -483,9 +938,30 @@ def main(url):
             print("\n[!] No email address found on the website. Skipping email step.")
             print(f"[*] You can manually email the business at this link: {vercel_url}")
 
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Analyze an existing site and generate a redesigned preview."
+    )
+    parser.add_argument("url")
+    parser.add_argument(
+        "--generation-provider",
+        choices=("local", "openrouter"),
+        default="local",
+    )
+    parser.add_argument("--generation-model")
+    parser.add_argument("--skip-deploy", action="store_true")
+    parser.add_argument("--skip-email", action="store_true")
+    parser.add_argument("--skip-image-gen", action="store_true")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2 or sys.argv[1].startswith("--"):
-        print("Usage: python pipeline.py <url> [--skip-deploy] [--skip-email] [--skip-image-gen]")
-    else:
-        main(sys.argv[1])
+    args = parse_args()
+    main(
+        args.url,
+        generation_provider=args.generation_provider,
+        generation_model=args.generation_model,
+        skip_deploy=args.skip_deploy,
+        skip_email=args.skip_email,
+        skip_image_gen=args.skip_image_gen,
+    )

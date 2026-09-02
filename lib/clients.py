@@ -1,12 +1,13 @@
-"""API keys, third-party client setup, and shared model constants.
+"""Environment-backed third-party configuration.
 
-Importing this module loads .env, initializes the OpenAI-compatible client
-against OpenRouter, and configures the resend module. Both pipeline.py and
-build.py import from here so the wiring stays single-sourced."""
+This module deliberately performs no network I/O and creates no API clients at
+import time.  Callers opt in to each external service through the matching
+factory so a local-only build remains local-only.
+"""
 import os
 import json
-import requests
-import resend
+from functools import lru_cache
+
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -16,53 +17,26 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY")
 
-if not OPENROUTER_API_KEY:
-    print("Warning: OPENROUTER_API_KEY is not set. Please add it to your .env file.")
-if not RESEND_API_KEY:
-    print("Warning: RESEND_API_KEY is not set. Please add it to your .env file.")
-if not UNSPLASH_ACCESS_KEY:
-    print("Info: UNSPLASH_ACCESS_KEY is not set; hero images will fall back to Flux generation. Add the key to .env for free Unsplash photo fetching.")
-
-# OpenAI-compatible client pointed at OpenRouter. None if no key was provided
-# so import-time doesn't crash; callers that need the client will fail loudly
-# at call time instead.
-openai_client = None
-if OPENROUTER_API_KEY:
-    openai_client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=OPENROUTER_API_KEY,
-    )
-
-if RESEND_API_KEY:
-    resend.api_key = RESEND_API_KEY
-    # Validate that at least one sending domain is verified in Resend.
-    # Using onboarding@resend.dev only works for sending to your own account email.
-    try:
-        _domain_resp = requests.get(
-            "https://api.resend.com/domains",
-            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-            timeout=5
-        )
-        if _domain_resp.status_code == 200:
-            _verified = [d for d in _domain_resp.json().get("data", []) if d.get("status") == "verified"]
-            if not _verified:
-                print("Warning: No verified sending domains found in Resend.")
-                print("         Emails will only send to your Resend account address.")
-                print("         Verify a domain at https://resend.com/domains to send to clients.")
-        else:
-            print(f"Warning: Could not verify Resend domain status (HTTP {_domain_resp.status_code}).")
-    except Exception:
-        pass  # Non-fatal -- domain check is informational only
-
-# Model split: Haiku for structured extraction (analysis + enrichment),
-# Sonnet for creative HTML generation (redesign + from-scratch builds).
-# Both run via OpenRouter using the OpenAI-compatible client.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 EXTRACTION_MODEL = "anthropic/claude-haiku-4.5"
-GENERATION_MODEL = "anthropic/claude-sonnet-4.5"
 # Hero / background image generation. OpenRouter's image model catalog
 # shifts over time; update this constant when the provider deprecates an
 # entry. Bypass at runtime with --skip-image-gen.
 IMAGE_MODEL = "black-forest-labs/flux.2-max"
+
+
+class MissingServiceConfiguration(RuntimeError):
+    """Raised when an explicitly requested service is not configured."""
+
+
+@lru_cache(maxsize=1)
+def get_openrouter_client():
+    """Return the shared OpenRouter client, creating it only when requested."""
+    if not OPENROUTER_API_KEY:
+        raise MissingServiceConfiguration(
+            "OPENROUTER_API_KEY is required for this OpenRouter operation."
+        )
+    return OpenAI(base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_API_KEY)
 
 def extract_json_object(text):
     """Pull a single JSON object out of an LLM response, tolerating the

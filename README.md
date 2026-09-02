@@ -37,7 +37,7 @@ URL → fetch_and_clean_html → analyze_site → enrich_site_json
 
 5. **Hero image** — Flux-only via `generate_image_openrouter` (OpenRouter, `black-forest-labs/flux.2-max`). Fires when analysis JSON contains `image_generation_prompt` or when no hero/background image was extracted. `UNSPLASH_ACCESS_KEY` has no effect here — the Unsplash-first path is `build.py`-only. Base64 responses are decoded to disk to avoid blowing up the LLM context on the next call.
 
-6. **Generate HTML** — `GENERATION_MODEL` (`claude-sonnet-4.5`) with `references/02-redesign-gen-prompt.md` + full `references/03-base-template.html` (the CSS component library). Theme is auto-selected in `pipeline.py` via a `site.type → theme` map. Contact page generated separately using `references/04-interior-page-prompt.md`.
+6. **Generate HTML** — local `qwen/qwen3.8-27b` by default, with `references/02-redesign-gen-prompt.md` + full `references/03-base-template.html` (the CSS component library). An OpenRouter text model can be selected explicitly for a run. Theme is auto-selected in `pipeline.py` via a `site.type → theme` map. Contact page generated separately using `references/04-interior-page-prompt.md`.
 
 7. **Deploy** — `vercel --prod --yes --name <slug>` in the output directory. Runs `vercel whoami` as a preflight; returns the `*.vercel.app` URL parsed from stdout/stderr.
 
@@ -75,6 +75,31 @@ The pitch email is generated as a Markdown draft with `[VERCEL_URL_PLACEHOLDER]`
 # Python deps
 pip install -r requirements.txt
 
+# Local HTML generation (install vLLM and vllm-gguf-plugin v0.0.5 first).
+# Qwen3.8 text-only support is not released in that plugin yet, so provision
+# the reviewed upstream adapter once. Normal startup never downloads code.
+export VLLM_GGUF_PLUGIN_PATH=/absolute/path/to/vllm-gguf-plugin-qwen38
+git clone https://github.com/vllm-project/vllm-gguf-plugin.git \
+  "$VLLM_GGUF_PLUGIN_PATH"
+git -C "$VLLM_GGUF_PLUGIN_PATH" fetch origin refs/pull/120/head
+git -C "$VLLM_GGUF_PLUGIN_PATH" checkout --detach \
+  d42c0510a1bc96526fd51481ffaf70d58435fd10
+
+# Keep the model and config.json in a text-only directory with no sibling
+# mmproj file.
+export VLLM_MODEL_PATH=/absolute/text-only/path/Qwen3.8-27B-Q4_K_M.gguf
+# Pin the matching Qwen tokenizer files locally; startup never downloads them.
+export VLLM_TOKENIZER_PATH=/absolute/path/to/Qwen3.8-27B-tokenizer
+# One-time tokenizer setup (metadata only, not model weights):
+hf download Qwen/Qwen3.8-27B \
+  --revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 \
+  --include config.json chat_template.jinja merges.txt tokenizer.json tokenizer_config.json vocab.json \
+  --local-dir "$VLLM_TOKENIZER_PATH"
+# Only needed when vllm is not on PATH:
+export VLLM_BIN=/absolute/path/to/vllm
+# The launcher defaults to CUDA device 0 and explicitly disables CPU offload.
+scripts/start_vllm_server.sh
+
 # Headless browser (only needed for JS-rendered sites in pipeline.py)
 playwright install chromium
 
@@ -85,9 +110,22 @@ npm install -g vercel && vercel login
 ### `.env` required keys
 
 ```
-OPENROUTER_API_KEY=...   # Required — all LLM and image calls route through OpenRouter
+OPENROUTER_API_KEY=...   # Extraction/images and explicitly selected cloud generation
 RESEND_API_KEY=...       # Required for pipeline.py email send; optional for build.py
 UNSPLASH_ACCESS_KEY=...  # Optional — free hero photos; falls back to Flux generation
+
+# Optional local overrides; these defaults target standalone vLLM + Qwen.
+LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8000/v1
+LOCAL_GENERATION_MODEL=qwen/qwen3.8-27b
+# Optional. When set, export the same value before starting vLLM.
+LOCAL_GENERATION_API_KEY=...
+# Local generation defaults to a two-hour request deadline. Override only when needed.
+GENERATION_TIMEOUT_SECONDS=7200
+# The template-sized default is 65,536 output tokens. Lower only for smaller prompts.
+GENERATION_MAX_OUTPUT_TOKENS=65536
+
+# Optional default after --generation-provider openrouter is explicitly selected.
+OPENROUTER_GENERATION_MODEL=anthropic/claude-sonnet-4.5
 ```
 
 ### Redesign an existing site
@@ -97,6 +135,7 @@ python pipeline.py https://example-plumber.com
 python pipeline.py https://example-plumber.com --skip-deploy
 python pipeline.py https://example-plumber.com --skip-deploy --skip-email
 python pipeline.py https://example-plumber.com --skip-deploy --skip-image-gen
+python pipeline.py https://example-plumber.com --generation-provider openrouter --generation-model anthropic/claude-sonnet-4.5
 ```
 
 Output lands in `outputs/<site-slug>/`.
@@ -111,6 +150,7 @@ cp examples/prospect-plumber-template.json examples/my-prospect.json
 python build.py examples/my-prospect.json
 python build.py examples/my-prospect.json --skip-deploy
 python build.py examples/my-prospect.json --skip-deploy --skip-image-gen --skip-email-draft
+python build.py examples/my-prospect.json --generation-provider openrouter --generation-model anthropic/claude-sonnet-4.5
 ```
 
 Output site: `outputs/builds/<slug>/index.html`
@@ -177,15 +217,34 @@ Six themes are defined in `references/09-themes.md` and `references/02-redesign-
 
 ## Models
 
-Both scripts call OpenRouter using the OpenAI-compatible client:
+Extraction remains on OpenRouter. HTML and pitch-draft generation use the
+explicitly selected provider, defaulting to standalone local vLLM:
 
-| Role | Model constant | Current value |
+| Role | Provider | Default model |
 |---|---|---|
-| Extraction / enrichment | `EXTRACTION_MODEL` | `anthropic/claude-haiku-4.5` |
-| HTML generation / email draft | `GENERATION_MODEL` | `anthropic/claude-sonnet-4.5` |
-| Hero image (Flux) | `IMAGE_MODEL` | `black-forest-labs/flux.2-max` |
+| Extraction / enrichment | OpenRouter | `anthropic/claude-haiku-4.5` |
+| HTML generation / email draft | Local vLLM | `qwen/qwen3.8-27b` |
+| Explicit cloud generation | OpenRouter | `--generation-model` / `OPENROUTER_GENERATION_MODEL` |
+| Hero image (Flux) | OpenRouter | `black-forest-labs/flux.2-max` |
 
-Constants live in `lib/clients.py`. Prompt caching (`cache_control: ephemeral`) is enabled in `build.py` for the large static context block (industry defaults + themes + section orders + base template). Cache hit/miss counts are logged to stdout.
+Provider configuration and admission checks live in `lib/generation.py`.
+OpenRouter prompt caching (`cache_control: ephemeral`) is enabled only for the
+cloud build request. Local generation preflights vLLM through `/health`
+and `/v1/models`, then sends one non-streaming OpenAI-compatible request to
+`/v1/chat/completions`. Both the request and `scripts/start_vllm_server.sh`
+disable Qwen thinking; reasoning or tool output still fails closed. The script
+binds only to loopback, exposes one explicit CUDA device by default, disables
+CPU offload, uses the exact model alias above, and never downloads a model or
+falls back to OpenRouter. A Qwen3.5/3.8 GGUF, detected from the default alias or
+its local `config.json`, also verifies the
+adapter checkout root, exact pinned commit, clean status, and required adapter
+module before vLLM executes, then exposes that same reviewed checkout through
+`PYTHONPATH`. This temporary pin is required because upstream PR #120 remains
+unreleased; update it only through a reviewed compatibility change. For HTML
+work, the model returns only the variable `<body>`; trusted code supplies the
+base template's head and CSS,
+applies the selected palette and theme, and validates the assembled standalone
+document before it is written or offered to Vercel.
 
 ---
 

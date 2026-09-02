@@ -1,0 +1,43 @@
+name: Generator Tests
+
+on:
+  pull_request:
+    paths:
+      - "build.py"
+      - "pipeline.py"
+      - "lib/**"
+      - "references/**"
+      - "scripts/start_llama_server.sh"
+      - "scripts/start_vllm_server.sh"
+      - "tests/**"
+      - "requirements*.txt"
+      - ".github/workflows/generator-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "build.py"
+      - "pipeline.py"
+      - "lib/**"
+      - "references/**"
+      - "scripts/start_llama_server.sh"
+      - "scripts/start_vllm_server.sh"
+      - "tests/**"
+      - "requirements*.txt"
+      - ".github/workflows/generator-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q build.py pipeline.py lib tests
