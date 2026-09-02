@@ -2032,6 +2032,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertEqual(user_content.count('<p class="service-card-desc">'), 6)
         self.assertIn("[SERVICE_1_NAME]", user_content)
         self.assertIn("[SERVICE_6_DESCRIPTION]", user_content)
+        self.assertIn("SOURCE-GATED CLAIM ALLOWLIST (EXHAUSTIVE): []", user_content)
         self.assertNotIn("BASE BODY TEMPLATE", user_content)
         self.assertNotIn("{{SITE_NAME}}", user_content)
         self.assertTrue(
@@ -2040,6 +2041,31 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 "the text business name, and do not invent a logo URL."
             )
         )
+
+    def test_build_claim_allowlist_uses_the_same_source_evidence_as_admission(self):
+        unsupported = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "locally_owned": None,
+            "service_promises": [],
+        }
+        unsupported_instruction = build.source_claim_boundary_instruction(unsupported)
+        self.assertIn("SOURCE-GATED CLAIM ALLOWLIST (EXHAUSTIVE): []", unsupported_instruction)
+        self.assertNotIn("Not a Franchise", unsupported_instruction)
+        self.assertNotIn("Free Estimates", unsupported_instruction)
+
+        verified = {
+            **unsupported,
+            "locally_owned": True,
+            "service_promises": ["We provide free estimates."],
+        }
+        verified_instruction = build.source_claim_boundary_instruction(verified)
+        self.assertIn("Locally Owned", verified_instruction)
+        self.assertIn("Not a Franchise", verified_instruction)
+        self.assertIn("Free Estimates", verified_instruction)
 
     def test_build_generator_rejects_placeholder_from_static_industry_defaults(self):
         leaked_body = COMPLETE_BUILD_BODY.replace(
