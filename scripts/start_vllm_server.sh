@@ -11,6 +11,8 @@ Required:
 Optional:
   VLLM_BIN                     vLLM executable (default: vllm on PATH)
   VLLM_TOKENIZER_PATH          Local tokenizer directory (required for GGUF)
+  VLLM_GGUF_PLUGIN_PATH        Pinned Qwen adapter checkout (required for a
+                               Qwen3.5/3.8 GGUF)
   VLLM_HOST                    Loopback bind host (default: 127.0.0.1)
   VLLM_PORT                    Port (default: 8000)
   VLLM_MAX_MODEL_LEN           Maximum context tokens (default: 49152)
@@ -48,6 +50,7 @@ cuda_visible_devices="${VLLM_CUDA_VISIBLE_DEVICES:-0}"
 use_flashinfer_sampler="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 model_alias="${LOCAL_GENERATION_MODEL:-qwen/qwen3.8-27b}"
 api_key="${LOCAL_GENERATION_API_KEY:-${VLLM_API_KEY:-}}"
+qwen_gguf_adapter_commit="d42c0510a1bc96526fd51481ffaf70d58435fd10"
 
 if [[ "$vllm_bin" == */* ]]; then
     if [[ ! -x "$vllm_bin" ]]; then
@@ -101,6 +104,8 @@ configured_tokenizer_path="${VLLM_TOKENIZER_PATH:-}"
 tokenizer_path=""
 hf_config_path=""
 chat_template_path=""
+qwen_gguf_adapter_path=""
+requires_qwen_gguf_adapter=0
 if [[ "${model_path,,}" == *.gguf ]]; then
     if [[ -z "$configured_tokenizer_path" || ! -d "$configured_tokenizer_path" ]]; then
         printf 'Set VLLM_TOKENIZER_PATH to a local tokenizer directory for GGUF.\n' >&2
@@ -131,6 +136,60 @@ if [[ "${model_path,,}" == *.gguf ]]; then
         exit 2
     fi
     chat_template_path="$tokenizer_path/chat_template.jinja"
+
+    if [[ "$model_alias" == "qwen/qwen3.8-27b" ]] || \
+        LC_ALL=C grep -Eq \
+            '"model_type"[[:space:]]*:[[:space:]]*"qwen3_5(_text)?"' \
+            "$hf_config_path/config.json"
+    then
+        requires_qwen_gguf_adapter=1
+    fi
+
+    if (( requires_qwen_gguf_adapter )); then
+        configured_adapter_path="${VLLM_GGUF_PLUGIN_PATH:-}"
+        if [[ -z "$configured_adapter_path" || ! -d "$configured_adapter_path" ]]; then
+            printf '%s\n' \
+                'Set VLLM_GGUF_PLUGIN_PATH to the pinned Qwen GGUF adapter checkout.' >&2
+            exit 2
+        fi
+        if ! command -v git >/dev/null 2>&1; then
+            printf 'git is required to verify VLLM_GGUF_PLUGIN_PATH.\n' >&2
+            exit 2
+        fi
+        qwen_gguf_adapter_path="$(cd "$configured_adapter_path" && pwd -P)"
+        if ! adapter_repo_root="$(
+            git -C "$qwen_gguf_adapter_path" rev-parse --show-toplevel 2>/dev/null
+        )"; then
+            printf 'VLLM_GGUF_PLUGIN_PATH must be a Git checkout.\n' >&2
+            exit 2
+        fi
+        if [[ "$adapter_repo_root" != "$qwen_gguf_adapter_path" ]]; then
+            printf 'VLLM_GGUF_PLUGIN_PATH must name the checkout root.\n' >&2
+            exit 2
+        fi
+        if ! adapter_commit="$(
+            git -C "$qwen_gguf_adapter_path" rev-parse --verify HEAD 2>/dev/null
+        )" || [[ "$adapter_commit" != "$qwen_gguf_adapter_commit" ]]; then
+            printf 'VLLM_GGUF_PLUGIN_PATH must be pinned to commit %s.\n' \
+                "$qwen_gguf_adapter_commit" >&2
+            exit 2
+        fi
+        if ! adapter_status="$(
+            git -C "$qwen_gguf_adapter_path" status --porcelain --untracked-files=all \
+                2>/dev/null
+        )"; then
+            printf 'Unable to verify the VLLM_GGUF_PLUGIN_PATH checkout status.\n' >&2
+            exit 2
+        fi
+        if [[ -n "$adapter_status" ]]; then
+            printf 'VLLM_GGUF_PLUGIN_PATH must be a clean checkout.\n' >&2
+            exit 2
+        fi
+        if [[ ! -f "$qwen_gguf_adapter_path/vllm_gguf_plugin/weights_adapter/qwen3_5.py" ]]; then
+            printf 'VLLM_GGUF_PLUGIN_PATH is missing the Qwen3.5/3.8 adapter.\n' >&2
+            exit 2
+        fi
+    fi
 fi
 
 args=(
@@ -164,4 +223,7 @@ fi
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES="$cuda_visible_devices"
 export VLLM_USE_FLASHINFER_SAMPLER="$use_flashinfer_sampler"
+if [[ -n "$qwen_gguf_adapter_path" ]]; then
+    export PYTHONPATH="$qwen_gguf_adapter_path${PYTHONPATH:+:$PYTHONPATH}"
+fi
 exec "${args[@]}"

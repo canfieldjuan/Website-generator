@@ -75,8 +75,18 @@ The pitch email is generated as a Markdown draft with `[VERCEL_URL_PLACEHOLDER]`
 # Python deps
 pip install -r requirements.txt
 
-# Local HTML generation (install vLLM first). For GGUF, keep the model and
-# config.json in a text-only directory with no sibling mmproj file.
+# Local HTML generation (install vLLM and vllm-gguf-plugin v0.0.5 first).
+# Qwen3.8 text-only support is not released in that plugin yet, so provision
+# the reviewed upstream adapter once. Normal startup never downloads code.
+export VLLM_GGUF_PLUGIN_PATH=/absolute/path/to/vllm-gguf-plugin-qwen38
+git clone https://github.com/vllm-project/vllm-gguf-plugin.git \
+  "$VLLM_GGUF_PLUGIN_PATH"
+git -C "$VLLM_GGUF_PLUGIN_PATH" fetch origin refs/pull/120/head
+git -C "$VLLM_GGUF_PLUGIN_PATH" checkout --detach \
+  d42c0510a1bc96526fd51481ffaf70d58435fd10
+
+# Keep the model and config.json in a text-only directory with no sibling
+# mmproj file.
 export VLLM_MODEL_PATH=/absolute/text-only/path/Qwen3.8-27B-Q4_K_M.gguf
 # Pin the matching Qwen tokenizer files locally; startup never downloads them.
 export VLLM_TOKENIZER_PATH=/absolute/path/to/Qwen3.8-27B-tokenizer
@@ -225,8 +235,14 @@ and `/v1/models`, then sends one non-streaming OpenAI-compatible request to
 disable Qwen thinking; reasoning or tool output still fails closed. The script
 binds only to loopback, exposes one explicit CUDA device by default, disables
 CPU offload, uses the exact model alias above, and never downloads a model or
-falls back to OpenRouter. For HTML work, the model returns only the
-variable `<body>`; trusted code supplies the base template's head and CSS,
+falls back to OpenRouter. A Qwen3.5/3.8 GGUF, detected from the default alias or
+its local `config.json`, also verifies the
+adapter checkout root, exact pinned commit, clean status, and required adapter
+module before vLLM executes, then exposes that same reviewed checkout through
+`PYTHONPATH`. This temporary pin is required because upstream PR #120 remains
+unreleased; update it only through a reviewed compatibility change. For HTML
+work, the model returns only the variable `<body>`; trusted code supplies the
+base template's head and CSS,
 applies the selected palette and theme, and validates the assembled standalone
 document before it is written or offered to Vercel.
 
