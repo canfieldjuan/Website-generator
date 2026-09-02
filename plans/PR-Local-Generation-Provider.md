@@ -634,8 +634,8 @@ override before assembly.
 
 ## Verification
 
-- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 118 tests passed in 1.479 seconds, including the `llama.cpp`
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests`
+  — 120 tests passed in 3.962 seconds, including the `llama.cpp`
   health/model/chat contract,
   browser- and URL-decoded placeholder admission, startup-script boundaries, and both
   HTML entry points' shared assembly. The suite also proves this slice cannot
@@ -736,6 +736,14 @@ override before assembly.
   PASS`, 72,170 bytes). The two rejected samples establish that one-shot local
   generation is not reliably admissible; a bounded retry policy remains a
   separate product decision because the OpenRouter path can incur cost.
+- A subsequent combined-head CUDA attempt exposed and then removed the prompt
+  asymmetry that still supplied unverified claim examples to Qwen. The focused
+  source-claim boundary tests and the full 120-test core suite pass after that
+  correction. The required post-correction fixture remains unverified because
+  `llama.cpp` aborted before returning the next response with
+  `CUDA error: unspecified launch failure`; immediately afterward `nvidia-smi`
+  reported `Unable to determine the device handle for GPU0`. No CPU or cloud
+  fallback was used.
 - The standalone runtime was stopped after validation. The GPU compute-process
   query was empty.
 - Mocked local transport tests prove the configured request reaches the
