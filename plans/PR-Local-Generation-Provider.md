@@ -458,9 +458,10 @@ image, email, deployment, and Connect contracts must remain unchanged.
 47. Bind review cards, aggregate ratings, counts, and review links to the
     sanitized source data; reject review UI and ambient review claims when no
     source evidence exists.
-48. Reject testimonial-shaped semantic tags plus quoted or attributed prose
-    outside the canonical source-bound review roots, including ASCII and curly
-    single-quote forms.
+48. Reject testimonial-shaped semantic tags plus author-attributed testimonial
+    prose outside the canonical source-bound review roots, including ASCII and
+    curly single-quote forms, without rejecting ordinary quoted product names
+    or slogans.
 49. Bind every exposed or actionable business email to the sanitized source,
     including addresses assembled across inline DOM nodes, without joining
     fragments across semantic block boundaries.
@@ -562,8 +563,11 @@ claim remains admissible.
 Review admission is source-bound: sanitized review entries own review cards,
 the source rating/count/link own aggregate review UI, and a no-review prospect
 must not emit canonical review components, ambient score/count claims,
-testimonial tags, or quoted/attributed testimonial prose elsewhere in the
-document. Business-email admission similarly compares direct text and decoded
+testimonial tags, or author-attributed testimonial prose elsewhere in the
+document. Canonical card, grid, aggregate, and summary roots accept only their
+declared child hierarchy; every field and CTA label is matched to source data
+or its fixed code-owned wording, so additional direct or nested prose cannot
+hide inside an excluded review root. Business-email admission similarly compares direct text and decoded
 attributes with a block-boundary-aware DOM adjacency stream so split inline
 addresses cannot bypass the source contract. Its synthetic boundary is invalid
 inside both phone and email values. Block elements and actionable contact links
@@ -601,7 +605,7 @@ override before assembly.
 ## Verification
 
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests -v`
-  — 118 tests passed in 1.401 seconds, including the `llama.cpp`
+  — 118 tests passed in 1.479 seconds, including the `llama.cpp`
   health/model/chat contract,
   browser- and URL-decoded placeholder admission, startup-script boundaries, and both
   HTML entry points' shared assembly. The suite also proves this slice cannot
@@ -610,8 +614,9 @@ override before assembly.
   generation, checks claim-bearing attributes, preserves a deterministic
   document palette for uncatalogued trades, and rejects missing, duplicated, or
   unresolved mandatory page structure. The final suite also covers source-bound
-  review cards and aggregate claims, testimonial-shaped prose, direct and
-  inline-split business email identity, and single-form action ownership.
+  review cards and aggregate claims, canonical review-root ownership,
+  attributed testimonial prose without blocking ordinary quotations, direct
+  and inline-split business email identity, and single-form action ownership.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m compileall -q build.py pipeline.py lib tests`
   — passed.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest
@@ -635,12 +640,11 @@ override before assembly.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.BodyAssemblyTests.test_body_admission_rejects_gated_claim_in_decoded_attributes`
   — passed after the Unicode-whitespace review correction; covers ordinary,
   non-breaking, em-space, percent-encoded, and clean-label paths.
-- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.AtomicWriteAndCliTests.test_build_generator_rejects_reviews_without_source_evidence tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_every_business_email_to_source tests.test_generation.AtomicWriteAndCliTests.test_build_generator_enforces_identity_and_phone_substitutions -v`
-  — 3 tests passed in 0.420 seconds. The boundary set rejects ASCII/curly
-  single-quoted testimonial prose and wrong or absent-source email addresses,
-  including addresses split across inline nodes; it accepts the verified direct
-  and split-inline addresses plus non-address fragments separated by block
-  boundaries.
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest tests.test_generation.AtomicWriteAndCliTests.test_build_generator_rejects_reviews_without_source_evidence tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_aggregate_review_claims_to_source tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_review_cards_to_source_entries -v`
+  — 3 tests passed in 0.306 seconds. The boundary set rejects semantic and
+  attributed testimonial forms plus additional direct/nested text in card,
+  grid, aggregate, summary, and CTA ownership surfaces; it accepts ordinary
+  quoted product copy and exact source-bound review components.
 - `bash -n scripts/start_llama_server.sh` — passed.
 - `scripts/start_llama_server.sh --help` — passed without loading a model.
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python build.py --help` — passed;
