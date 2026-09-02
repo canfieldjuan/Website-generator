@@ -1,6 +1,7 @@
 import fcntl
 import io
 import os
+import stat
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -133,6 +134,28 @@ class EntitlementActivationTests(unittest.TestCase):
                 (gate.path.parent / ENTITLEMENT_LOCK_NAME).stat().st_mode & 0o777,
                 0o600,
             )
+
+    def test_missing_config_parents_are_private_under_restrictive_umask(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "missing-config"
+            destination = config_root / "local-connect" / ENTITLEMENT_FILE_NAME
+            gate = EntitlementGate.for_test(
+                path=destination,
+                keyring_document=self.keyring,
+                now=self.now,
+            )
+            source = self.source(root)
+            prior_umask = os.umask(0o777)
+            try:
+                result = install_entitlement(source, gate)
+            finally:
+                os.umask(prior_umask)
+
+            self.assertEqual(result, {"state": "active", "active": True})
+            self.assertEqual(config_root.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(destination.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
 
     def test_invalid_and_inactive_sources_preserve_existing_entitlement(self):
         cases = (
@@ -362,6 +385,39 @@ class EntitlementActivationTests(unittest.TestCase):
             )
             self.assertEqual(destination.read_bytes(), prior)
             self.assertEqual(clock.call_count, 3)
+
+    def test_path_swap_after_promotion_never_reports_activation_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gate = self.gate(root)
+            source = self.source(root)
+            source.write_bytes(source.read_bytes() + b"\n")
+            replacement = (self.fixtures / "valid/active.json").read_bytes()
+            assert gate.path is not None
+            parent = gate.path.parent
+            detached = root / "detached-local-connect"
+            swapped = False
+            real_fsync = os.fsync
+
+            def fsync_and_swap(descriptor):
+                nonlocal swapped
+                real_fsync(descriptor)
+                if not swapped and stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                    parent.rename(detached)
+                    self.write_installed(root, replacement)
+                    swapped = True
+
+            with patch(
+                "lib.connect_entitlement.os.fsync", side_effect=fsync_and_swap
+            ):
+                self.assert_activation_error(
+                    INSTALL_FAILED_CODE,
+                    lambda: install_entitlement(source, gate),
+                )
+
+            self.assertTrue(swapped)
+            self.assertEqual(gate.path.read_bytes(), replacement)
+            self.assertFalse((detached / ENTITLEMENT_FILE_NAME).exists())
 
     def test_cli_activation_commands_do_not_preflight_or_start_generation(self):
         stdout = io.StringIO()

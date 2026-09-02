@@ -168,7 +168,12 @@ def install_entitlement(
         temporary_name = None
         try:
             os.fsync(directory_fd)
-            status_document = entitlement_status(selected_gate)
+            status_document = _installed_entitlement_status(
+                directory_fd,
+                selected_gate.path.parent,
+                candidate,
+                selected_gate,
+            )
             if not status_document["active"]:
                 raise EntitlementActivationError(
                     INSTALL_FAILED_CODE,
@@ -279,14 +284,7 @@ def _open_private_directory(path: Path) -> int:
         )
     descriptor: int | None = None
     try:
-        created = False
-        try:
-            path.mkdir(mode=0o700, parents=True)
-            created = True
-        except FileExistsError:
-            pass
-        if created:
-            path.chmod(0o700)
+        _create_missing_private_directories(path)
         descriptor = os.open(
             path,
             os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY,
@@ -307,6 +305,35 @@ def _open_private_directory(path: Path) -> int:
             STORAGE_UNAVAILABLE_CODE,
             "The shared Connect entitlement directory is unavailable.",
         ) from exc
+
+
+def _create_missing_private_directories(path: Path) -> None:
+    missing: list[Path] = []
+    current = path
+    while True:
+        try:
+            current.lstat()
+            break
+        except FileNotFoundError:
+            parent = current.parent
+            if parent == current:
+                raise OSError(errno.ENOENT, "no existing directory ancestor")
+            missing.append(current)
+            current = parent
+
+    for directory in reversed(missing):
+        try:
+            directory.mkdir(mode=0o700)
+        except FileExistsError:
+            continue
+        directory.chmod(0o700)
+        metadata = directory.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o777 != 0o700
+        ):
+            raise OSError(errno.EACCES, "unsafe created entitlement directory")
 
 
 def _open_activation_lock(directory_fd: int) -> int:
@@ -408,6 +435,29 @@ def _read_existing_destination(directory_fd: int) -> bytes | None:
     finally:
         with suppress(OSError):
             os.close(descriptor)
+
+
+def _installed_entitlement_status(
+    directory_fd: int,
+    directory_path: Path,
+    candidate: bytes,
+    gate: EntitlementGate,
+) -> dict[str, Any]:
+    installed = _read_existing_destination(directory_fd)
+    if installed != candidate:
+        raise OSError(errno.EIO, "installed entitlement bytes mismatch")
+
+    opened = os.fstat(directory_fd)
+    visible = os.stat(directory_path, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(visible.st_mode)
+        or (opened.st_dev, opened.st_ino) != (visible.st_dev, visible.st_ino)
+    ):
+        raise OSError(errno.EIO, "entitlement directory path changed")
+
+    assert gate.keys is not None
+    decision = _evaluate_entitlement(installed, gate.keys, gate.now())
+    return {"state": decision.value, "active": decision.is_active}
 
 
 def _restore_previous_entitlement(
