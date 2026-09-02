@@ -2019,6 +2019,9 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn(COMPLETE_BUILD_BODY, html)
         request = next(call for call in client.calls if call[0] == "POST")
         user_content = request[2]["json"]["messages"][1]["content"]
+        request_prompt = "\n".join(
+            message["content"] for message in request[2]["json"]["messages"]
+        )
         self.assertIn(build.BUILD_RESPONSE_BOUNDARY_REMINDER, user_content)
         self.assertIn(
             '"business_name": "Test Business"',
@@ -2033,6 +2036,8 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("[SERVICE_1_NAME]", user_content)
         self.assertIn("[SERVICE_6_DESCRIPTION]", user_content)
         self.assertIn("SOURCE-GATED CLAIM ALLOWLIST (EXHAUSTIVE): []", user_content)
+        self.assertNotIn("Not a Franchise", request_prompt)
+        self.assertNotIn("Free Estimates", request_prompt)
         self.assertNotIn("BASE BODY TEMPLATE", user_content)
         self.assertNotIn("{{SITE_NAME}}", user_content)
         self.assertTrue(
@@ -2085,6 +2090,35 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("Locally Owned", verified_instruction)
         self.assertIn("Not a Franchise", verified_instruction)
         self.assertIn("Free Estimates", verified_instruction)
+
+    def test_build_prompt_filters_only_unverified_source_claim_examples(self):
+        catalog = (
+            "Locally Owned, Not a Franchise. Licensed & Insured. "
+            "Free Estimates. Same Day service. prospect.locally_owned"
+        )
+        unverified = {
+            "locally_owned": None,
+            "licensed_and_insured": None,
+            "same_day_service": None,
+            "service_promises": [],
+        }
+        filtered = build.filter_unverified_claim_examples(catalog, unverified)
+        for claim in ("Locally Owned", "Not a Franchise", "Licensed", "Insured", "Free Estimates", "Same Day"):
+            with self.subTest(claim=claim):
+                self.assertNotIn(claim, filtered)
+        self.assertIn("prospect.locally_owned", filtered)
+
+        partially_verified = {
+            **unverified,
+            "locally_owned": True,
+            "service_promises": ["We provide free estimates."],
+        }
+        filtered = build.filter_unverified_claim_examples(catalog, partially_verified)
+        self.assertIn("Locally Owned", filtered)
+        self.assertIn("Not a Franchise", filtered)
+        self.assertIn("Free Estimates", filtered)
+        self.assertNotIn("Licensed & Insured", filtered)
+        self.assertNotIn("Same Day", filtered)
 
     def test_build_generator_rejects_placeholder_from_static_industry_defaults(self):
         leaked_body = COMPLETE_BUILD_BODY.replace(
