@@ -193,6 +193,26 @@ no official issuer key and therefore fail closed; official keyring and license
 provisioning are tracked in issue #27. Test fixture keys must never be used as
 production authority.
 
+An official package exposes the app-local activation adapter without starting
+vLLM or the provider:
+
+```bash
+python connect_provider.py entitlement status
+python connect_provider.py entitlement install /path/to/entitlement-v1.json
+```
+
+`status` reports only the stable entitlement state and whether Connect is
+active. `install` admits only a currently active issuer-signed source, then
+serializes participating installers and atomically replaces the fixed shared
+license with its exact bytes. Unsafe sources, directories, lock files, or
+existing licenses fail closed and cannot be used to write another path.
+If durability or final verification fails after promotion, the prior license is
+restored (or the new candidate is removed when none existed).
+Activation becomes visible to every participating app on its next entitlement
+check; no provider restart is needed. A source checkout reports
+`authority_unavailable` until issue #27 supplies the official packaged public
+keyring, and it cannot install a production license.
+
 Only one process and one active generation job are allowed for that state.
 Identical caller-owned job IDs replay idempotently; conflicting reuse is
 rejected. An accepted job resumes after restart, while a job interrupted after
