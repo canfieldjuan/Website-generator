@@ -149,7 +149,7 @@ def install_entitlement(
         directory_fd = _open_private_directory(selected_gate.path.parent)
         lock_fd = _open_activation_lock(directory_fd)
         _acquire_activation_lock(lock_fd)
-        _validate_existing_destination(directory_fd)
+        previous = _read_existing_destination(directory_fd)
         _admit_candidate(candidate, selected_gate)
 
         temporary_name, temporary_fd = _open_activation_temporary(directory_fd)
@@ -166,13 +166,20 @@ def install_entitlement(
             dst_dir_fd=directory_fd,
         )
         temporary_name = None
-        os.fsync(directory_fd)
-        status_document = entitlement_status(selected_gate)
-        if not status_document["active"]:
+        try:
+            os.fsync(directory_fd)
+            status_document = entitlement_status(selected_gate)
+            if not status_document["active"]:
+                raise EntitlementActivationError(
+                    INSTALL_FAILED_CODE,
+                    "The installed Connect entitlement did not verify as active.",
+                )
+        except (EntitlementActivationError, OSError) as exc:
+            _restore_previous_entitlement(directory_fd, previous)
             raise EntitlementActivationError(
                 INSTALL_FAILED_CODE,
-                "The installed Connect entitlement did not verify as active.",
-            )
+                "The Connect entitlement could not be installed safely.",
+            ) from exc
     except EntitlementActivationError:
         raise
     except OSError as exc:
@@ -272,7 +279,14 @@ def _open_private_directory(path: Path) -> int:
         )
     descriptor: int | None = None
     try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        created = False
+        try:
+            path.mkdir(mode=0o700, parents=True)
+            created = True
+        except FileExistsError:
+            pass
+        if created:
+            path.chmod(0o700)
         descriptor = os.open(
             path,
             os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY,
@@ -281,7 +295,7 @@ def _open_private_directory(path: Path) -> int:
         if (
             not stat.S_ISDIR(metadata.st_mode)
             or metadata.st_uid != os.geteuid()
-            or metadata.st_mode & 0o077
+            or metadata.st_mode & 0o777 != 0o700
         ):
             raise OSError(errno.EACCES, "unsafe entitlement directory")
         return descriptor
@@ -298,16 +312,20 @@ def _open_private_directory(path: Path) -> int:
 def _open_activation_lock(directory_fd: int) -> int:
     descriptor: int | None = None
     try:
-        descriptor = os.open(
-            ENTITLEMENT_LOCK_NAME,
-            os.O_RDWR
-            | os.O_CREAT
-            | os.O_CLOEXEC
-            | os.O_NOFOLLOW
-            | os.O_NONBLOCK,
-            0o600,
-            dir_fd=directory_fd,
-        )
+        flags = os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        try:
+            descriptor = os.open(
+                ENTITLEMENT_LOCK_NAME,
+                flags | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=directory_fd,
+            )
+        except FileExistsError:
+            descriptor = os.open(
+                ENTITLEMENT_LOCK_NAME,
+                flags,
+                dir_fd=directory_fd,
+            )
         metadata = os.fstat(descriptor)
         if (
             not stat.S_ISREG(metadata.st_mode)
@@ -315,6 +333,9 @@ def _open_activation_lock(directory_fd: int) -> int:
             or metadata.st_mode & 0o077
         ):
             raise OSError(errno.EACCES, "unsafe entitlement lock")
+        os.fchmod(descriptor, 0o600)
+        if os.fstat(descriptor).st_mode & 0o777 != 0o600:
+            raise OSError(errno.EACCES, "entitlement lock mode mismatch")
         return descriptor
     except OSError as exc:
         if descriptor is not None:
@@ -346,28 +367,89 @@ def _acquire_activation_lock(descriptor: int) -> None:
         ) from exc
 
 
-def _validate_existing_destination(directory_fd: int) -> None:
+def _read_existing_destination(directory_fd: int) -> bytes | None:
+    descriptor: int | None = None
     try:
-        metadata = os.stat(
-            ENTITLEMENT_FILE_NAME, dir_fd=directory_fd, follow_symlinks=False
+        descriptor = os.open(
+            ENTITLEMENT_FILE_NAME,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=directory_fd,
         )
     except FileNotFoundError:
-        return
+        return None
     except OSError as exc:
         raise EntitlementActivationError(
             STORAGE_UNAVAILABLE_CODE,
-            "The existing Connect entitlement cannot be inspected safely.",
+            "The existing Connect entitlement cannot be opened safely.",
         ) from exc
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or metadata.st_uid != os.geteuid()
-        or metadata.st_mode & 0o077
-        or not 0 < metadata.st_size <= MAX_ENTITLEMENT_BYTES
-    ):
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or before.st_mode & 0o077
+            or not 0 < before.st_size <= MAX_ENTITLEMENT_BYTES
+        ):
+            raise OSError(errno.EACCES, "unsafe existing entitlement")
+        content = _read_bounded(descriptor, MAX_ENTITLEMENT_BYTES)
+        after = os.fstat(descriptor)
+        if (
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+            or len(content) != before.st_size
+        ):
+            raise OSError(errno.EINVAL, "existing entitlement changed")
+        return content
+    except OSError as exc:
         raise EntitlementActivationError(
             STORAGE_UNAVAILABLE_CODE,
             "The existing Connect entitlement is not an owner-private regular file.",
-        )
+        ) from exc
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
+
+
+def _restore_previous_entitlement(
+    directory_fd: int, previous: bytes | None
+) -> None:
+    try:
+        if previous is None:
+            try:
+                os.unlink(ENTITLEMENT_FILE_NAME, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+            os.fsync(directory_fd)
+            if _read_existing_destination(directory_fd) is not None:
+                raise OSError(errno.EIO, "candidate removal failed")
+            return
+
+        temporary_name, temporary_fd = _open_activation_temporary(directory_fd)
+        try:
+            try:
+                _write_all(temporary_fd, previous)
+                os.fsync(temporary_fd)
+            finally:
+                os.close(temporary_fd)
+            os.replace(
+                temporary_name,
+                ENTITLEMENT_FILE_NAME,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+            temporary_name = ""
+            os.fsync(directory_fd)
+        finally:
+            if temporary_name:
+                with suppress(OSError):
+                    os.unlink(temporary_name, dir_fd=directory_fd)
+        if _read_existing_destination(directory_fd) != previous:
+            raise OSError(errno.EIO, "entitlement restoration mismatch")
+    except (EntitlementActivationError, OSError) as exc:
+        raise EntitlementActivationError(
+            INSTALL_FAILED_CODE,
+            "The prior Connect entitlement could not be restored safely.",
+        ) from exc
 
 
 def _open_activation_temporary(directory_fd: int) -> tuple[str, int]:

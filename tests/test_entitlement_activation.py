@@ -115,6 +115,25 @@ class EntitlementActivationTests(unittest.TestCase):
                 client.close()
                 runtime.close()
 
+    def test_installer_sets_exact_private_modes_under_restrictive_umask(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gate = self.gate(root)
+            source = self.source(root)
+            prior_umask = os.umask(0o777)
+            try:
+                install_entitlement(source, gate)
+            finally:
+                os.umask(prior_umask)
+
+            assert gate.path is not None
+            self.assertEqual(gate.path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(gate.path.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(
+                (gate.path.parent / ENTITLEMENT_LOCK_NAME).stat().st_mode & 0o777,
+                0o600,
+            )
+
     def test_invalid_and_inactive_sources_preserve_existing_entitlement(self):
         cases = (
             ("invalid/bad-signature.json", SOURCE_INVALID_CODE),
@@ -274,22 +293,27 @@ class EntitlementActivationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = self.source(root)
-            expected = source.read_bytes()
             gate = self.gate(root)
             with patch(
                 "lib.connect_entitlement.os.fsync",
-                side_effect=(None, OSError("simulated directory sync failure")),
+                side_effect=(
+                    None,
+                    OSError("simulated directory sync failure"),
+                    None,
+                ),
             ):
                 self.assert_activation_error(
-                    STORAGE_UNAVAILABLE_CODE,
+                    INSTALL_FAILED_CODE,
                     lambda: install_entitlement(source, gate),
                 )
             assert gate.path is not None
-            self.assertEqual(gate.path.read_bytes(), expected)
+            self.assertFalse(gate.path.exists())
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = self.source(root)
+            prior = b"prior-entitlement"
+            destination = self.write_installed(root, prior)
             base_gate = self.gate(root)
             clock = Mock(
                 side_effect=(
@@ -307,8 +331,7 @@ class EntitlementActivationTests(unittest.TestCase):
                 INSTALL_FAILED_CODE,
                 lambda: install_entitlement(source, gate),
             )
-            assert gate.path is not None
-            self.assertTrue(gate.path.exists())
+            self.assertEqual(destination.read_bytes(), prior)
             self.assertEqual(clock.call_count, 3)
 
     def test_cli_activation_commands_do_not_preflight_or_start_generation(self):

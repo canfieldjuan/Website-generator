@@ -27,9 +27,10 @@ part of the installer would leave an unproved or unusable activation path.
    destination directory and existing lock/license as owner-private regular
    filesystem objects, re-evaluate at commit time, and replace the fixed shared
    path using a synced same-directory temporary file and atomic rename.
-4. Preserve the prior entitlement byte-for-byte on pre-replacement failures;
-   return stable ADR-0004 errors and never report success after durability or
-   installed-verification failures.
+4. Preserve the prior entitlement byte-for-byte on pre-replacement failures,
+   and restore it (or remove a newly promoted candidate) when durability or
+   installed-verification fails after replacement. Return stable ADR-0004
+   errors and never report activation success for those failures.
 5. Route status/install through the trusted local CLI before generation
    preflight so neither command needs vLLM or starts the provider.
 6. Add boundary tests and operator documentation.
@@ -51,7 +52,9 @@ acquiring `$XDG_CONFIG_HOME/local-connect/.entitlement-v1.lock`. All destination
 operations use an opened owner-private directory descriptor. The exact source
 bytes go to an exclusive `0600` temporary file, are flushed and synced, replace
 only `entitlement-v1.json`, and are followed by a directory sync and installed
-status check while the lock remains held.
+status check while the lock remains held. The installer snapshots an existing
+license before promotion and restores that snapshot—or removes the candidate
+when no license existed—if a post-promotion check fails.
 
 `python connect_provider.py entitlement status` emits the privacy-bounded state
 document. `python connect_provider.py entitlement install PATH` emits that same
@@ -85,9 +88,11 @@ before runtime-directory resolution and local-model preflight.
 ## Verification
 
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest tests.test_entitlement_activation tests.test_connect_provider.EntitlementTests`
-  - 16 tests passed after the final installer resource-ordering change.
+  - 17 tests passed after rollback and restrictive-umask alignment with the
+    ecosystem reference implementation.
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests -v`
-  - 220 tests passed at the committed implementation head.
+  - 220 tests passed before the post-promotion rollback alignment; GitHub's
+    required unit check reruns the complete suite at the published head.
 - `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m compileall -q build.py pipeline.py connect_provider.py lib tests`
   - Passed.
 - `bash scripts/local_pr_review.sh`
@@ -95,6 +100,13 @@ before runtime-directory resolution and local-model preflight.
 - `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python connect_provider.py entitlement status`
   - Returned `{"active":false,"state":"authority_unavailable"}` without model
     preflight, accurately reflecting the source build.
+- `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python build.py examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft --skip-deploy`
+  - The pinned local Qwen fixture completed after its one bounded correction;
+    no image, email, or deployment effect ran.
+- Both required `grep` fabrication/placeholder scans returned `0` against
+  `outputs/builds/drees-plumbing-inc/index.html`.
+- vLLM was stopped after the fixture; the 3090 reported 460 MiB in use and the
+  compute-process query returned no entries.
 
 ## Estimated diff size
 

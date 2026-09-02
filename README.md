@@ -206,6 +206,8 @@ active. `install` admits only a currently active issuer-signed source, then
 serializes participating installers and atomically replaces the fixed shared
 license with its exact bytes. Unsafe sources, directories, lock files, or
 existing licenses fail closed and cannot be used to write another path.
+If durability or final verification fails after promotion, the prior license is
+restored (or the new candidate is removed when none existed).
 Activation becomes visible to every participating app on its next entitlement
 check; no provider restart is needed. A source checkout reports
 `authority_unavailable` until issue #27 supplies the official packaged public
