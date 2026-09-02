@@ -2493,6 +2493,22 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(ordinary_testimonial)),
             )
 
+        for opening_quote, closing_quote in (("‘", "’"), ("'", "'")):
+            with self.subTest(quote=(opening_quote, closing_quote)):
+                single_quoted_testimonial = ordinary_testimonial.replace(
+                    "“They were fantastic.”",
+                    f"{opening_quote}They were fantastic.{closing_quote}",
+                )
+                with self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "unstructured testimonial",
+                ):
+                    build.generate_build_html(
+                        prospect,
+                        config(),
+                        FakeLocalClient(local_chat_payload(single_quoted_testimonial)),
+                    )
+
         attributed_testimonial = ordinary_testimonial.replace(
             "“They were fantastic.”",
             "They were fantastic.",
@@ -3120,6 +3136,28 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(invented_email)),
             )
 
+        inline_split_email = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            "<span>invented@</span><span>example.com</span></nav>",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "no verified business email"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(inline_split_email)),
+            )
+
+        block_separated_fragments = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            "<p>invented@</p><p>example.com</p></nav>",
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(block_separated_fragments)),
+        )
+        self.assertIn("<p>invented@</p><p>example.com</p>", html)
+
         prospect["owner_email"] = "owner@realbusiness.test"
         verified_email = COMPLETE_BUILD_BODY.replace(
             "</nav>",
@@ -3132,6 +3170,39 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(verified_email)),
         )
         self.assertIn("mailto:owner@realbusiness.test", html)
+
+        split_verified_email = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            "<p><span>owner@</span><span>realbusiness.test</span></p></nav>",
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(split_verified_email)),
+        )
+        self.assertIn("<span>owner@</span><span>realbusiness.test</span>", html)
+
+        prefixed_verified_email = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            "<p><span>invented</span><span>owner@realbusiness.test</span></p></nav>",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unexpected business email"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(prefixed_verified_email)),
+            )
+
+        split_wrong_email = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            "<p><span>invented@</span><span>example.com</span></p></nav>",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "unexpected business email"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(split_wrong_email)),
+            )
 
         wrong_email = verified_email.replace(
             "owner@realbusiness.test",

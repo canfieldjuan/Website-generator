@@ -57,8 +57,10 @@ PHONE_LIKE_PATTERN = re.compile(
     r"(?<!\d)(?:\+?1[\s()./-]*)?\(?[2-9]\d{2}\)?[\s./-]*"
     r"[2-9]\d{2}[\s./-]*\d{4}(?!\d)"
 )
-PHONE_TEXT_BOUNDARY_TAGS = frozenset(
+DOM_ADJACENCY_BOUNDARY = ":"
+DOM_ADJACENCY_BOUNDARY_TAGS = frozenset(
     {
+        "a",
         "address",
         "article",
         "aside",
@@ -131,11 +133,11 @@ REVIEW_ROOT_CLASSES = frozenset(
     ("review-card", "reviews-aggregate", "reviews-summary-row")
 )
 QUOTED_PROSE_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])[\"“]\s*\S(?:.{1,500}?\S)?\s*[\"”]",
+    r"(?<![A-Za-z0-9])[\"“'‘’]\s*\S(?:.{1,500}?\S)?\s*[\"”'‘’]",
     re.DOTALL,
 )
 ATTRIBUTED_PROSE_PATTERN = re.compile(
-    r"[.!?][\"”]?\s*[—–]\s*[A-Z][A-Za-z'.’\-]+"
+    r"[.!?][\"”'‘’]?\s*[—–]\s*[A-Z][A-Za-z'.’\-]+"
     r"(?:\s+(?:[A-Z][A-Za-z'.’\-]+|[A-Z]\.)){0,3}\b"
 )
 TRUSTED_IMAGE_ERROR_HANDLER = "this.style.display='none'"
@@ -987,9 +989,9 @@ def _claim_exposure_texts(
             return
         if is_render_suppressed(node):
             return
-        has_phone_boundary = node.name.casefold() in PHONE_TEXT_BOUNDARY_TAGS
-        if has_phone_boundary:
-            phone_visual_parts.append("|")
+        has_text_boundary = node.name.casefold() in DOM_ADJACENCY_BOUNDARY_TAGS
+        if has_text_boundary:
+            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
         tooltip = tooltip_text(node)
         if tooltip:
             visual_parts.append(tooltip)
@@ -999,8 +1001,8 @@ def _claim_exposure_texts(
             phone_visual_parts.append(replacement)
         for child in node.children:
             visit_visual(child)
-        if has_phone_boundary:
-            phone_visual_parts.append("|")
+        if has_text_boundary:
+            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
 
     def resolve_references(
         node: Tag,
@@ -1788,7 +1790,7 @@ def validate_generated_body(
                 "Generated body contains an alternate unverified contact form action."
             )
 
-    exposure_surfaces, dom_adjacent_phone_surface = _claim_exposure_texts(body_root)
+    exposure_surfaces, dom_adjacent_visual_surface = _claim_exposure_texts(body_root)
     claim_surfaces = (
         *exposure_surfaces,
         *parser.decoded_attribute_values,
@@ -1820,12 +1822,12 @@ def validate_generated_body(
                     "Expected business email must be one complete email address."
                 )
 
-        exposed_emails: set[str] = set()
         email_surfaces = (
-            *parser.visible_text_parts,
+            dom_adjacent_visual_surface,
             *parser.decoded_attribute_values,
             *(unquote(value) for value in parser.decoded_attribute_values),
         )
+        exposed_emails: set[str] = set()
         for surface in email_surfaces:
             exposed_emails.update(_email_like_values(surface))
         mailto_targets = []
@@ -1854,7 +1856,7 @@ def validate_generated_body(
 
     if expected_phone is not _EXPECTED_PHONE_UNSET:
         exposed_phone_digits: set[str] = set()
-        for surface in (*exposure_surfaces, dom_adjacent_phone_surface):
+        for surface in (*exposure_surfaces, dom_adjacent_visual_surface):
             exposed_phone_digits.update(_phone_like_digit_values(surface))
         actionable_phone_digits: set[str] = set()
         tel_targets = []
