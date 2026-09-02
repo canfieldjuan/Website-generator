@@ -409,7 +409,7 @@ as any other invalid token.
 
 ## Final diff size
 
-Measured against the current provider base: 13 files changed, with 3,828
+Measured against the current provider base: 13 files changed, with 3,851
 insertions and 55 deletions across the durable provider and its contract,
 concurrency, and restart boundary suite. Removing those tests or persistence
 boundaries would make the advertised asynchronous capability unproved.
