@@ -445,6 +445,153 @@ as any other invalid token.
   does not satisfy issue #27's separate official issuer-key and production
   entitlement provisioning requirement.
 
+  The runtime was started with the exact command below after placing the Qwen
+  adapter checkout at its pinned commit:
+
+  ```bash
+  VLLM_BIN=/media/juan-canfield/Dev-Drive/vllm-runtime/bin/vllm \
+  VLLM_MODEL_PATH=/media/juan-canfield/Dev-Drive/vllm-models/Qwen3.8-27B-lmstudio-text/Qwen3.8-27B-Q4_K_M.gguf \
+  VLLM_TOKENIZER_PATH=/media/juan-canfield/Dev-Drive/vllm-tokenizers/Qwen3.8-27B \
+  VLLM_GGUF_PLUGIN_PATH=/media/juan-canfield/Dev-Drive/vllm-gguf-plugin-qwen38 \
+  VLLM_GPU_MEMORY_UTILIZATION=0.88 \
+  scripts/start_vllm_server.sh
+  ```
+
+  In a second shell, this exact harness created the isolated store and active
+  test gate, submitted and polled the real HTTP job, decoded the returned
+  artifact, and enforced the result checks reported above:
+
+  ```bash
+  LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8000/v1 \
+  GENERATION_TIMEOUT_SECONDS=7200 \
+  /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python - <<'PY'
+  import base64
+  import hashlib
+  import json
+  import re
+  import tempfile
+  import time
+  import uuid
+  from pathlib import Path
+
+  from fastapi.testclient import TestClient
+
+  from lib.connect_entitlement import EntitlementDecision
+  from lib.connect_store import ConnectStore, canonical_json
+  from lib.connect_v2 import (
+      CAPABILITY_ID,
+      CAPABILITY_VERSION,
+      ProviderRuntime,
+      create_app,
+  )
+
+  class ActiveAcceptanceGate:
+      def decision(self):
+          return EntitlementDecision.ACTIVE
+
+  data = Path("examples/prospect-plumber-template.json").read_bytes()
+  job_id = str(uuid.uuid4())
+  request_document = {
+      "protocol_version": 2,
+      "job_id": job_id,
+      "capability": {"id": CAPABILITY_ID, "version": CAPABILITY_VERSION},
+      "inputs": [{
+          "artifact_id": str(uuid.uuid4()),
+          "media_type": "application/json",
+          "byte_size": len(data),
+          "sha256": hashlib.sha256(data).hexdigest(),
+          "display_name": "prospect-plumber-template.json",
+          "source_app_id": "website-generator-acceptance",
+      }],
+      "parameters": {},
+  }
+  token = "A" * 64
+  with tempfile.TemporaryDirectory(
+      prefix="website-connect-acceptance-"
+  ) as directory:
+      runtime = ProviderRuntime(
+          ConnectStore(Path(directory) / "connect.sqlite3")
+      )
+      try:
+          with TestClient(
+              create_app(runtime, token, ActiveAcceptanceGate())
+          ) as client:
+              response = client.post(
+                  "/v2/jobs",
+                  headers={"Authorization": f"Bearer {token}"},
+                  files=[
+                      (
+                          "request",
+                          (
+                              None,
+                              canonical_json(request_document),
+                              "application/json",
+                          ),
+                      ),
+                      (
+                          "artifact",
+                          ("prospect.json", data, "application/json"),
+                      ),
+                  ],
+              )
+              print(f"submit_http_status={response.status_code}")
+              assert response.status_code == 202, response.text
+              deadline = time.monotonic() + 3600
+              while time.monotonic() < deadline:
+                  status_response = client.get(
+                      f"/v2/jobs/{job_id}",
+                      headers={"Authorization": f"Bearer {token}"},
+                  )
+                  assert status_response.status_code == 200, status_response.text
+                  terminal = status_response.json()
+                  if terminal["status"] in {"completed", "failed"}:
+                      break
+                  time.sleep(2)
+              else:
+                  raise AssertionError("Connect job did not finish within 3600s")
+
+              print(f"terminal_status={terminal['status']}")
+              assert terminal["status"] == "completed", json.dumps(
+                  terminal.get("error"), sort_keys=True
+              )
+              output = terminal["result"]["outputs"][0]
+              output_bytes = base64.b64decode(
+                  output["payload_base64"], validate=True
+              )
+              actual_sha256 = hashlib.sha256(output_bytes).hexdigest()
+              placeholder_matches = len(re.findall(
+                  rb"\[TRUST_TRAILER\]|\[SERVICE_PROMISE\]|\[TRADE_DISPLAY\]|"
+                  rb"\[CITY\]|\[YEARS\]|\[SERVICE_AREA\]",
+                  output_bytes,
+              ))
+              fabricated_matches = len(re.findall(
+                  rb"Upfront Flat-Rate|Surprise Fees|Free Estimates|Owner Answers",
+                  output_bytes,
+                  re.IGNORECASE,
+              ))
+              print(f"output_display_name={output['display_name']}")
+              print(f"output_byte_size={len(output_bytes)}")
+              print(f"output_sha256={actual_sha256}")
+              print(
+                  f"response_sha256_matches="
+                  f"{actual_sha256 == output['sha256']}"
+              )
+              print(
+                  f"doctype_present="
+                  f"{output_bytes.lstrip().lower().startswith(b'<!doctype html>')}"
+              )
+              print(f"placeholder_matches={placeholder_matches}")
+              print(f"fabricated_claim_matches={fabricated_matches}")
+              assert actual_sha256 == output["sha256"]
+              assert len(output_bytes) == output["byte_size"]
+              assert output_bytes.lstrip().lower().startswith(b"<!doctype html>")
+              assert placeholder_matches == 0
+              assert fabricated_matches == 0
+      finally:
+          runtime.close()
+  PY
+  ```
+
 ## Final diff size
 
 Measured against the current provider base: 13 files changed, with 3,870
