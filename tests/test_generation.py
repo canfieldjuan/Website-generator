@@ -11,6 +11,7 @@ import build
 import pipeline
 import lib.clients
 from lib.generation import (
+    ActionUrlAdmissionContract,
     DEFAULT_DOCUMENT_ACCENT,
     DEFAULT_DOCUMENT_SECONDARY,
     DEFAULT_LOCAL_BASE_URL,
@@ -60,7 +61,7 @@ COMPLETE_HTML = """<!DOCTYPE html>
 <body><main>Ready</main></body></html>"""
 COMPLETE_BODY = '<body class="theme-light"><main>Ready</main></body>'
 COMPLETE_PAGE_BODY = (
-    '<body class="theme-light"><main>Ready</main>'
+    '<body class="theme-light"><span>Current Business</span><main>Ready</main>'
     '<footer class="site-footer"><div class="footer-grid"></div>'
     '<div class="footer-bottom"><p>Copyright</p></div></footer></body>'
 )
@@ -1536,6 +1537,72 @@ class BodyAssemblyTests(unittest.TestCase):
             'aria-label="Request service">Request service</a></body>'
         )
         self.assertEqual(validate_generated_body(body_result(valid_body)), valid_body)
+
+    def test_body_action_destinations_are_source_owned(self):
+        contract = ActionUrlAdmissionContract(
+            allowed_urls=(
+                "https://source.test/book",
+                "https://source.test/form",
+            ),
+            phones=("217-555-0100",),
+            emails=("office@source.test",),
+        )
+        valid_body = (
+            '<body><a href="#contact">Contact</a>'
+            '<a href="https://source.test/book">Book</a>'
+            '<a href="tel:2175550100">Call</a>'
+            '<a href="sms:2175550100?body=Hello">Text</a>'
+            '<a href="mailto:office@source.test?subject=Hello">Email</a>'
+            '<form action="https://source.test/form">'
+            '<button formaction="https://source.test/form">Send</button>'
+            "</form></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(valid_body),
+                expected_action_urls=contract,
+            ),
+            valid_body,
+        )
+        no_action_body = "<body><main>No actions</main></body>"
+        self.assertEqual(
+            validate_generated_body(
+                body_result(no_action_body),
+                expected_action_urls=ActionUrlAdmissionContract(),
+            ),
+            no_action_body,
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "empty actionable destination",
+        ):
+            validate_generated_body(
+                body_result('<body><a href="">Empty</a></body>'),
+                expected_action_urls=ActionUrlAdmissionContract(),
+            )
+
+        invalid_destinations = (
+            '<a href="https://calendly.com/wrong">Book</a>',
+            '<area href="//unrelated.test/path">',
+            '<a xlink:href="https://unrelated.test/path">Open</a>',
+            '<form action="https://unrelated.test/form"></form>',
+            '<button formaction="https://unrelated.test/form">Send</button>',
+            '<a href="tel:2175550199">Call</a>',
+            '<a href="mailto:wrong@source.test">Email</a>',
+        )
+        for invalid in invalid_destinations:
+            mixed_body = (
+                '<body><a href="https://source.test/book">Book</a>'
+                f"{invalid}</body>"
+            )
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "outside source-owned destinations",
+            ):
+                validate_generated_body(
+                    body_result(mixed_body),
+                    expected_action_urls=contract,
+                )
 
     def test_body_admission_restricts_inline_styles_to_declared_properties(self):
         hiding_styles = (
@@ -3648,7 +3715,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             ("same_day_service", True, "Same-day replacement available"),
             ("same_day_service", True, "Same-day repair"),
             ("epa_certified", True, "EPA-Certified Technicians"),
-            ("master_electrician_license", "IL-123", "Master Electrician"),
+            (
+                "master_electrician_license",
+                "IL-123",
+                "Master Electrician licensed, #IL-123",
+            ),
             ("ibew_local_number", "176", "IBEW Local 176 Member"),
         )
         base_prospect = {
@@ -3682,6 +3753,80 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(claim_body)),
             )
             self.assertIn(claim, html)
+
+    def test_build_generator_binds_master_electrician_license_value(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "electrician",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "master_electrician_license": "IL-123",
+        }
+
+        def with_claim(claim):
+            return COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero">{claim}</section>',
+            )
+
+        invalid_claims = (
+            "Master Electrician",
+            "Master Electrician licensed, #IL-999",
+            "Master Licensed, #IL-999",
+            "Master-Licensed, #IL-999",
+            '<span title="Master Electrician licensed, #IL-999">'
+            "Master Electrician licensed, #IL-123</span>",
+        )
+        for claim in invalid_claims:
+            with self.subTest(claim=claim), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "verified Master electrician license",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(with_claim(claim))),
+                )
+
+        for exact_claim in (
+            "Master Electrician licensed, #IL-123",
+            "Master Licensed, #IL-123",
+            "Master-Licensed, #IL-123",
+            "Master <span>Electrician licensed, #IL-123</span>",
+        ):
+            with self.subTest(exact_claim=exact_claim):
+                html = build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(with_claim(exact_claim))),
+                )
+                self.assertIn(exact_claim, html)
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "unsupported prospect claims",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(with_claim("Insured"))),
+            )
+
+        for empty_license in ("", "#", " ## "):
+            with self.subTest(empty_license=empty_license), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "unsupported prospect claims",
+            ):
+                build.generate_build_html(
+                    {**prospect, "master_electrician_license": empty_license},
+                    config(),
+                    FakeLocalClient(
+                        local_chat_payload(
+                            with_claim("Master Electrician licensed, #IL-123")
+                        )
+                    ),
+                )
 
     def test_build_generator_binds_footer_address_to_source(self):
         prospect = {
@@ -3793,6 +3938,8 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         unsupported_claims = (
             ("Serving since 1999", "establishment year"),
             ("20 years of plumbing service", "years in business"),
+            ("50 years experience", "years in business"),
+            ("Serving families for 50 years", "years in business"),
             ("Serving local families for decades", "generic tenure"),
         )
         for claim, message in unsupported_claims:
@@ -3841,6 +3988,20 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(exact_years)),
         )
         self.assertIn("12 years of plumbing service", html)
+
+        for exact_bare_claim in (
+            "12 years experience",
+            "Serving families for 12 years",
+        ):
+            with self.subTest(exact_bare_claim=exact_bare_claim):
+                html = build.generate_build_html(
+                    years_prospect,
+                    config(),
+                    FakeLocalClient(
+                        local_chat_payload(with_claim(exact_bare_claim))
+                    ),
+                )
+                self.assertIn(exact_bare_claim, html)
 
         wrong_attribute = with_claim(
             '<span title="Serving since 1999">Serving since 2011</span>'
@@ -4091,9 +4252,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 "service_promises": [],
             }
         )
+        allowlist_instruction = instruction.split(" EXACT SOURCE CLAIMS:", 1)[0]
 
-        self.assertIn('"IBEW Local 176"', instruction)
-        self.assertNotIn('"IBEW"', instruction)
+        self.assertIn('"IBEW Local 176"', allowlist_instruction)
+        self.assertNotIn('"IBEW"', allowlist_instruction)
+        self.assertIn('["IBEW", "IBEW Local 176"]', instruction)
 
     def test_build_generator_requires_exact_contact_form_action(self):
         prospect = {
@@ -4185,6 +4348,32 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY)),
         )
         self.assertIn('action="#"', html)
+
+    def test_build_generator_rejects_unsourced_action_destinations(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+        for destination in (
+            "https://calendly.com/unrelated-account",
+            "/invented-booking-path",
+        ):
+            body = COMPLETE_BUILD_BODY.replace(
+                "</nav>",
+                f'<a href="{destination}">Book online</a></nav>',
+            )
+            with self.subTest(destination=destination), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "outside source-owned destinations",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
 
     def test_build_generator_binds_every_business_email_to_source(self):
         prospect = {
@@ -4310,6 +4499,72 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("WEBSITE REDESIGN MOCKUP", html)
         self.assertIn('class="site-footer"', html)
         self.assertIn('<body class="theme-dark">', html)
+
+    def test_redesign_generators_bind_identity_and_action_destinations(self):
+        source_url = "https://current.test/book"
+        site_json = {
+            "site": {"name": "Current Business"},
+            "cta": {"label": "Book", "url": source_url},
+        }
+
+        def generators(body):
+            return (
+                lambda: pipeline.generate_redesign(
+                    site_json,
+                    theme="minimal",
+                    generation_config=config(),
+                    generation_client=FakeLocalClient(local_chat_payload(body)),
+                ),
+                lambda: pipeline.generate_interior_page(
+                    site_json,
+                    "contact",
+                    theme="warm",
+                    generation_config=config(),
+                    generation_client=FakeLocalClient(local_chat_payload(body)),
+                ),
+            )
+
+        exact_body = COMPLETE_PAGE_BODY.replace(
+            "</main>",
+            f'<a href="{source_url}">Book</a><a href="#contact">Contact</a></main>',
+        )
+        for generator in generators(exact_body):
+            html = generator()
+            self.assertIn(f'href="{source_url}"', html)
+
+        wrong_identity = COMPLETE_PAGE_BODY.replace(
+            "Current Business",
+            "Invented Business",
+        )
+        for generator in generators(wrong_identity):
+            with self.assertRaisesRegex(GeneratedBodyError, "site_name"):
+                generator()
+
+        wrong_destination = exact_body.replace(
+            source_url,
+            "https://calendly.com/unrelated-account",
+        )
+        for generator in generators(wrong_destination):
+            with self.assertRaisesRegex(
+                GeneratedBodyError,
+                "outside source-owned destinations",
+            ):
+                generator()
+
+        fetched_source_url = "https://current.test/source-only-action"
+        fetched_body = COMPLETE_PAGE_BODY.replace(
+            "</main>",
+            f'<a href="{fetched_source_url}">Source action</a></main>',
+        )
+        html = pipeline.generate_interior_page(
+            {"site": {"name": "Current Business"}},
+            "contact",
+            source_content=f'<a href="{fetched_source_url}">Original</a>',
+            theme="warm",
+            generation_config=config(),
+            generation_client=FakeLocalClient(local_chat_payload(fetched_body)),
+        )
+        self.assertIn(f'href="{fetched_source_url}"', html)
 
     def test_contact_fallback_only_handles_source_fetch_failures(self):
         page = {

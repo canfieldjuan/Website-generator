@@ -218,6 +218,11 @@ NUMERIC_TENURE_CLAIM_PATTERNS = (
         r"(?<!\w)(?P<years>\d{1,3})\s*\+\s*years?\b",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"(?<!\w)(?P<years>\d{1,3})\s*\+?\s+years?\s+"
+        r"(?:experience|service)\b",
+        re.IGNORECASE,
+    ),
 )
 GENERIC_TENURE_CLAIM_PATTERN = re.compile(
     r"(?<!\w)(?:for\s+(?:many\s+)?(?:years|decades|generations?)|"
@@ -257,6 +262,7 @@ _EXPECTED_REVIEWS_UNSET = object()
 _SOURCE_CONTACT_UNSET = object()
 _EXPECTED_LOCATION_UNSET = object()
 _EXPECTED_IMAGES_UNSET = object()
+_EXPECTED_ACTION_URLS_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -365,6 +371,13 @@ class SourceContactAdmissionContract:
 
 
 @dataclass(frozen=True)
+class ActionUrlAdmissionContract:
+    allowed_urls: tuple[str, ...] = ()
+    phones: tuple[str, ...] = ()
+    emails: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class LocationAdmissionContract:
     city: str
     state: str
@@ -376,6 +389,24 @@ class LocationAdmissionContract:
 class ImageAdmissionContract:
     allowed_urls: tuple[str, ...] = ()
     nav_logo_url: str | None = None
+
+
+def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str:
+    if not isinstance(contract, ActionUrlAdmissionContract):
+        raise GeneratedBodyError("Action URL admission contract is invalid.")
+    allowed_urls = _contract_text_values(contract.allowed_urls, "Action URL")
+    phones = _contract_text_values(contract.phones, "Action phone")
+    emails = _contract_text_values(contract.emails, "Action email")
+    return (
+        "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
+        "are allowed. Every other generated anchor, form action, or submit "
+        "override must copy one exact source URL from "
+        f"{json.dumps(allowed_urls, ensure_ascii=False)}, use a `tel:` or `sms:` "
+        f"target matching one of {json.dumps(phones, ensure_ascii=False)}, or use "
+        "a `mailto:` target matching one of "
+        f"{json.dumps(emails, ensure_ascii=False)}. Do not invent, shorten, or "
+        "substitute a booking, social, navigation, or form destination."
+    )
 
 
 def image_contract_instruction(contract: ImageAdmissionContract) -> str:
@@ -1935,6 +1966,69 @@ def _contract_text_values(values: object, label: str) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _validate_action_urls(
+    body_root: Tag,
+    contract: ActionUrlAdmissionContract,
+) -> None:
+    if not isinstance(contract, ActionUrlAdmissionContract):
+        raise GeneratedBodyError("Action URL admission contract is invalid.")
+    allowed_urls = set(_contract_text_values(contract.allowed_urls, "Action URL"))
+    allowed_phone_digits: set[str] = set()
+    for phone in _contract_text_values(contract.phones, "Action phone"):
+        phone_values = _phone_like_digit_values(phone)
+        if len(phone_values) != 1:
+            raise GeneratedBodyError("Action phone contract contains an invalid phone.")
+        allowed_phone_digits.update(phone_values)
+    allowed_emails: set[str] = set()
+    for email in _contract_text_values(contract.emails, "Action email"):
+        canonical = _canonical_email_value(email)
+        if canonical is None:
+            raise GeneratedBodyError("Action email contract contains an invalid email.")
+        allowed_emails.add(canonical)
+
+    action_values: list[str] = []
+    for element in (body_root, *body_root.find_all(True)):
+        tag_name = element.name.casefold()
+        if tag_name in {"a", "area"}:
+            attributes = ("href", "xlink:href")
+        elif tag_name == "form":
+            attributes = ("action",)
+        elif tag_name in {"button", "input"}:
+            attributes = ("formaction",)
+        else:
+            continue
+        action_values.extend(
+            value
+            for attribute in attributes
+            if isinstance((value := element.get(attribute)), str)
+        )
+
+    for raw_value in action_values:
+        candidate = raw_value.strip()
+        if not candidate:
+            raise GeneratedBodyError(
+                "Generated body contains an empty actionable destination."
+            )
+        if candidate.startswith("#") or candidate in allowed_urls:
+            continue
+        scheme, separator, target = candidate.partition(":")
+        if not separator:
+            raise GeneratedBodyError(
+                "Generated body contains an action URL outside source-owned destinations."
+            )
+        if scheme.casefold() in {"tel", "sms"}:
+            phone_digits = _canonical_phone_digits(target.split("?", 1)[0])
+            if phone_digits and phone_digits in allowed_phone_digits:
+                continue
+        elif scheme.casefold() == "mailto":
+            mailbox = _canonical_email_value(target.split("?", 1)[0])
+            if mailbox is not None and mailbox in allowed_emails:
+                continue
+        raise GeneratedBodyError(
+            "Generated body contains an action URL outside source-owned destinations."
+        )
+
+
 def _validate_source_contacts(
     body_root: Tag,
     parser: _GeneratedBodyParser,
@@ -2237,6 +2331,7 @@ def validate_generated_body(
     expected_location: object = _EXPECTED_LOCATION_UNSET,
     expected_images: object = _EXPECTED_IMAGES_UNSET,
     expected_tenure: object = _EXPECTED_TENURE_UNSET,
+    expected_action_urls: object = _EXPECTED_ACTION_URLS_UNSET,
     exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
@@ -2601,6 +2696,8 @@ def validate_generated_body(
                 raise GeneratedBodyError(
                     "Generated body contains an unexpected actionable phone."
                 )
+    if expected_action_urls is not _EXPECTED_ACTION_URLS_UNSET:
+        _validate_action_urls(body_root, expected_action_urls)
     normalized_claim_surfaces = tuple(
         _normalize_claim_match_text(surface) for surface in claim_surfaces
     )
@@ -2817,6 +2914,7 @@ def assemble_generated_html(
     expected_location: object = _EXPECTED_LOCATION_UNSET,
     expected_images: object = _EXPECTED_IMAGES_UNSET,
     expected_tenure: object = _EXPECTED_TENURE_UNSET,
+    expected_action_urls: object = _EXPECTED_ACTION_URLS_UNSET,
     exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
@@ -2851,6 +2949,7 @@ def assemble_generated_html(
         expected_location=expected_location,
         expected_images=expected_images,
         expected_tenure=expected_tenure,
+        expected_action_urls=expected_action_urls,
         exact_source_claims=exact_source_claims,
         expected_form_action=expected_form_action,
         expected_reviews=expected_reviews,

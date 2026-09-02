@@ -28,6 +28,7 @@ from urllib.parse import quote_plus
 from lib.images import fetch_unsplash_hero, generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.generation import (
+    ActionUrlAdmissionContract,
     DEFAULT_DOCUMENT_ACCENT,
     DEFAULT_DOCUMENT_SECONDARY,
     REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
@@ -39,6 +40,7 @@ from lib.generation import (
     ReviewAdmissionContract,
     ReviewEvidence,
     TenureAdmissionContract,
+    action_url_contract_instruction,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -335,6 +337,19 @@ def expected_build_form_action(prospect):
     return "#"
 
 
+def expected_build_action_url_contract(prospect, review_contract):
+    allowed_urls = [expected_build_form_action(prospect)]
+    if review_contract.reviews_url:
+        allowed_urls.append(review_contract.reviews_url)
+    phone = prospect.get("phone")
+    email = prospect.get("owner_email")
+    return ActionUrlAdmissionContract(
+        allowed_urls=tuple(dict.fromkeys(allowed_urls)),
+        phones=(phone.strip(),) if isinstance(phone, str) and phone.strip() else (),
+        emails=(email.strip(),) if isinstance(email, str) and email.strip() else (),
+    )
+
+
 BUILD_SERVICES_RESPONSE_SCAFFOLD = (
     '<div class="page-wrap section-gap">\n'
     '  <div class="sec-hd">\n'
@@ -572,8 +587,13 @@ def unverified_service_claim_phrases(prospect):
     unsupported_field_claims = tuple(
         claim
         for field, claims in FIELD_GATED_CLAIMS.items()
-        if not _field_claim_is_verified(prospect, field, normalized_promises)
         for claim in claims
+        if not _field_claim_is_verified(
+            prospect,
+            field,
+            normalized_promises,
+            claim=claim,
+        )
     )
     return tuple(dict.fromkeys((*unsupported_service_claims, *unsupported_field_claims)))
 
@@ -602,11 +622,41 @@ def expected_ibew_local_claim(prospect):
     return f"IBEW Local {value_text}"
 
 
+def expected_master_electrician_license_value(prospect):
+    value = prospect.get("master_electrician_license")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().lstrip("#").strip()
+    return normalized or None
+
+
 def exact_source_claim_contracts(prospect):
     ibew_claim = expected_ibew_local_claim(prospect)
-    if ibew_claim is None:
-        return ()
-    return (("IBEW local number", "IBEW", ibew_claim),)
+    master_license = expected_master_electrician_license_value(prospect)
+    claims = []
+    if master_license is not None:
+        claims.extend(
+            (
+                (
+                    "Master electrician license",
+                    "Master Electrician",
+                    f"Master Electrician licensed, #{master_license}",
+                ),
+                (
+                    "Master electrician license",
+                    "Master Licensed",
+                    f"Master Licensed, #{master_license}",
+                ),
+                (
+                    "Master electrician license",
+                    "Master-Licensed",
+                    f"Master-Licensed, #{master_license}",
+                ),
+            )
+        )
+    if ibew_claim is not None:
+        claims.append(("IBEW local number", "IBEW", ibew_claim))
+    return tuple(claims)
 
 
 def expected_tenure_contract(prospect):
@@ -711,7 +761,7 @@ def expected_image_contract(prospect, logo_url):
 
 def source_claim_boundary_instruction(prospect):
     allowed_claims = verified_source_claim_phrases(prospect)
-    return (
+    instruction = (
         "SOURCE-GATED CLAIM ALLOWLIST (EXHAUSTIVE): "
         f"{json.dumps(allowed_claims, ensure_ascii=False)}. "
         "Only those listed source-gated phrases may be rendered. Do not output, "
@@ -719,6 +769,17 @@ def source_claim_boundary_instruction(prospect):
         "credential, availability, same-day, estimate, pricing, billing, or "
         "owner-availability claim from adjacent prospect data or earlier examples."
     )
+    exact_claims = tuple(
+        (trigger, exact_phrase)
+        for _label, trigger, exact_phrase in exact_source_claim_contracts(prospect)
+    )
+    if exact_claims:
+        instruction += (
+            " EXACT SOURCE CLAIMS: For each trigger below, every occurrence must "
+            "begin with its complete exact source phrase: "
+            f"{json.dumps(exact_claims, ensure_ascii=False)}."
+        )
+    return instruction
 
 
 def filter_unverified_claim_examples(prompt_text, prospect):
@@ -736,9 +797,12 @@ def filter_unverified_claim_examples(prompt_text, prospect):
     return filtered
 
 
-def _field_claim_is_verified(prospect, field, normalized_promises):
+def _field_claim_is_verified(prospect, field, normalized_promises, *, claim=None):
     if field in BOOLEAN_CLAIM_FIELDS and prospect.get(field) is True:
         return True
+    if field == "licensed_and_insured" and claim == "Licensed":
+        if expected_master_electrician_license_value(prospect) is not None:
+            return True
     evidence_phrases = FIELD_GATED_PROMISE_EVIDENCE.get(field, ())
     if any(
         evidence in promise
@@ -748,7 +812,7 @@ def _field_claim_is_verified(prospect, field, normalized_promises):
         return True
     value = prospect.get(field)
     if field == "master_electrician_license":
-        if isinstance(value, str) and value.strip():
+        if expected_master_electrician_license_value(prospect) is not None:
             return True
         equivalent_credentials = (
             prospect.get("licenses"),
@@ -1289,6 +1353,10 @@ def generate_build_html(prospect, generation_config=None, client=None):
     location_contract = expected_location_contract(prospect)
     image_contract = expected_image_contract(prospect, logo_url)
     review_contract = expected_review_contract(prospect)
+    action_url_contract = expected_build_action_url_contract(
+        prospect,
+        review_contract,
+    )
     required_class_counts = required_build_class_counts(prospect)
     if logo_url:
         logo_instruction = (
@@ -1314,6 +1382,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{tenure_contract_instruction(tenure_contract)}\n"
         f"{location_contract_instruction(location_contract)}\n"
         f"{image_contract_instruction(image_contract)}\n"
+        f"{action_url_contract_instruction(action_url_contract)}\n"
         f"{review_contract_instruction(review_contract)}\n"
         f"{phone_instruction}\n"
         f"{email_instruction}\n"
@@ -1357,6 +1426,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             expected_location=location_contract,
             expected_images=image_contract,
             expected_tenure=tenure_contract,
+            expected_action_urls=action_url_contract,
             exact_source_claims=exact_source_claim_contracts(prospect),
             expected_form_action=expected_build_form_action(prospect),
             expected_reviews=review_contract,

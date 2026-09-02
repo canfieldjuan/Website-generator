@@ -15,6 +15,7 @@ from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
 from lib.generation import (
+    ActionUrlAdmissionContract,
     DEFAULT_DOCUMENT_ACCENT,
     DEFAULT_DOCUMENT_SECONDARY,
     REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
@@ -23,6 +24,7 @@ from lib.generation import (
     ImageAdmissionContract,
     PromptPart,
     SourceContactAdmissionContract,
+    action_url_contract_instruction,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -117,6 +119,47 @@ def _redesign_contact_contract(site_json):
         phones=tuple(phones),
         emails=tuple(emails),
         addresses=tuple(addresses),
+    )
+
+
+def _redesign_action_url_contract(
+    site_json,
+    contact_contract,
+    *,
+    source_content=None,
+    extra_urls=(),
+):
+    allowed_urls = []
+
+    def collect_source_urls(value):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normalized_key = str(key).casefold()
+                if normalized_key in {
+                    "action",
+                    "anchor",
+                    "formaction",
+                    "href",
+                    "url",
+                } or normalized_key.endswith("_url"):
+                    _append_source_value(allowed_urls, nested)
+                collect_source_urls(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect_source_urls(nested)
+
+    collect_source_urls(site_json)
+    for url in extra_urls:
+        _append_source_value(allowed_urls, url)
+    if isinstance(source_content, str) and "<" in source_content:
+        source_root = BeautifulSoup(source_content, "html.parser")
+        for element in source_root.find_all(True):
+            for attribute in ("href", "action", "formaction", "xlink:href"):
+                _append_source_value(allowed_urls, element.get(attribute))
+    return ActionUrlAdmissionContract(
+        allowed_urls=tuple(allowed_urls),
+        phones=contact_contract.phones,
+        emails=contact_contract.emails,
     )
 
 
@@ -545,11 +588,22 @@ def generate_redesign(
     class_catalog = "\n".join(homepage_classes)
     interior_only_classes = extract_interior_only_class_names(base_template)
     image_contract = _redesign_image_contract(site_json)
+    site_name = site_json.get("site", {}).get("name") or "Website"
+    contact_contract = _redesign_contact_contract(site_json)
+    action_url_contract = _redesign_action_url_contract(
+        site_json,
+        contact_contract,
+    )
 
     user_prompt = f"""THEME: {theme}
 COLOR_MODE: {color_mode}
 ACCENT_OVERRIDE: none
 NOTES: none
+
+MANDATORY BUSINESS IDENTITY: Visibly render this exact extracted business name:
+{json.dumps(site_name, ensure_ascii=False)}
+
+{action_url_contract_instruction(action_url_contract)}
 
 SITE JSON:
 {json.dumps(site_json, indent=2)}
@@ -563,9 +617,6 @@ text, HTML head metadata, or unresolved template token.
 
 {image_contract_instruction(image_contract)}
 """
-
-    site_name = site_json.get("site", {}).get("name") or "Website"
-    contact_contract = _redesign_contact_contract(site_json)
 
     def admit(candidate):
         return assemble_generated_html(
@@ -589,8 +640,10 @@ text, HTML head metadata, or unresolved template token.
             forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
             forbidden_class_names=interior_only_classes,
             allowed_class_names=homepage_classes,
+            required_exposed_values=(("site_name", site_name),),
             source_contacts=contact_contract,
             expected_images=image_contract,
+            expected_action_urls=action_url_contract,
             required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
             required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
         )
@@ -644,11 +697,25 @@ def generate_interior_page(
         else:
             source_content = "{}"
         content_source = "homepage-section"
+
+    site_name = site_json.get("site", {}).get("name") or "Website"
+    contact_contract = _redesign_contact_contract(site_json)
+    action_url_contract = _redesign_action_url_contract(
+        site_json,
+        contact_contract,
+        source_content=source_content,
+        extra_urls=(page_url,),
+    )
         
     user_prompt = f"""PAGE TYPE: {page_type}
 PAGE URL: {page_url or 'n/a -- single-page site'}
 CONTENT_SOURCE: {content_source}
 NOTES: none
+
+MANDATORY BUSINESS IDENTITY: Visibly render this exact extracted business name:
+{json.dumps(site_name, ensure_ascii=False)}
+
+{action_url_contract_instruction(action_url_contract)}
 
 HOMEPAGE DESIGN JSON:
 {json.dumps(site_json, indent=2)}
@@ -665,8 +732,6 @@ SOURCE CONTENT:
 """
 
     config = generation_config or resolve_generation_config()
-    site_name = site_json.get("site", {}).get("name") or "Website"
-    contact_contract = _redesign_contact_contract(site_json)
     page_label = page_type.replace("-", " ").title()
 
     def admit(candidate):
@@ -684,8 +749,10 @@ SOURCE CONTENT:
             ),
             forbidden_comment_markers=REDESIGN_DEPLOYMENT_COMMENT_MARKERS,
             allowed_class_names=template_classes,
+            required_exposed_values=(("site_name", site_name),),
             source_contacts=contact_contract,
             expected_images=image_contract,
+            expected_action_urls=action_url_contract,
             required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
             required_child_class_sequences=REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
         )
