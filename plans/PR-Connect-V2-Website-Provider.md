@@ -1,6 +1,75 @@
-# Local Connect v2 website-generation provider
+# Local Connect v2 provider terminal-delivery evidence
 
 ## Why this slice exists
+
+The Local Connect provider implementation is already merged, but its committed
+verification record still ends by saying that a successful durable terminal
+delivery is pending. A current-tree acceptance run has now exercised the real
+authenticated HTTP route, durable queue, local generation boundary, bounded
+correction, terminal persistence, and returned artifact checks. This
+documentation-only follow-up makes that observed result reproducible and
+removes the stale evidence gap without changing the provider.
+
+## Scope (this PR)
+
+1. Append the successful terminal Connect-delivery result to the existing
+   provider verification history.
+2. Record the exact local vLLM launch configuration and a self-contained
+   reproduction harness for the HTTP/durable-job path.
+3. Preserve the distinction between test-gated runtime acceptance and issue
+   #27's still-unmet production entitlement provisioning.
+
+### Files touched
+
+- `plans/PR-Connect-V2-Website-Provider.md`
+
+## Mechanism
+
+The follow-up adds one chronological acceptance entry to the historical
+provider verification record. The entry identifies the route, state
+transitions, first-candidate rejection, bounded correction, returned artifact
+identity, content-safety checks, and post-run GPU unload. It then includes the
+runtime command and an isolated `TestClient` harness that reproduces the same
+authentication, entitlement-gate, persistence, polling, decoding, and result
+assertions without requiring a production entitlement.
+
+## Intentional
+
+- This is evidence correction only. Provider code, generation behavior,
+  Connect schemas, entitlement enforcement, and product output do not change.
+- The harness uses an isolated active test gate because source builds correctly
+  remain unavailable without the official issuer authority.
+- The historical provider implementation contract remains in this file but is
+  explicitly labeled as historical rather than as the scope of this follow-up.
+
+## Deferred
+
+- Official build-owned issuer keys, production license issuance, and release
+  provisioning remain tracked by #27.
+- Local GGUF/vLLM throughput optimization remains outside this evidence-only
+  slice.
+- Existing guard hardening remains deferred under #32 and #33.
+
+## Verification
+
+- Real `POST /v2/jobs` returned `202`; the durable job rejected one unsupported
+  first candidate, took one local correction, and persisted `completed`.
+- The returned `drees-plumbing-inc-homepage.html` was 73,159 bytes with SHA-256
+  `448d4c8655756448ae8b0bdb92c306e1621a7fd4ef5b9f06d4b0ffcfc99705bd`.
+  Response identity and doctype checks passed; placeholder and fabricated-claim
+  match counts were both `0`.
+- `bash -n` accepted the documented self-contained reproduction command after
+  extraction from this plan.
+- `bash scripts/local_pr_review.sh origin/main` passed on the committed diff.
+- vLLM was stopped after acceptance and the RTX 3090 returned to 358 MiB used.
+
+## Estimated diff size
+
+One documentation file, under 250 added lines, with no production-code change.
+
+---
+
+## Historical provider implementation contract
 
 The local-first generation slice gives the Python entry points one validated
 JSON-to-HTML seam, but independently installed apps still cannot discover or
@@ -166,7 +235,7 @@ must prove truthy and falsy non-string values never reach generation. This must
 not change address rendering, source-ownership admission, job/error schemas,
 or any unrelated prospect field.
 
-## Scope (this PR)
+## Historical provider scope
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
    accepting one `application/json` artifact up to 200,000 bytes and producing
@@ -209,7 +278,7 @@ or any unrelated prospect field.
 - `README.md`
 - `plans/PR-Connect-V2-Website-Provider.md`
 
-## Mechanism
+## Historical provider mechanism
 
 `connect_provider.py` validates that the configured model endpoint is a literal
 loopback and disables environment-proxy discovery for that Connect-only model
@@ -259,7 +328,7 @@ builds with no official keyring fail closed as authority-unavailable. Malformed
 or non-ASCII bearer credentials fail as the same shaped unauthorized response
 as any other invalid token.
 
-## Intentional
+## Historical provider decisions
 
 - Connect invocation is local-Qwen-only and advertises `external: false`; an
   OpenRouter-configured CLI cannot silently change Connect's cost/privacy
@@ -283,7 +352,7 @@ as any other invalid token.
 - Canonical entitlement fixture keys are test-only. Production cannot select a
   keyring with an environment variable.
 
-## Deferred
+## Historical provider deferred work
 
 - Existing-site analysis, email drafting, images, Vercel deployment, and
   OpenRouter-backed Connect capabilities are not advertised.
@@ -295,7 +364,7 @@ as any other invalid token.
   operations tracked by #27; the provider must remain unavailable until both
   exist.
 
-## Verification
+## Historical provider verification record
 
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935
   /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
@@ -425,8 +494,177 @@ as any other invalid token.
   successful delivery evidence.
 - vLLM was stopped immediately after that fixture. The compute-process query was
   empty, and the RTX 3090 reported 444 MiB used after unload.
+- A later acceptance run exercised the merged provider tree through its real
+  authenticated FastAPI route and durable `ProviderRuntime` queue using the
+  canonical `examples/prospect-plumber-template.json` artifact and an isolated
+  active test entitlement gate. `POST /v2/jobs` returned `202`; the same job
+  remained `processing` while its first candidate failed admission for the
+  unsupported `Not a Franchise` claim, then took the single bounded local
+  correction and persisted `status=completed`.
+- The returned `drees-plumbing-inc-homepage.html` artifact was 73,159 bytes with
+  SHA-256
+  `448d4c8655756448ae8b0bdb92c306e1621a7fd4ef5b9f06d4b0ffcfc99705bd`.
+  Its response digest matched the decoded payload, it began with the required
+  doctype, and the prescribed unresolved-placeholder and fabricated-claim scans
+  each returned `0`. The run performed no image generation, email, deployment,
+  cloud fallback, or repository output write.
+- The source branch tree used by that run and merged `origin/main` had the same
+  tree object. vLLM was then stopped; the RTX 3090 returned to 358 MiB used.
+  This closes the successful terminal Connect-delivery evidence gap above. It
+  does not satisfy issue #27's separate official issuer-key and production
+  entitlement provisioning requirement.
 
-## Final diff size
+  The runtime was started with the exact command below after placing the Qwen
+  adapter checkout at its pinned commit:
+
+  ```bash
+  VLLM_BIN=/media/juan-canfield/Dev-Drive/vllm-runtime/bin/vllm \
+  VLLM_MODEL_PATH=/media/juan-canfield/Dev-Drive/vllm-models/Qwen3.8-27B-lmstudio-text/Qwen3.8-27B-Q4_K_M.gguf \
+  VLLM_TOKENIZER_PATH=/media/juan-canfield/Dev-Drive/vllm-tokenizers/Qwen3.8-27B \
+  VLLM_GGUF_PLUGIN_PATH=/media/juan-canfield/Dev-Drive/vllm-gguf-plugin-qwen38 \
+  VLLM_GPU_MEMORY_UTILIZATION=0.88 \
+  scripts/start_vllm_server.sh
+  ```
+
+  In a second shell, the run used the self-contained harness below. The recorded
+  invocation included additional progress and explicit error prints, omitted
+  here because they do not change the route, gate, persistence, polling, or
+  assertions. This reproduction command creates the isolated store and active
+  test gate, submits and polls the real HTTP job, decodes the returned artifact,
+  and enforces the result checks reported above:
+
+  ```bash
+  LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8000/v1 \
+  GENERATION_TIMEOUT_SECONDS=7200 \
+  /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python - <<'PY'
+  import base64
+  import hashlib
+  import json
+  import re
+  import tempfile
+  import time
+  import uuid
+  from pathlib import Path
+
+  from fastapi.testclient import TestClient
+
+  from lib.connect_entitlement import EntitlementDecision
+  from lib.connect_store import ConnectStore, canonical_json
+  from lib.connect_v2 import (
+      CAPABILITY_ID,
+      CAPABILITY_VERSION,
+      ProviderRuntime,
+      create_app,
+  )
+
+  class ActiveAcceptanceGate:
+      def decision(self):
+          return EntitlementDecision.ACTIVE
+
+  data = Path("examples/prospect-plumber-template.json").read_bytes()
+  job_id = str(uuid.uuid4())
+  request_document = {
+      "protocol_version": 2,
+      "job_id": job_id,
+      "capability": {"id": CAPABILITY_ID, "version": CAPABILITY_VERSION},
+      "inputs": [{
+          "artifact_id": str(uuid.uuid4()),
+          "media_type": "application/json",
+          "byte_size": len(data),
+          "sha256": hashlib.sha256(data).hexdigest(),
+          "display_name": "prospect-plumber-template.json",
+          "source_app_id": "website-generator-acceptance",
+      }],
+      "parameters": {},
+  }
+  token = "A" * 64
+  with tempfile.TemporaryDirectory(
+      prefix="website-connect-acceptance-"
+  ) as directory:
+      runtime = ProviderRuntime(
+          ConnectStore(Path(directory) / "connect.sqlite3")
+      )
+      try:
+          with TestClient(
+              create_app(runtime, token, ActiveAcceptanceGate())
+          ) as client:
+              response = client.post(
+                  "/v2/jobs",
+                  headers={"Authorization": f"Bearer {token}"},
+                  files=[
+                      (
+                          "request",
+                          (
+                              None,
+                              canonical_json(request_document),
+                              "application/json",
+                          ),
+                      ),
+                      (
+                          "artifact",
+                          ("prospect.json", data, "application/json"),
+                      ),
+                  ],
+              )
+              print(f"submit_http_status={response.status_code}")
+              assert response.status_code == 202, response.text
+              deadline = time.monotonic() + 3600
+              while time.monotonic() < deadline:
+                  status_response = client.get(
+                      f"/v2/jobs/{job_id}",
+                      headers={"Authorization": f"Bearer {token}"},
+                  )
+                  assert status_response.status_code == 200, status_response.text
+                  terminal = status_response.json()
+                  if terminal["status"] in {"completed", "failed"}:
+                      break
+                  time.sleep(2)
+              else:
+                  raise AssertionError("Connect job did not finish within 3600s")
+
+              print(f"terminal_status={terminal['status']}")
+              assert terminal["status"] == "completed", json.dumps(
+                  terminal.get("error"), sort_keys=True
+              )
+              output = terminal["result"]["outputs"][0]
+              output_bytes = base64.b64decode(
+                  output["payload_base64"], validate=True
+              )
+              actual_sha256 = hashlib.sha256(output_bytes).hexdigest()
+              placeholder_matches = len(re.findall(
+                  rb"\[TRUST_TRAILER\]|\[SERVICE_PROMISE\]|\[TRADE_DISPLAY\]|"
+                  rb"\[CITY\]|\[YEARS\]|\[SERVICE_AREA\]",
+                  output_bytes,
+              ))
+              fabricated_matches = len(re.findall(
+                  rb"Upfront Flat-Rate|Surprise Fees|Free Estimates|Owner Answers",
+                  output_bytes,
+                  re.IGNORECASE,
+              ))
+              print(f"output_display_name={output['display_name']}")
+              print(f"output_byte_size={len(output_bytes)}")
+              print(f"output_sha256={actual_sha256}")
+              print(
+                  f"response_sha256_matches="
+                  f"{actual_sha256 == output['sha256']}"
+              )
+              print(
+                  f"doctype_present="
+                  f"{output_bytes.lstrip().lower().startswith(b'<!doctype html>')}"
+              )
+              print(f"placeholder_matches={placeholder_matches}")
+              print(f"fabricated_claim_matches={fabricated_matches}")
+              assert actual_sha256 == output["sha256"]
+              assert len(output_bytes) == output["byte_size"]
+              assert output_bytes.lstrip().lower().startswith(b"<!doctype html>")
+              assert placeholder_matches == 0
+              assert fabricated_matches == 0
+      finally:
+          runtime.close()
+  PY
+  ```
+
+## Historical provider final diff size
 
 Measured against the current provider base: 13 files changed, with 3,870
 insertions and 55 deletions across the durable provider and its contract,
