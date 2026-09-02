@@ -26,9 +26,10 @@ part of the installer would leave an unproved or unusable activation path.
 3. Serialize installers on the contract-owned persistent lock, validate the
    destination directory, any newly created config ancestors, and existing
    lock/license as owner-private filesystem objects, and traverse every config
-   path component without following symlinks. Re-evaluate at commit time and
-   replace the fixed shared path using a synced same-directory temporary file
-   and atomic rename.
+   path component without following symlinks. Apply created-directory modes
+   through opened descriptors and sync both the child metadata and each new
+   entry's parent. Re-evaluate at commit time and replace the fixed shared path
+   using a synced same-directory temporary file and atomic rename.
 4. Preserve the prior entitlement byte-for-byte on pre-replacement failures,
    and restore it (or remove a newly promoted candidate) when durability or
    installed-verification fails after replacement. Final verification reads
@@ -60,11 +61,14 @@ status check through that same descriptor while the lock remains held. Before
 success, the installer also confirms the configured pathname still identifies
 the opened directory by walking it again without following any component
 symlinks. Missing config ancestors are created relative to pinned parent
-descriptors, made owner-private before creating their child, and rejected under
-a non-sticky shared parent. This prevents a restrictive process umask from
-leaving them inaccessible without reintroducing path redirection. The installer
-snapshots an existing license before promotion and restores that snapshot—or
-removes the candidate when no license existed—if a post-promotion check fails.
+descriptors, opened and identity-checked before descriptor-based mode changes,
+and rejected under a non-sticky shared parent. Each created directory and the
+parent containing its new entry are synced before traversal advances. This
+prevents a restrictive process umask from leaving ancestors inaccessible
+without reintroducing path redirection or losing the hierarchy after reported
+success. The installer snapshots an existing license before promotion and
+restores that snapshot—or removes the candidate when no license existed—if a
+post-promotion check fails.
 
 `python connect_provider.py entitlement status` emits the privacy-bounded state
 document. `python connect_provider.py entitlement install PATH` emits that same
@@ -98,10 +102,10 @@ before runtime-directory resolution and local-model preflight.
 ## Verification
 
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest tests.test_entitlement_activation tests.test_connect_provider.EntitlementTests`
-  - The suites passed separately after one combined-run teardown stall: 18
+  - The suites passed separately after one combined-run teardown stall: 19
     activation boundary tests and 4 existing verifier/route tests passed after
-    rollback, restrictive-umask, no-follow traversal, path-identity, and
-    byte-boundary alignment.
+    rollback, restrictive-umask, descriptor-based mode changes, parent syncing,
+    no-follow traversal, path-identity, and byte-boundary alignment.
 - `CONNECT_CONTRACTS_DIR=/home/juan-canfield/.cache/connect-contracts-c5405935 /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python -m unittest discover -s tests -v`
   - 220 tests passed before the post-promotion rollback alignment; GitHub's
     required unit check reruns the complete suite at the published head.

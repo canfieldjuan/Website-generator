@@ -10,6 +10,7 @@ import os
 import re
 import stat
 import sys
+import threading
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ MAX_KEYS = 16
 MAX_FEATURES = 32
 PUBLIC_KEY_BYTES = 32
 SIGNATURE_BYTES = 64
+_UMASK_LOCK = threading.Lock()
 
 AUTHORITY_UNAVAILABLE_CODE = "CONNECT_ENTITLEMENT_AUTHORITY_UNAVAILABLE"
 SOURCE_INVALID_CODE = "CONNECT_ENTITLEMENT_SOURCE_INVALID"
@@ -276,9 +278,9 @@ def _open_private_directory(path: Path) -> int:
         os.name != "posix"
         or fcntl is None
         or not hasattr(os, "geteuid")
+        or not hasattr(os, "umask")
         or any(not hasattr(os, flag) for flag in required_flags)
         or os.mkdir not in os.supports_dir_fd
-        or os.chmod not in os.supports_dir_fd
         or os.stat not in os.supports_dir_fd
         or os.stat not in os.supports_follow_symlinks
     ):
@@ -322,7 +324,7 @@ def _open_directory_path(path: Path, *, create_missing: bool) -> int:
     try:
         for component in components[1:]:
             require_private = False
-            created_identity: tuple[int, int] | None = None
+            created = False
             try:
                 child = os.open(component, flags, dir_fd=current)
             except FileNotFoundError:
@@ -330,37 +332,39 @@ def _open_directory_path(path: Path, *, create_missing: bool) -> int:
                     raise
                 _validate_creation_parent(current)
                 try:
-                    os.mkdir(component, 0o700, dir_fd=current)
+                    _mkdir_private_component(current, component)
                     require_private = True
-                    created = os.stat(
-                        component,
-                        dir_fd=current,
-                        follow_symlinks=False,
-                    )
-                    if (
-                        not stat.S_ISDIR(created.st_mode)
-                        or created.st_uid != os.geteuid()
-                    ):
-                        raise OSError(
-                            errno.EACCES, "unsafe created entitlement directory"
-                        )
-                    created_identity = (created.st_dev, created.st_ino)
-                    os.chmod(component, 0o700, dir_fd=current)
+                    created = True
                 except FileExistsError:
                     require_private = True
                 child = os.open(component, flags, dir_fd=current)
 
             metadata = os.fstat(child)
-            if created_identity is not None and (
-                metadata.st_dev,
-                metadata.st_ino,
-            ) != created_identity:
-                raise OSError(errno.EACCES, "created entitlement directory changed")
-            if require_private and (
-                metadata.st_uid != os.geteuid()
-                or metadata.st_mode & 0o777 != 0o700
-            ):
-                raise OSError(errno.EACCES, "unsafe created entitlement directory")
+            if require_private:
+                visible = os.stat(
+                    component,
+                    dir_fd=current,
+                    follow_symlinks=False,
+                )
+                if (
+                    not stat.S_ISDIR(visible.st_mode)
+                    or (metadata.st_dev, metadata.st_ino)
+                    != (visible.st_dev, visible.st_ino)
+                    or metadata.st_uid != os.geteuid()
+                    or (not created and metadata.st_mode & 0o777 != 0o700)
+                ):
+                    raise OSError(
+                        errno.EACCES, "unsafe created entitlement directory"
+                    )
+                if created:
+                    os.fchmod(child, 0o700)
+                    metadata = os.fstat(child)
+                if metadata.st_mode & 0o777 != 0o700:
+                    raise OSError(
+                        errno.EACCES, "created entitlement directory mode mismatch"
+                    )
+                os.fsync(child)
+                os.fsync(current)
 
             os.close(current)
             current = child
@@ -373,6 +377,15 @@ def _open_directory_path(path: Path, *, create_missing: bool) -> int:
         with suppress(OSError):
             os.close(current)
         raise
+
+
+def _mkdir_private_component(parent_fd: int, component: str) -> None:
+    with _UMASK_LOCK:
+        previous = os.umask(0o077)
+        try:
+            os.mkdir(component, 0o700, dir_fd=parent_fd)
+        finally:
+            os.umask(previous)
 
 
 def _validate_creation_parent(descriptor: int) -> None:

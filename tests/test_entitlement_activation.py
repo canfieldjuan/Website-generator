@@ -148,7 +148,11 @@ class EntitlementActivationTests(unittest.TestCase):
             source = self.source(root)
             prior_umask = os.umask(0o777)
             try:
-                result = install_entitlement(source, gate)
+                with patch(
+                    "lib.connect_entitlement.os.chmod",
+                    side_effect=AssertionError("directory chmod must use its descriptor"),
+                ):
+                    result = install_entitlement(source, gate)
             finally:
                 os.umask(prior_umask)
 
@@ -156,6 +160,41 @@ class EntitlementActivationTests(unittest.TestCase):
             self.assertEqual(config_root.stat().st_mode & 0o777, 0o700)
             self.assertEqual(destination.parent.stat().st_mode & 0o777, 0o700)
             self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+
+    def test_new_config_directory_entries_are_synced_before_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "missing-config"
+            destination = config_root / "local-connect" / ENTITLEMENT_FILE_NAME
+            gate = EntitlementGate.for_test(
+                path=destination,
+                keyring_document=self.keyring,
+                now=self.now,
+            )
+            source = self.source(root)
+            synced_directories = []
+            real_fsync = os.fsync
+
+            def record_fsync(descriptor):
+                metadata = os.fstat(descriptor)
+                if stat.S_ISDIR(metadata.st_mode):
+                    synced_directories.append((metadata.st_dev, metadata.st_ino))
+                real_fsync(descriptor)
+
+            with patch(
+                "lib.connect_entitlement.os.fsync", side_effect=record_fsync
+            ):
+                install_entitlement(source, gate)
+
+            root_metadata = root.stat()
+            config_metadata = config_root.stat()
+            self.assertIn(
+                (root_metadata.st_dev, root_metadata.st_ino), synced_directories
+            )
+            self.assertIn(
+                (config_metadata.st_dev, config_metadata.st_ino),
+                synced_directories,
+            )
 
     def test_config_ancestor_symlink_is_not_followed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -389,18 +428,39 @@ class EntitlementActivationTests(unittest.TestCase):
             root = Path(directory)
             source = self.source(root)
             gate = self.gate(root)
+            real_fsync = os.fsync
+            real_replace = os.replace
+            promoted = False
+            failed_after_promotion = False
+
+            def record_promotion(*args, **kwargs):
+                nonlocal promoted
+                result = real_replace(*args, **kwargs)
+                promoted = True
+                return result
+
+            def fail_promoted_directory_sync(descriptor):
+                nonlocal failed_after_promotion
+                if (
+                    promoted
+                    and not failed_after_promotion
+                    and stat.S_ISDIR(os.fstat(descriptor).st_mode)
+                ):
+                    failed_after_promotion = True
+                    raise OSError("simulated directory sync failure")
+                real_fsync(descriptor)
+
             with patch(
+                "lib.connect_entitlement.os.replace", side_effect=record_promotion
+            ), patch(
                 "lib.connect_entitlement.os.fsync",
-                side_effect=(
-                    None,
-                    OSError("simulated directory sync failure"),
-                    None,
-                ),
+                side_effect=fail_promoted_directory_sync,
             ):
                 self.assert_activation_error(
                     INSTALL_FAILED_CODE,
                     lambda: install_entitlement(source, gate),
                 )
+            self.assertTrue(failed_after_promotion)
             assert gate.path is not None
             self.assertFalse(gate.path.exists())
 
