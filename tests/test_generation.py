@@ -542,7 +542,9 @@ class VllmStartupScriptTests(unittest.TestCase):
             arguments[arguments.index("--default-chat-template-kwargs") + 1],
             '{"enable_thinking":false}',
         )
-        self.assertIn("--disable-log-requests", arguments)
+        self.assertIn("--no-enable-log-requests", arguments)
+        self.assertIn("--disable-uvicorn-access-log", arguments)
+        self.assertNotIn("--disable-log-requests", arguments)
         self.assertNotIn("--api-key", arguments)
 
     def test_numeric_boundaries_reject_values_outside_the_contract(self):
