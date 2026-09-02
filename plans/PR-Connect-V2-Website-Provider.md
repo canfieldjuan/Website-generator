@@ -151,6 +151,21 @@ unchanged. This correction must not change other prospect fields, capability or
 job schemas, provider/runtime behavior, generated copy, or image, deployment,
 and email-send effects.
 
+### Address input admission revision
+
+Exact-head review exposed the same validation-order defect for the optional
+business address. A truthy non-string value reaches local generation and only
+fails when generated-body admission tries to compare it with source evidence,
+misclassifying deterministic input as retryable model output.
+
+The correct fix must admit only string-or-null address input during shared
+prospect preparation, trim a valid string, and normalize an empty or
+whitespace-only string to absence before generation. Connect must retain the
+existing non-retryable `INPUT_INVALID` mapping for rejected input, and tests
+must prove truthy and falsy non-string values never reach generation. This must
+not change address rendering, source-ownership admission, job/error schemas,
+or any unrelated prospect field.
+
 ## Scope (this PR)
 
 1. Expose `website.generate.single-page` version `1.0` over Local Connect v2,
@@ -180,6 +195,8 @@ and email-send effects.
     generation while preserving valid remote and embedded hero inputs.
 12. Re-run the canonical plumber fixture and both zero-count fabrication scans on
     the final combined head with standalone CUDA vLLM.
+13. Reject malformed optional addresses before generation and normalize blank
+    address strings to omission.
 
 ### Files touched
 

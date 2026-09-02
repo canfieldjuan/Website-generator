@@ -353,7 +353,7 @@ BUILD_SERVICES_RESPONSE_SCAFFOLD = (
 )
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
-OPTIONAL_STRING_FIELDS = ("display_name", "owner_email")
+OPTIONAL_STRING_FIELDS = ("display_name", "owner_email", "address")
 
 # Substring markers that indicate a prospect-JSON field was left at its
 # template default. Case-insensitive substring match against the value.
@@ -483,6 +483,9 @@ def prepare_prospect(prospect, build_date=None):
                 "Prospect JSON owner_email must be a valid email address or null."
             )
         prospect["owner_email"] = owner_email
+    address = prospect.get("address")
+    if isinstance(address, str):
+        prospect["address"] = address.strip() or None
     sanitize_reviews(prospect)
     build_date = build_date or date.today()
     prospect["build_date"] = build_date.isoformat()

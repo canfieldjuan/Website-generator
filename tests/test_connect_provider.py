@@ -725,6 +725,24 @@ class GenerationSeamTests(unittest.TestCase):
                     expected,
                 )
 
+    def test_optional_address_must_be_string_or_null(self):
+        for invalid in (123, 0, False, [], {}):
+            with self.subTest(invalid=invalid):
+                source = {**PROSPECT, "address": invalid}
+                with self.assertRaisesRegex(ValueError, "strings or null"):
+                    build.prepare_prospect(source)
+
+        for value, expected in (
+            ("123 Main Place, Effingham, IL 62401", "123 Main Place, Effingham, IL 62401"),
+            ("  123 Main Place, Effingham, IL 62401  ", "123 Main Place, Effingham, IL 62401"),
+            ("", None),
+            ("   ", None),
+            (None, None),
+        ):
+            with self.subTest(value=value):
+                source = {**PROSPECT, "address": value}
+                self.assertEqual(build.prepare_prospect(source)["address"], expected)
+
     def test_malformed_optional_display_name_is_nonretryable_before_generation(self):
         for invalid in (123, 0):
             with self.subTest(invalid=invalid):
@@ -781,6 +799,16 @@ class GenerationSeamTests(unittest.TestCase):
                         generated.assert_not_called()
                     finally:
                         runtime.close()
+
+    def test_malformed_address_is_nonretryable_before_generation(self):
+        for invalid in (123, 0, False, [], {}):
+            with self.subTest(invalid=invalid):
+                source = {**PROSPECT, "address": invalid}
+                data = json.dumps(source).encode("utf-8")
+                with patch.object(build, "generate_build_html") as generated:
+                    with self.assertRaisesRegex(ValueError, "valid prospect document"):
+                        generate_website_artifact(data)
+                    generated.assert_not_called()
 
     def test_malformed_brand_colors_are_nonretryable_before_generation(self):
         invalid_palettes = (
