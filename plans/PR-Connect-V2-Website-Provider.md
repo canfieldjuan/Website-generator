@@ -425,6 +425,25 @@ as any other invalid token.
   successful delivery evidence.
 - vLLM was stopped immediately after that fixture. The compute-process query was
   empty, and the RTX 3090 reported 444 MiB used after unload.
+- A later acceptance run exercised the merged provider tree through its real
+  authenticated FastAPI route and durable `ProviderRuntime` queue using the
+  canonical `examples/prospect-plumber-template.json` artifact and an isolated
+  active test entitlement gate. `POST /v2/jobs` returned `202`; the same job
+  remained `processing` while its first candidate failed admission for the
+  unsupported `Not a Franchise` claim, then took the single bounded local
+  correction and persisted `status=completed`.
+- The returned `drees-plumbing-inc-homepage.html` artifact was 73,159 bytes with
+  SHA-256
+  `448d4c8655756448ae8b0bdb92c306e1621a7fd4ef5b9f06d4b0ffcfc99705bd`.
+  Its response digest matched the decoded payload, it began with the required
+  doctype, and the prescribed unresolved-placeholder and fabricated-claim scans
+  each returned `0`. The run performed no image generation, email, deployment,
+  cloud fallback, or repository output write.
+- The source branch tree used by that run and merged `origin/main` had the same
+  tree object. vLLM was then stopped; the RTX 3090 returned to 358 MiB used.
+  This closes the successful terminal Connect-delivery evidence gap above. It
+  does not satisfy issue #27's separate official issuer-key and production
+  entitlement provisioning requirement.
 
 ## Final diff size
 
