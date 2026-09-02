@@ -454,6 +454,50 @@ sanitization, customer-facing layout or styling, generated/Connect schemas,
 provider selection, vLLM/OpenRouter transport, image/email/deployment behavior,
 or the existing phone, email, form, and review contracts.
 
+### Exact-head tenure, visibility, and CI contract revision
+
+Exact-head review exposed three remaining boundary gaps. First, tenure wording
+is governed only by prompt prose: generated `since <year>`, numeric-years, or
+generic decades/generations claims are not compared with the prospect's
+`established_year` or `years_in_business`. Second, required identity and phone
+values are excluded from exposure only for `display:none`,
+`visibility:hidden`, and `content-visibility:hidden`; zero opacity, zero font
+size, clipping, and explicitly off-screen positioning can still satisfy the
+required-visible-value check. Third, the generator workflow path filters watch
+the retired llama.cpp launcher but not the active vLLM launcher whose command
+contract the suite tests.
+
+The correct fix must pass an explicit tenure contract from the build caller to
+shared body admission. Every rendered or attribute-exposed `since <year>` claim
+must use the verified establishment year; every numeric years-of-tenure claim
+must use the verified years-in-business value; and either claim family must be
+absent when its source is absent. Unsourced generic tenure wording such as
+`for years`, `decades`, and `generations` must fail rather than act as a numeric
+substitute. The response boundary must give the model the same present/absent
+contract.
+
+Code inspection revises the visibility mechanism from enumerating more hiding
+properties to enforcing the existing prompt boundary. All three generation
+prompts forbid custom CSS; their declared inline exceptions are code-owned
+background-image and review-score styles plus the redesign prompt's fixed
+section padding. Admission currently accepts every model-authored style
+property. Generated-body admission must therefore reject inline properties
+outside that small declared set. This prevents current and future CSS
+hiding/layout tricks from satisfying required substitutions without trying to
+emulate the full CSS cascade. The three declared properties remain available
+and their existing source/shape contracts remain authoritative. Both workflow selectors must
+enroll `scripts/start_vllm_server.sh` so launcher-only changes run its existing
+contract tests.
+
+Tests must cover wrong, absent, and exact `since` and numeric-year claims,
+generic unsourced tenure, every reported hiding family, all allowed inline
+properties, and both vLLM workflow path filters. This correction must not
+require tenure copy to be present; reject arbitrary non-tenure dates; change
+prospect normalization, other source-claim families, generated layout/copy,
+provider requests, launcher arguments, Connect schemas/jobs, or
+image/email/deployment behavior. The controlled CUDA vLLM fixture remains a
+separate final acceptance item and cannot be replaced by mocked tests.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -709,6 +753,20 @@ override before assembly.
   remain outside this milestone.
 
 ## Verification
+
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest -v
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_uses_shared_admission_gate
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_enforces_identity_and_phone_substitutions
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_gates_field_owned_claim_families
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_footer_address_to_source
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_tenure_claims_to_source_values
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_ibew_claim_to_exact_local
+  tests.test_generation.BodyAssemblyTests.test_body_admission_restricts_inline_styles_to_declared_properties
+  tests.test_generation.VllmStartupScriptTests.test_generator_workflow_tracks_the_active_vllm_launcher`
+  — 8 tests passed in 2.190 seconds. Boundary proof covers absent/wrong/exact
+  tenure values, rendered and attribute surfaces, generic tenure rejection,
+  unsupported and mixed inline styles, both permitted inline properties, and
+  both active-launcher workflow selectors.
 
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest
   tests.test_generation.GenerationConfigTests

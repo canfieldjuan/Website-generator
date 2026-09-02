@@ -145,6 +145,44 @@ ATTRIBUTED_PROSE_PATTERN = re.compile(
     r"[.!?][\"”'‘’]?\s*[—–]\s*[A-Z][A-Za-z'.’\-]+"
     r"(?:\s+(?:[A-Z][A-Za-z'.’\-]+|[A-Z]\.)){0,3}\b"
 )
+ESTABLISHMENT_CLAIM_PATTERN = re.compile(
+    r"(?<!\w)(?:since|established(?:\s+in)?|founded(?:\s+in)?)\s+"
+    r"(?P<year>\d{4})(?!\d)",
+    re.IGNORECASE,
+)
+NUMERIC_TENURE_CLAIM_PATTERNS = (
+    re.compile(
+        r"(?<!\w)(?P<years>\d{1,3})\s*\+?\s+years?\s+of\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<!\w)(?:serving|operating|trusted|in\s+business)\b"
+        r"[^.!?]{0,48}?\b(?P<years>\d{1,3})\s*\+?\s+years?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<!\w)(?:over|more\s+than)\s+(?P<years>\d{1,3})"
+        r"\s*\+?\s+years?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<!\w)(?P<years>\d{1,3})\s*\+\s*years?\b",
+        re.IGNORECASE,
+    ),
+)
+GENERIC_TENURE_CLAIM_PATTERN = re.compile(
+    r"(?<!\w)(?:for\s+(?:many\s+)?(?:years|decades|generations?)|"
+    r"(?:decades|generations?)\s+of\s+"
+    r"(?:experience|service|work|business|craftsmanship|expertise))\b",
+    re.IGNORECASE,
+)
+ALLOWED_GENERATED_INLINE_STYLE_PROPERTIES = frozenset(
+    ("--score", "background-image", "padding")
+)
+INLINE_STYLE_COMMENT_PATTERN = re.compile(r"/\*.*?\*/", re.DOTALL)
+INLINE_STYLE_PROPERTY_PATTERN = re.compile(
+    r"(?:^|;)\s*([A-Za-z_-][A-Za-z0-9_-]*)\s*:"
+)
 TRUSTED_IMAGE_ERROR_HANDLER = "this.style.display='none'"
 NONDETERMINISTIC_RENDERING_TAGS = frozenset(
     {
@@ -164,6 +202,7 @@ NONDETERMINISTIC_RENDERING_TAGS = frozenset(
 _EXPECTED_PHONE_UNSET = object()
 _EXPECTED_EMAIL_UNSET = object()
 _EXPECTED_ADDRESS_UNSET = object()
+_EXPECTED_TENURE_UNSET = object()
 _EXPECTED_FORM_ACTION_UNSET = object()
 _EXPECTED_REVIEWS_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
@@ -196,6 +235,17 @@ class GeneratedHtmlError(ValueError):
 
 class GeneratedBodyError(ValueError):
     """Generated output is not an admissible template body fragment."""
+
+
+def _unsupported_inline_style_properties(style: str) -> set[str]:
+    cleaned = INLINE_STYLE_COMMENT_PATTERN.sub("", style)
+    properties = {
+        match.group(1).casefold()
+        for match in INLINE_STYLE_PROPERTY_PATTERN.finditer(cleaned)
+    }
+    if cleaned.strip() and not properties:
+        return {"<malformed>"}
+    return properties - ALLOWED_GENERATED_INLINE_STYLE_PROPERTIES
 
 
 @dataclass(frozen=True)
@@ -247,6 +297,12 @@ class ReviewAdmissionContract:
     aggregate_score: int | float | None = None
     aggregate_count: int | None = None
     reviews_url: str | None = None
+
+
+@dataclass(frozen=True)
+class TenureAdmissionContract:
+    established_year: int | None = None
+    years_in_business: int | None = None
 
 
 @dataclass(frozen=True)
@@ -312,6 +368,7 @@ class _GeneratedBodyParser(HTMLParser):
         self.decoded_attribute_values: list[str] = []
         self.comment_values: list[str] = []
         self.executable_attributes: list[str] = []
+        self.unsupported_inline_style_properties: list[str] = []
         self.duplicate_attributes: list[str] = []
         self.class_names: set[str] = set()
         self.class_name_counts: dict[str, int] = {}
@@ -346,6 +403,10 @@ class _GeneratedBodyParser(HTMLParser):
                 )
             ):
                 self.executable_attributes.append(name)
+            if normalized_name == "style" and value is not None:
+                self.unsupported_inline_style_properties.extend(
+                    sorted(_unsupported_inline_style_properties(value))
+                )
             if normalized_name != "class" or not value:
                 continue
             for class_name in value.split():
@@ -1700,6 +1761,49 @@ def _validate_exact_source_claims(
                     )
 
 
+def _validate_tenure_claims(
+    claim_surfaces: Iterable[str],
+    contract: TenureAdmissionContract,
+) -> None:
+    if not isinstance(contract, TenureAdmissionContract):
+        raise GeneratedBodyError("Expected tenure admission contract is invalid.")
+    if contract.established_year is not None and (
+        isinstance(contract.established_year, bool)
+        or not isinstance(contract.established_year, int)
+        or not 1000 <= contract.established_year <= 9999
+    ):
+        raise GeneratedBodyError("Verified establishment year is invalid.")
+    if contract.years_in_business is not None and (
+        isinstance(contract.years_in_business, bool)
+        or not isinstance(contract.years_in_business, int)
+        or not 1 <= contract.years_in_business <= 999
+    ):
+        raise GeneratedBodyError("Verified years in business is invalid.")
+
+    for raw_surface in claim_surfaces:
+        surface = _normalize_claim_match_text(raw_surface)
+        if GENERIC_TENURE_CLAIM_PATTERN.search(surface):
+            raise GeneratedBodyError(
+                "Generated body contains a generic tenure claim without an "
+                "exact source value."
+            )
+        for match in ESTABLISHMENT_CLAIM_PATTERN.finditer(surface):
+            actual_year = int(match.group("year"))
+            if actual_year != contract.established_year:
+                raise GeneratedBodyError(
+                    "Generated body tenure claim does not match the verified "
+                    "establishment year."
+                )
+        for pattern in NUMERIC_TENURE_CLAIM_PATTERNS:
+            for match in pattern.finditer(surface):
+                actual_years = int(match.group("years"))
+                if actual_years != contract.years_in_business:
+                    raise GeneratedBodyError(
+                        "Generated body tenure claim does not match the verified "
+                        "years in business."
+                    )
+
+
 def validate_generated_body(
     result: GenerationResult,
     *,
@@ -1713,6 +1817,7 @@ def validate_generated_body(
     expected_phone: object = _EXPECTED_PHONE_UNSET,
     expected_email: object = _EXPECTED_EMAIL_UNSET,
     expected_address: object = _EXPECTED_ADDRESS_UNSET,
+    expected_tenure: object = _EXPECTED_TENURE_UNSET,
     exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
@@ -1769,6 +1874,14 @@ def validate_generated_body(
         names = ", ".join(sorted(set(parser.executable_attributes)))
         raise GeneratedBodyError(
             f"Generated body contains an executable attribute: {names}."
+        )
+    if parser.unsupported_inline_style_properties:
+        names = ", ".join(
+            sorted(set(parser.unsupported_inline_style_properties))
+        )
+        raise GeneratedBodyError(
+            "Generated body contains an unsupported inline style property: "
+            f"{names}."
         )
     if parser.nondeterministic_rendering_tags:
         names = ", ".join(sorted(set(parser.nondeterministic_rendering_tags)))
@@ -1935,6 +2048,8 @@ def validate_generated_body(
             expected_address,
             exact_claim_surfaces,
         )
+    if expected_tenure is not _EXPECTED_TENURE_UNSET:
+        _validate_tenure_claims(exact_claim_surfaces, expected_tenure)
     _validate_exact_source_claims(exact_claim_surfaces, exact_source_claims)
     missing_exposed_values = []
     for label, value in required_exposed_values:
@@ -2260,6 +2375,7 @@ def assemble_generated_html(
     expected_phone: object = _EXPECTED_PHONE_UNSET,
     expected_email: object = _EXPECTED_EMAIL_UNSET,
     expected_address: object = _EXPECTED_ADDRESS_UNSET,
+    expected_tenure: object = _EXPECTED_TENURE_UNSET,
     exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
@@ -2289,6 +2405,7 @@ def assemble_generated_html(
         expected_phone=expected_phone,
         expected_email=expected_email,
         expected_address=expected_address,
+        expected_tenure=expected_tenure,
         exact_source_claims=exact_source_claims,
         expected_form_action=expected_form_action,
         expected_reviews=expected_reviews,

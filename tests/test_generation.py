@@ -453,6 +453,17 @@ class VllmStartupScriptTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("VLLM_MODEL_PATH", completed.stdout)
 
+    def test_generator_workflow_tracks_the_active_vllm_launcher(self):
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/generator-tests.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(
+            workflow.count('"scripts/start_vllm_server.sh"'),
+            2,
+        )
+
     def test_retired_llama_launcher_fails_with_vllm_instruction(self):
         completed = subprocess.run(
             [str(self.retired_script)],
@@ -1148,6 +1159,37 @@ class BodyAssemblyTests(unittest.TestCase):
         )
         self.assertEqual(validate_generated_body(body_result(valid_body)), valid_body)
 
+    def test_body_admission_restricts_inline_styles_to_declared_properties(self):
+        hiding_styles = (
+            "opacity: 0",
+            "font-size: 0",
+            "clip-path: inset(50%)",
+            "position: absolute; left: -9999px",
+        )
+        for style in hiding_styles:
+            body = f'<body><span style="{style}">Test Business</span></body>'
+            with self.subTest(style=style), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "unsupported inline style property",
+            ):
+                validate_generated_body(body_result(body))
+
+        mixed = (
+            '<body><span style="--score: 4.8; opacity: 0">★★★★★</span></body>'
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "unsupported inline style property: opacity",
+        ):
+            validate_generated_body(body_result(mixed))
+
+        allowed = (
+            '<body><section style="background-image: url(\'images/hero.jpg\'); '
+            'padding: 4rem 0">'
+            '<span style="--score: 4.8">★★★★★</span></section></body>'
+        )
+        self.assertEqual(validate_generated_body(body_result(allowed)), allowed)
+
     def test_body_admission_rejects_nondeterministic_rendering_containers(self):
         for tag in (
             "audio",
@@ -1322,8 +1364,6 @@ class BodyAssemblyTests(unittest.TestCase):
             "<body><p><span>Free</span><br><span>Esti</span>"
             "<span>mates</span></p></body>",
             '<body><span class="ft-phone-label">Free</span>'
-            "<span>Estimates</span></body>",
-            '<body><span style="display:block">Free</span>'
             "<span>Estimates</span></body>",
             '<body><p><img src="missing" alt="Free"> Estimates</p></body>',
             '<body><p><span aria-label="Free">Request</span> Estimates</p></body>',
@@ -2105,6 +2145,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("[SERVICE_1_NAME]", user_content)
         self.assertIn("[SERVICE_6_DESCRIPTION]", user_content)
         self.assertIn("SOURCE-GATED CLAIM ALLOWLIST (EXHAUSTIVE): []", user_content)
+        self.assertIn("TENURE CLAIM CONTRACT (OPTIONAL OUTPUT)", user_content)
         self.assertNotIn("Not a Franchise", request_prompt)
         self.assertNotIn("Free Estimates", request_prompt)
         self.assertNotIn("BASE BODY TEMPLATE", user_content)
@@ -2951,7 +2992,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     ">217-555-0100</a>",
                     '>Call now</a><span style="display: none">217-555-0100</span>',
                 ),
-                "phone",
+                "unsupported inline style property: display",
             ),
             (
                 COMPLETE_BUILD_BODY.replace(
@@ -2966,7 +3007,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     '<a href="tel:2175550100" '
                     'style="display:none!important">217-555-0100</a>',
                 ),
-                "missing required visible substitution: phone",
+                "unsupported inline style property: display",
             ),
             (
                 COMPLETE_BUILD_BODY.replace(
@@ -3273,6 +3314,106 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 config(),
                 FakeLocalClient(local_chat_payload(wrong_attribute)),
             )
+
+    def test_build_generator_binds_tenure_claims_to_source_values(self):
+        base_prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+
+        def with_claim(value):
+            return COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero">{value}</section>',
+            )
+
+        unsupported_claims = (
+            ("Serving since 1999", "establishment year"),
+            ("20 years of plumbing service", "years in business"),
+            ("Serving local families for decades", "generic tenure"),
+        )
+        for claim, message in unsupported_claims:
+            with self.subTest(claim=claim), self.assertRaisesRegex(
+                GeneratedBodyError,
+                message,
+            ):
+                build.generate_build_html(
+                    base_prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(with_claim(claim))),
+                )
+
+        established_prospect = {**base_prospect, "established_year": 2011}
+        with self.assertRaisesRegex(GeneratedBodyError, "establishment year"):
+            build.generate_build_html(
+                established_prospect,
+                config(),
+                FakeLocalClient(
+                    local_chat_payload(with_claim("Serving since 1999"))
+                ),
+            )
+        exact_established = with_claim(
+            "Serving <span>since</span> <span>2011</span>"
+        )
+        html = build.generate_build_html(
+            established_prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(exact_established)),
+        )
+        self.assertIn("<span>2011</span>", html)
+
+        years_prospect = {**base_prospect, "years_in_business": 12}
+        with self.assertRaisesRegex(GeneratedBodyError, "years in business"):
+            build.generate_build_html(
+                years_prospect,
+                config(),
+                FakeLocalClient(
+                    local_chat_payload(with_claim("20 years of plumbing service"))
+                ),
+            )
+        exact_years = with_claim("12 years of plumbing service")
+        html = build.generate_build_html(
+            years_prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(exact_years)),
+        )
+        self.assertIn("12 years of plumbing service", html)
+
+        wrong_attribute = with_claim(
+            '<span title="Serving since 1999">Serving since 2011</span>'
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "establishment year"):
+            build.generate_build_html(
+                established_prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(wrong_attribute)),
+            )
+
+        non_tenure_years = with_claim("Includes a sourced 2-year parts warranty")
+        html = build.generate_build_html(
+            base_prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(non_tenure_years)),
+        )
+        self.assertIn("2-year parts warranty", html)
+
+    def test_build_tenure_instruction_uses_only_verified_values(self):
+        absent = build.tenure_contract_instruction(
+            build.expected_tenure_contract({})
+        )
+        self.assertIn("No establishment year is verified", absent)
+        self.assertIn("No years-in-business count is verified", absent)
+
+        exact = build.tenure_contract_instruction(
+            build.expected_tenure_contract(
+                {"established_year": 2011, "years_in_business": 12}
+            )
+        )
+        self.assertIn("exactly 2011", exact)
+        self.assertIn("exactly 12 years", exact)
 
     def test_build_generator_binds_ibew_claim_to_exact_local(self):
         prospect = {

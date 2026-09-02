@@ -35,6 +35,7 @@ from lib.generation import (
     PromptPart,
     ReviewAdmissionContract,
     ReviewEvidence,
+    TenureAdmissionContract,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -561,6 +562,57 @@ def exact_source_claim_contracts(prospect):
     if ibew_claim is None:
         return ()
     return (("IBEW local number", "IBEW", ibew_claim),)
+
+
+def expected_tenure_contract(prospect):
+    established_year = prospect.get("established_year")
+    if (
+        isinstance(established_year, bool)
+        or not isinstance(established_year, int)
+        or not 1000 <= established_year <= 9999
+    ):
+        established_year = None
+    years_in_business = prospect.get("years_in_business")
+    if (
+        isinstance(years_in_business, bool)
+        or not isinstance(years_in_business, int)
+        or not 1 <= years_in_business <= 999
+    ):
+        years_in_business = None
+    return TenureAdmissionContract(
+        established_year=established_year,
+        years_in_business=years_in_business,
+    )
+
+
+def tenure_contract_instruction(contract):
+    instructions = [
+        "TENURE CLAIM CONTRACT (OPTIONAL OUTPUT): Tenure copy may be omitted."
+    ]
+    if contract.established_year is None:
+        instructions.append(
+            "No establishment year is verified; emit no `since`, `established`, "
+            "or `founded` year claim."
+        )
+    else:
+        instructions.append(
+            "Every `since`, `established`, or `founded` year claim must use "
+            f"exactly {contract.established_year}."
+        )
+    if contract.years_in_business is None:
+        instructions.append(
+            "No years-in-business count is verified; emit no numeric tenure claim."
+        )
+    else:
+        instructions.append(
+            "Every numeric years-of-tenure claim must use exactly "
+            f"{contract.years_in_business} years."
+        )
+    instructions.append(
+        "Never substitute generic tenure wording such as `for years`, "
+        "`decades`, or `generations`."
+    )
+    return " ".join(instructions)
 
 
 def source_claim_boundary_instruction(prospect):
@@ -1103,6 +1155,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             "NO VERIFIED BUSINESS ADDRESS: Omit `.ft-address` and do not invent a "
             "physical location."
         )
+    tenure_contract = expected_tenure_contract(prospect)
     review_contract = expected_review_contract(prospect)
     required_class_counts = required_build_class_counts(prospect)
     if logo_url:
@@ -1126,6 +1179,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         "MANDATORY EXACT SUBSTITUTIONS: "
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
         f"{source_claim_boundary_instruction(prospect)}\n"
+        f"{tenure_contract_instruction(tenure_contract)}\n"
         f"{review_contract_instruction(review_contract)}\n"
         f"{phone_instruction}\n"
         f"{email_instruction}\n"
@@ -1195,6 +1249,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         expected_phone=prospect.get("phone"),
         expected_email=prospect.get("owner_email") or None,
         expected_address=prospect.get("address") or None,
+        expected_tenure=tenure_contract,
         exact_source_claims=exact_source_claim_contracts(prospect),
         expected_form_action=expected_build_form_action(prospect),
         expected_reviews=review_contract,
