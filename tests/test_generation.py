@@ -4057,6 +4057,19 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn(article_location, html)
 
+        for claim in (
+            "We serve Effingham and surrounding communities.",
+            "Test Business serves the Effingham area.",
+            "We serve homeowners and businesses.",
+        ):
+            with self.subTest(claim=claim):
+                html = build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(with_location(claim))),
+                )
+                self.assertIn(claim, html)
+
         ordinary_prose = (
             "Call today, or request service online.",
             "Call us, we can help.",
@@ -4075,6 +4088,9 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             ("Serving Springfield and surrounding communities within 25 miles.", "service location"),
             ("Serving the Springfield area.", "service location"),
             ("serving springfield and surrounding communities within 25 miles.", "service location"),
+            ("We serve Springfield and surrounding communities.", "service location"),
+            ("Test Business serves the Springfield area.", "service location"),
+            ("we serve springfield and surrounding communities.", "service location"),
             ("Serving Effingham and surrounding communities within 50 miles.", "service radius"),
             ("Located in Springfield, IL.", "location"),
         )

@@ -710,6 +710,24 @@ checks, source-location construction, prompt contract, retries, provider
 transport, Connect schemas/jobs, action destinations, and all external-effect
 paths remain unchanged.
 
+### Present-tense service-location contract revision
+
+Exact-head review proves that the location admission trigger recognizes
+`serving` but not the equally claim-bearing `serve` and `serves` forms. A model
+can therefore state `We serve Springfield and surrounding communities` for an
+Effingham prospect without comparing Springfield to the source-owned location.
+The correct boundary must derive all three present-tense forms from one service
+verb family, continue admitting the exact verified location and non-geographic
+audiences, and reject wrong locations across capitalization and optional-article
+forms.
+
+This correction is limited to the contextual service-place trigger and
+both-direction regression coverage; the existing non-geographic audience
+allowlist remains unchanged and is verified on the new verb forms. CSS
+property-value bounds are visibility hardening and remain deferred; this change
+does not alter layout/CSS, source schemas, location construction, prompt text,
+provider/runtime behavior, retry behavior, Connect jobs, or external effects.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -834,6 +852,8 @@ paths remain unchanged.
     keep an optional leading article plus terminal area noun outside the
     contextual matcher's captured place so source-owned `serving the City area`
     claims remain admissible.
+54. Classify `serve`, `serves`, and `serving` as one present-tense
+    service-location claim family while preserving ordinary audience wording.
 
 ### Files touched
 
@@ -968,6 +988,8 @@ override before assembly.
   conformance tests remain isolated in the dependent Connect-provider slice.
 - Desktop/web UI, model catalogs, automatic model loading, and cloud fallback
   remain outside this milestone.
+- Generated inline-style value bounds are tracked as issue #33. Property-value
+  hardening is separate from proving the current local-generation slice.
 
 ## Verification
 
@@ -1181,6 +1203,12 @@ override before assembly.
   exact source location, source-owned article form, and ordinary comma prose,
   while rejecting wrong, article-prefixed wrong, lowercase wrong, and
   wrong-radius claims.
+- The exact-head `serve`/`serves` regression initially failed because all three
+  wrong Springfield forms passed without raising. After deriving those forms
+  from the contextual service verb, the same focused command passed in 0.622
+  seconds. Its positive side retains exact Effingham, article, and generic
+  homeowner-audience copy; its negative side rejects wrong `serve`, `serves`,
+  lowercase, article, contextual, city/state, and radius claims.
 - `LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8000/v1
   GENERATION_TIMEOUT_SECONDS=7200
   /home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python
