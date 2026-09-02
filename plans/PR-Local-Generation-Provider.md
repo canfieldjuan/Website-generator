@@ -383,6 +383,46 @@ deployment, and Connect transport behavior. The exact plumber fixture and both
 zero-count safety scans must pass on the resulting combined head through CUDA
 llama.cpp before the contract is considered satisfied.
 
+### vLLM runtime replacement contract
+
+The operator selected vLLM as the production local runtime. The current local
+transport is OpenAI-compatible, but its default port, environment aliases,
+preflight response assumptions, request body, operator errors, launcher, tests,
+and documentation still encode standalone llama.cpp. In particular, vLLM's
+`/health` contract is successful HTTP status with no required JSON body, while
+the current preflight requires `{"status":"ok"}`; a healthy vLLM server would
+therefore be rejected before generation.
+
+The correct fix must keep `local` as the provider boundary while making vLLM the
+only named local runtime. It must default to the loopback OpenAI API at port
+8000, accept only the generic `LOCAL_GENERATION_*` variables plus explicit
+`VLLM_*` aliases, require a successful non-redirected health response and the
+exact served model ID, and post the existing bounded chat request without
+llama.cpp-only fields. Thinking must remain disabled through the Qwen-supported
+`chat_template_kwargs` request contract. OpenRouter must remain explicit and
+must never become an automatic fallback.
+
+The explicit launcher must invoke an already-installed `vllm serve`, require an
+existing local model path, bind only to loopback, publish the exact
+`qwen/qwen3.8-27b` served name, disable request logging, use vLLM generation
+defaults rather than model-supplied generation config, and default to one
+explicit CUDA device with zero CPU offload. Numeric and path arguments must be
+forwarded as separate arguments without shell evaluation or word splitting.
+The app and Connect provider must only preflight this runtime; neither may start
+it or consume GPU implicitly. The former llama.cpp launcher may remain only as
+a failing deprecation notice until tracked-file deletion is separately
+authorized; no application, documentation, error, or test path may direct an
+operator to it.
+
+This replacement must not change prospect JSON, generated HTML admission,
+template/output semantics, CLI flags, image/email/deployment behavior, Connect
+schemas, or OpenRouter behavior. Tests must cover health/model/chat contract
+directions, ignored legacy LM Studio and llama.cpp variables, launcher boundary
+values, the GPU-only/no-CPU-offload command, and absence of llama.cpp-only
+request fields. Final acceptance still requires a controlled CUDA vLLM fixture,
+both fabrication scans, and explicit runtime unload; prior llama.cpp fixture
+evidence remains historical rather than proof of the new runtime.
+
 ## Scope (this PR)
 
 1. Add a provider-neutral generation module with a local Qwen default and
@@ -507,7 +547,7 @@ llama.cpp before the contract is considered satisfied.
   `references/03-base-template.html`, `references/06-build-prompt.md`,
   `references/07-industry-defaults.md`
 - `.github/workflows/generator-tests.yml`
-- `scripts/start_llama_server.sh`
+- `scripts/start_vllm_server.sh`, `scripts/start_llama_server.sh` (retirement shim)
 - `README.md`
 - `plans/PR-Local-Generation-Provider.md`
 
@@ -515,9 +555,9 @@ llama.cpp before the contract is considered satisfied.
 
 The CLI resolves a `GenerationConfig` from explicit arguments and environment
 configuration. Local is the default, accepts only localhost or literal loopback
-endpoints, ignores environment proxy settings, and preflights standalone `llama.cpp`
+endpoints, ignores environment proxy settings, and preflights standalone vLLM
 `/health` and `/v1/models` responses; OpenRouter requires the operator to select
-it and provide a model. Local generation uses `llama.cpp`'s OpenAI-compatible
+it and provide a model. Local generation uses vLLM's OpenAI-compatible
 `/v1/chat/completions` contract, sends plain system/user messages, disables Qwen
 thinking through chat-template parameters, and rejects any returned reasoning
 or tool-call surface. OpenRouter keeps its existing request path and receives
@@ -531,7 +571,7 @@ restarting an expensive completion after a read timeout. An explicit
 `GENERATION_TIMEOUT_SECONDS` value still overrides either provider default;
 OpenRouter keeps the existing ten-minute default.
 
-The `llama.cpp` adapter requires exactly one OpenAI-compatible choice, a string
+The local OpenAI-compatible adapter requires exactly one choice, a string
 finish reason, a text message, and an object usage record. Any reasoning, tool,
 malformed, or multi-choice output fails closed. The returned finish reason feeds
 the existing normal-completion gate, and the complete-document gate remains the
@@ -611,7 +651,7 @@ override before assembly.
 ## Intentional
 
 - Generation commands do not auto-start or silently fall back from
-  `llama.cpp`; a missing runtime/model exits with the documented standalone
+  vLLM; a missing runtime/model exits with the documented standalone
   startup instruction.
 - OpenRouter is never an automatic fallback because it changes cost and data
   locality.
@@ -634,8 +674,21 @@ override before assembly.
 
 ## Verification
 
+- `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest
+  tests.test_generation.GenerationConfigTests
+  tests.test_generation.VllmStartupScriptTests
+  tests.test_generation.ProviderBoundaryTests` — 40 tests passed, covering the
+  vLLM aliases, ignored legacy runtime aliases, empty-body health contract,
+  exact model admission, OpenAI-compatible chat request, launcher boundaries,
+  one-device CUDA default, zero CPU offload, and retired launcher failure.
+- `bash -n scripts/start_vllm_server.sh` — passed.
+- `git diff --check` — passed after the runtime replacement.
+- The llama.cpp commands and fixtures below are historical evidence from the
+  superseded runtime. They do not verify vLLM or satisfy the replacement's live
+  CUDA acceptance requirement.
+
 - `/home/juan-canfield/.cache/website-redesign-connect-venv/bin/python -m unittest discover -s tests`
-  — 120 tests passed in 3.962 seconds, including the `llama.cpp`
+  — 122 tests passed in 4.015 seconds, including the vLLM
   health/model/chat contract,
   browser- and URL-decoded placeholder admission, startup-script boundaries, and both
   HTML entry points' shared assembly. The suite also proves this slice cannot

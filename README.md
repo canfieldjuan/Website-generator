@@ -75,13 +75,12 @@ The pitch email is generated as a Markdown draft with `[VERCEL_URL_PLACEHOLDER]`
 # Python deps
 pip install -r requirements.txt
 
-# Local HTML generation (install/build llama.cpp first)
-export LLAMA_CPP_MODEL_PATH=/absolute/path/to/Qwen3.8-27B-Q4_K_M.gguf
-# Only needed when llama-server is not on PATH:
-export LLAMA_CPP_SERVER_BIN=/absolute/path/to/llama-server
-# The launcher defaults to full GPU layer offload. Override
-# LLAMA_CPP_GPU_LAYERS only for a different hardware configuration.
-scripts/start_llama_server.sh
+# Local HTML generation (install vLLM first)
+export VLLM_MODEL_PATH=/absolute/path/to/Qwen3.8-27B-Q4_K_M.gguf
+# Only needed when vllm is not on PATH:
+export VLLM_BIN=/absolute/path/to/vllm
+# The launcher defaults to CUDA device 0 and explicitly disables CPU offload.
+scripts/start_vllm_server.sh
 
 # Headless browser (only needed for JS-rendered sites in pipeline.py)
 playwright install chromium
@@ -97,10 +96,10 @@ OPENROUTER_API_KEY=...   # Extraction/images and explicitly selected cloud gener
 RESEND_API_KEY=...       # Required for pipeline.py email send; optional for build.py
 UNSPLASH_ACCESS_KEY=...  # Optional — free hero photos; falls back to Flux generation
 
-# Optional local overrides; these defaults target standalone llama.cpp + Qwen.
-LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8080/v1
+# Optional local overrides; these defaults target standalone vLLM + Qwen.
+LOCAL_GENERATION_BASE_URL=http://127.0.0.1:8000/v1
 LOCAL_GENERATION_MODEL=qwen/qwen3.8-27b
-# Optional. When set, export the same value before starting llama-server.
+# Optional. When set, export the same value before starting vLLM.
 LOCAL_GENERATION_API_KEY=...
 # Local generation defaults to a two-hour request deadline. Override only when needed.
 GENERATION_TIMEOUT_SECONDS=7200
@@ -201,23 +200,24 @@ Six themes are defined in `references/09-themes.md` and `references/02-redesign-
 ## Models
 
 Extraction remains on OpenRouter. HTML and pitch-draft generation use the
-explicitly selected provider, defaulting to standalone local `llama.cpp`:
+explicitly selected provider, defaulting to standalone local vLLM:
 
 | Role | Provider | Default model |
 |---|---|---|
 | Extraction / enrichment | OpenRouter | `anthropic/claude-haiku-4.5` |
-| HTML generation / email draft | Local llama.cpp | `qwen/qwen3.8-27b` |
+| HTML generation / email draft | Local vLLM | `qwen/qwen3.8-27b` |
 | Explicit cloud generation | OpenRouter | `--generation-model` / `OPENROUTER_GENERATION_MODEL` |
 | Hero image (Flux) | OpenRouter | `black-forest-labs/flux.2-max` |
 
 Provider configuration and admission checks live in `lib/generation.py`.
 OpenRouter prompt caching (`cache_control: ephemeral`) is enabled only for the
-cloud build request. Local generation preflights `llama.cpp` through `/health`
+cloud build request. Local generation preflights vLLM through `/health`
 and `/v1/models`, then sends one non-streaming OpenAI-compatible request to
-`/v1/chat/completions`. Both the request and `scripts/start_llama_server.sh`
+`/v1/chat/completions`. Both the request and `scripts/start_vllm_server.sh`
 disable Qwen thinking; reasoning or tool output still fails closed. The script
-binds only to loopback, uses the exact model alias above, and never downloads a
-model or falls back to OpenRouter. For HTML work, the model returns only the
+binds only to loopback, exposes one explicit CUDA device by default, disables
+CPU offload, uses the exact model alias above, and never downloads a model or
+falls back to OpenRouter. For HTML work, the model returns only the
 variable `<body>`; trusted code supplies the base template's head and CSS,
 applies the selected palette and theme, and validates the assembled standalone
 document before it is written or offered to Vercel.

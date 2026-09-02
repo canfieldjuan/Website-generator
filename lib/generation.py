@@ -22,7 +22,7 @@ from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 
 
 DEFAULT_LOCAL_MODEL = "qwen/qwen3.8-27b"
-DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8080/v1"
+DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8000/v1"
 DEFAULT_LOCAL_API_KEY = "no-key"
 DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
@@ -475,12 +475,12 @@ def resolve_generation_config(
             model=local_model,
             base_url=(
                 os.environ.get("LOCAL_GENERATION_BASE_URL")
-                or os.environ.get("LLAMA_CPP_BASE_URL")
+                or os.environ.get("VLLM_BASE_URL")
                 or DEFAULT_LOCAL_BASE_URL
             ),
             api_key=(
                 os.environ.get("LOCAL_GENERATION_API_KEY")
-                or os.environ.get("LLAMA_CPP_API_KEY")
+                or os.environ.get("VLLM_API_KEY")
                 or DEFAULT_LOCAL_API_KEY
             ),
             timeout_seconds=timeout_seconds,
@@ -524,7 +524,7 @@ def create_local_generation_client(config: GenerationConfig) -> requests.Session
     session = requests.Session()
     # A loopback-only provider must not inherit HTTP(S)_PROXY from the shell:
     # requests may otherwise send the complete prompt to that proxy even though
-    # the configured llama.cpp URL itself is local.  OpenRouter continues to
+    # the configured vLLM URL itself is local. OpenRouter continues to
     # honor GenerationConfig.trust_env through create_generation_client.
     session.trust_env = False
     session.headers.update(
@@ -580,7 +580,7 @@ def preflight_generation_provider(
     if config.provider != "local":
         return
     selected_client = client or create_local_generation_client(config)
-    health_url, models_url, _chat_url = _llama_cpp_urls(config.base_url)
+    health_url, models_url, _chat_url = _local_openai_urls(config.base_url)
     preflight_timeout = min(config.timeout_seconds, LOCAL_PREFLIGHT_TIMEOUT_SECONDS)
     try:
         health_response = selected_client.get(
@@ -589,9 +589,6 @@ def preflight_generation_provider(
             allow_redirects=False,
         )
         _raise_for_local_response_status(health_response)
-        health_payload = health_response.json()
-        if not isinstance(health_payload, dict) or health_payload.get("status") != "ok":
-            raise ValueError("health endpoint did not report status=ok")
 
         models_response = selected_client.get(
             models_url,
@@ -614,13 +611,13 @@ def preflight_generation_provider(
     except Exception as exc:
         raise GenerationProviderUnavailable(
             "Local generation is unavailable at "
-            f"{config.base_url}. Start standalone llama.cpp with: "
-            "scripts/start_llama_server.sh"
+            f"{config.base_url}. Start standalone vLLM with: "
+            "scripts/start_vllm_server.sh"
         ) from exc
     if config.model not in available:
         raise GenerationProviderUnavailable(
-            f"Local model alias {config.model!r} is not served by llama.cpp. "
-            "Start it with: scripts/start_llama_server.sh"
+            f"Local model alias {config.model!r} is not served by vLLM. "
+            "Start it with: scripts/start_vllm_server.sh"
         )
 
 
@@ -693,7 +690,7 @@ def _generate_local_text(
     client: Any | None,
 ) -> GenerationResult:
     selected_client = client or create_local_generation_client(config)
-    _health_url, _models_url, endpoint = _llama_cpp_urls(config.base_url)
+    _health_url, _models_url, endpoint = _local_openai_urls(config.base_url)
     request_body = {
         "model": config.model,
         "messages": [
@@ -704,7 +701,6 @@ def _generate_local_text(
         "max_tokens": config.max_output_tokens,
         "stream": False,
         "chat_template_kwargs": {"enable_thinking": False},
-        "reasoning_format": "deepseek",
     }
     try:
         response = selected_client.post(
@@ -2406,7 +2402,7 @@ def _replace_root_property(head: str, property_name: str, value: str) -> str:
     return updated
 
 
-def _llama_cpp_urls(base_url: str) -> tuple[str, str, str]:
+def _local_openai_urls(base_url: str) -> tuple[str, str, str]:
     try:
         parsed = urlsplit(base_url)
         hostname = parsed.hostname

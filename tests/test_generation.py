@@ -191,12 +191,14 @@ class FakeLocalResponse:
         self.json_error = json_error
         self.status_error = status_error
         self.status_code = status_code
+        self.json_calls = 0
 
     def raise_for_status(self):
         if self.status_error:
             raise self.status_error
 
     def json(self):
+        self.json_calls += 1
         if self.json_error:
             raise self.json_error
         return self.payload
@@ -360,12 +362,12 @@ class GenerationConfigTests(unittest.TestCase):
 
         self.assertEqual(selected.model, "local/from-cli")
 
-    def test_llama_cpp_endpoint_aliases_are_supported(self):
+    def test_vllm_endpoint_aliases_are_supported(self):
         with patch.dict(
             os.environ,
             {
-                "LLAMA_CPP_BASE_URL": "http://127.0.0.1:4321/v1",
-                "LLAMA_CPP_API_KEY": "local-key",
+                "VLLM_BASE_URL": "http://127.0.0.1:4321/v1",
+                "VLLM_API_KEY": "local-key",
             },
             clear=True,
         ):
@@ -374,12 +376,14 @@ class GenerationConfigTests(unittest.TestCase):
         self.assertEqual(selected.base_url, "http://127.0.0.1:4321/v1")
         self.assertEqual(selected.api_key, "local-key")
 
-    def test_lm_studio_aliases_no_longer_select_the_local_runtime(self):
+    def test_legacy_runtime_aliases_no_longer_select_the_local_runtime(self):
         with patch.dict(
             os.environ,
             {
                 "LM_STUDIO_BASE_URL": "http://127.0.0.1:4321/v1",
                 "LM_STUDIO_API_KEY": "legacy-key",
+                "LLAMA_CPP_BASE_URL": "http://127.0.0.1:4322/v1",
+                "LLAMA_CPP_API_KEY": "older-key",
             },
             clear=True,
         ):
@@ -421,8 +425,22 @@ class GenerationConfigTests(unittest.TestCase):
         self.assertEqual(selected.max_output_tokens, 32768)
 
 
-class LlamaCppStartupScriptTests(unittest.TestCase):
-    script = Path(__file__).resolve().parents[1] / "scripts/start_llama_server.sh"
+class VllmStartupScriptTests(unittest.TestCase):
+    script = Path(__file__).resolve().parents[1] / "scripts/start_vllm_server.sh"
+    retired_script = (
+        Path(__file__).resolve().parents[1] / "scripts/start_llama_server.sh"
+    )
+
+    @staticmethod
+    def environment(**overrides):
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("VLLM_")
+            and key not in {"LOCAL_GENERATION_MODEL", "LOCAL_GENERATION_API_KEY"}
+        }
+        environment.update(overrides)
+        return environment
 
     def test_help_does_not_require_or_load_a_model(self):
         completed = subprocess.run(
@@ -433,7 +451,18 @@ class LlamaCppStartupScriptTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("LLAMA_CPP_MODEL_PATH", completed.stdout)
+        self.assertIn("VLLM_MODEL_PATH", completed.stdout)
+
+    def test_retired_llama_launcher_fails_with_vllm_instruction(self):
+        completed = subprocess.run(
+            [str(self.retired_script)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("scripts/start_vllm_server.sh", completed.stderr)
 
     def test_non_loopback_host_is_rejected_before_launch(self):
         completed = subprocess.run(
@@ -441,12 +470,11 @@ class LlamaCppStartupScriptTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            env={
-                **os.environ,
-                "LLAMA_CPP_SERVER_BIN": "/bin/true",
-                "LLAMA_CPP_MODEL_PATH": str(Path(__file__).resolve()),
-                "LLAMA_CPP_HOST": "0.0.0.0",
-            },
+            env=self.environment(
+                VLLM_BIN="/bin/true",
+                VLLM_MODEL_PATH=str(Path(__file__).resolve()),
+                VLLM_HOST="0.0.0.0",
+            ),
         )
 
         self.assertEqual(completed.returncode, 2)
@@ -458,57 +486,67 @@ class LlamaCppStartupScriptTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            env={
-                **os.environ,
-                "LLAMA_CPP_SERVER_BIN": "/bin/true",
-                "LLAMA_CPP_MODEL_PATH": "",
-            },
+            env=self.environment(VLLM_BIN="/bin/true", VLLM_MODEL_PATH=""),
         )
 
         self.assertEqual(completed.returncode, 2)
-        self.assertIn("LLAMA_CPP_MODEL_PATH", completed.stderr)
+        self.assertIn("VLLM_MODEL_PATH", completed.stderr)
 
-    def test_launcher_defaults_to_all_gpu_layers(self):
+    def test_launcher_defaults_to_one_gpu_and_zero_cpu_offload(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            fake_server = root / "fake-llama-server"
+            fake_server = root / "fake-vllm"
             fake_server.write_text(
-                '#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n',
+                '#!/usr/bin/env bash\n'
+                'printf "CUDA_VISIBLE_DEVICES=%s\\n" "${CUDA_VISIBLE_DEVICES-}"\n'
+                'printf "%s\\n" "$@"\n',
                 encoding="utf-8",
             )
             fake_server.chmod(0o755)
             model = root / "qwen.gguf"
             model.write_bytes(b"")
-            environment = {
-                key: value
-                for key, value in os.environ.items()
-                if key != "LLAMA_CPP_GPU_LAYERS"
-            }
-            environment.update(
-                {
-                    "LLAMA_CPP_SERVER_BIN": str(fake_server),
-                    "LLAMA_CPP_MODEL_PATH": str(model),
-                }
-            )
             completed = subprocess.run(
                 [str(self.script)],
                 check=False,
                 capture_output=True,
                 text=True,
-                env=environment,
+                env=self.environment(
+                    VLLM_BIN=str(fake_server),
+                    VLLM_MODEL_PATH=str(model),
+                ),
             )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         arguments = completed.stdout.splitlines()
-        self.assertEqual(arguments[arguments.index("--n-gpu-layers") + 1], "all")
+        self.assertEqual(arguments[0], "CUDA_VISIBLE_DEVICES=0")
+        self.assertEqual(arguments[1:3], ["serve", str(model)])
+        self.assertEqual(
+            arguments[arguments.index("--tensor-parallel-size") + 1], "1"
+        )
+        self.assertEqual(arguments[arguments.index("--cpu-offload-gb") + 1], "0")
+        self.assertEqual(
+            arguments[arguments.index("--generation-config") + 1], "vllm"
+        )
+        self.assertEqual(
+            arguments[arguments.index("--default-chat-template-kwargs") + 1],
+            '{"enable_thinking":false}',
+        )
+        self.assertIn("--disable-log-requests", arguments)
+        self.assertNotIn("--api-key", arguments)
 
     def test_numeric_boundaries_reject_values_outside_the_contract(self):
         invalid_values = {
-            "port below minimum": {"LLAMA_CPP_PORT": "0"},
-            "port above maximum": {"LLAMA_CPP_PORT": "65536"},
-            "empty context": {"LLAMA_CPP_CONTEXT_SIZE": "0"},
-            "negative GPU layers": {"LLAMA_CPP_GPU_LAYERS": "-1"},
-            "empty server timeout": {"LLAMA_CPP_SERVER_TIMEOUT": "0"},
+            "port below minimum": {"VLLM_PORT": "0"},
+            "port above maximum": {"VLLM_PORT": "65536"},
+            "empty context": {"VLLM_MAX_MODEL_LEN": "0"},
+            "zero GPU fraction": {"VLLM_GPU_MEMORY_UTILIZATION": "0"},
+            "GPU fraction above one": {"VLLM_GPU_MEMORY_UTILIZATION": "1.01"},
+            "zero tensor parallelism": {"VLLM_TENSOR_PARALLEL_SIZE": "0"},
+            "malformed CUDA list": {"VLLM_CUDA_VISIBLE_DEVICES": "0, 1"},
+            "more workers than visible GPUs": {
+                "VLLM_TENSOR_PARALLEL_SIZE": "2",
+                "VLLM_CUDA_VISIBLE_DEVICES": "0",
+            },
         }
         for label, overrides in invalid_values.items():
             with self.subTest(label=label):
@@ -517,20 +555,48 @@ class LlamaCppStartupScriptTests(unittest.TestCase):
                     check=False,
                     capture_output=True,
                     text=True,
-                    env={
-                        **os.environ,
-                        "LLAMA_CPP_SERVER_BIN": "/bin/true",
-                        "LLAMA_CPP_MODEL_PATH": str(Path(__file__).resolve()),
+                    env=self.environment(
+                        VLLM_BIN="/bin/true",
+                        VLLM_MODEL_PATH=str(Path(__file__).resolve()),
                         **overrides,
-                    },
+                    ),
                 )
 
                 self.assertEqual(completed.returncode, 2)
 
+    def test_numeric_boundary_values_are_accepted(self):
+        valid_values = {
+            "minimum port and sizes": {
+                "VLLM_PORT": "1",
+                "VLLM_MAX_MODEL_LEN": "1",
+                "VLLM_GPU_MEMORY_UTILIZATION": "0.1",
+                "VLLM_TENSOR_PARALLEL_SIZE": "1",
+            },
+            "maximum port and GPU fraction": {
+                "VLLM_PORT": "65535",
+                "VLLM_GPU_MEMORY_UTILIZATION": "1",
+            },
+        }
+        for label, overrides in valid_values.items():
+            with self.subTest(label=label):
+                completed = subprocess.run(
+                    [str(self.script)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=self.environment(
+                        VLLM_BIN="/bin/true",
+                        VLLM_MODEL_PATH=str(Path(__file__).resolve()),
+                        **overrides,
+                    ),
+                )
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_safe_runtime_contract_is_forwarded_without_word_splitting(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            fake_server = root / "fake llama-server"
+            fake_server = root / "fake vllm"
             fake_server.write_text(
                 '#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n',
                 encoding="utf-8",
@@ -543,31 +609,36 @@ class LlamaCppStartupScriptTests(unittest.TestCase):
                 check=False,
                 capture_output=True,
                 text=True,
-                env={
-                    **os.environ,
-                    "LLAMA_CPP_SERVER_BIN": str(fake_server),
-                    "LLAMA_CPP_MODEL_PATH": str(model),
-                    "LLAMA_CPP_HOST": "127.0.0.1",
-                    "LLAMA_CPP_PORT": "18080",
-                    "LLAMA_CPP_CONTEXT_SIZE": "1024",
-                    "LLAMA_CPP_GPU_LAYERS": "0",
-                    "LLAMA_CPP_CACHE_TYPE_K": "f16",
-                    "LLAMA_CPP_CACHE_TYPE_V": "f16",
-                    "LLAMA_CPP_SERVER_TIMEOUT": "60",
-                    "LOCAL_GENERATION_MODEL": "local/test-model",
-                    "LOCAL_GENERATION_API_KEY": "test-key",
-                },
+                env=self.environment(
+                    VLLM_BIN=str(fake_server),
+                    VLLM_MODEL_PATH=str(model),
+                    VLLM_HOST="127.0.0.1",
+                    VLLM_PORT="18080",
+                    VLLM_MAX_MODEL_LEN="1024",
+                    VLLM_GPU_MEMORY_UTILIZATION="0.75",
+                    VLLM_TENSOR_PARALLEL_SIZE="2",
+                    VLLM_CUDA_VISIBLE_DEVICES="0,1",
+                    LOCAL_GENERATION_MODEL="local/test-model",
+                    LOCAL_GENERATION_API_KEY="test-key",
+                ),
             )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         arguments = completed.stdout.splitlines()
-        self.assertEqual(arguments[arguments.index("--model") + 1], str(model))
-        self.assertEqual(arguments[arguments.index("--alias") + 1], "local/test-model")
+        self.assertEqual(arguments[:2], ["serve", str(model)])
+        self.assertEqual(
+            arguments[arguments.index("--served-model-name") + 1],
+            "local/test-model",
+        )
         self.assertEqual(arguments[arguments.index("--host") + 1], "127.0.0.1")
         self.assertEqual(arguments[arguments.index("--port") + 1], "18080")
-        self.assertEqual(arguments[arguments.index("--reasoning") + 1], "off")
-        self.assertEqual(arguments[arguments.index("--reasoning-budget") + 1], "0")
-        self.assertIn("--no-webui", arguments)
+        self.assertEqual(arguments[arguments.index("--max-model-len") + 1], "1024")
+        self.assertEqual(
+            arguments[arguments.index("--gpu-memory-utilization") + 1], "0.75"
+        )
+        self.assertEqual(
+            arguments[arguments.index("--tensor-parallel-size") + 1], "2"
+        )
         self.assertEqual(arguments[arguments.index("--api-key") + 1], "test-key")
 
 
@@ -644,10 +715,11 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(
             [call[:2] for call in client.calls],
             [
-                ("GET", "http://127.0.0.1:8080/health"),
-                ("GET", "http://127.0.0.1:8080/v1/models"),
+                ("GET", "http://127.0.0.1:8000/health"),
+                ("GET", "http://127.0.0.1:8000/v1/models"),
             ],
         )
+        self.assertEqual(client.health_response.json_calls, 0)
         self.assertTrue(
             all(call[2]["allow_redirects"] is False for call in client.calls)
         )
@@ -673,7 +745,7 @@ class ProviderBoundaryTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(
-            GenerationProviderUnavailable, "scripts/start_llama_server.sh"
+            GenerationProviderUnavailable, "scripts/start_vllm_server.sh"
         ):
             preflight_generation_provider(selected, client=client)
 
@@ -681,31 +753,30 @@ class ProviderBoundaryTests(unittest.TestCase):
         selected = config()
         client = FakeLocalClient(health_status_error=ConnectionError("offline"))
 
-        with self.assertRaisesRegex(
-            GenerationProviderUnavailable, "standalone llama.cpp"
-        ):
+        with self.assertRaisesRegex(GenerationProviderUnavailable, "standalone vLLM"):
             preflight_generation_provider(selected, client=client)
 
-    def test_local_preflight_rejects_non_ready_health_without_model_lookup(self):
+    def test_local_preflight_accepts_empty_vllm_health_body(self):
         selected = config()
-        client = FakeLocalClient(health_payload={"status": "loading"})
+        client = FakeLocalClient(health_payload=None)
 
-        with self.assertRaisesRegex(
-            GenerationProviderUnavailable, "standalone llama.cpp"
-        ):
-            preflight_generation_provider(selected, client=client)
+        preflight_generation_provider(selected, client=client)
 
         self.assertEqual(
             [call[:2] for call in client.calls],
-            [("GET", "http://127.0.0.1:8080/health")],
+            [
+                ("GET", "http://127.0.0.1:8000/health"),
+                ("GET", "http://127.0.0.1:8000/v1/models"),
+            ],
         )
+        self.assertEqual(client.health_response.json_calls, 0)
 
     def test_local_preflight_rejects_redirect_without_following_it(self):
         client = FakeLocalClient(health_status_code=307)
 
         with self.assertRaisesRegex(
             GenerationProviderUnavailable,
-            "standalone llama.cpp",
+            "standalone vLLM",
         ):
             preflight_generation_provider(config(), client=client)
 
@@ -716,9 +787,7 @@ class ProviderBoundaryTests(unittest.TestCase):
         selected = config()
         client = FakeLocalClient(models_payload={"data": [{"id": None}]})
 
-        with self.assertRaisesRegex(
-            GenerationProviderUnavailable, "standalone llama.cpp"
-        ):
+        with self.assertRaisesRegex(GenerationProviderUnavailable, "standalone vLLM"):
             preflight_generation_provider(selected, client=client)
 
     def test_local_request_uses_plain_content_without_cloud_cache_metadata(self):
@@ -738,7 +807,7 @@ class ProviderBoundaryTests(unittest.TestCase):
 
         method, url, call = client.calls[0]
         self.assertEqual(method, "POST")
-        self.assertEqual(url, "http://127.0.0.1:8080/v1/chat/completions")
+        self.assertEqual(url, "http://127.0.0.1:8000/v1/chat/completions")
         self.assertEqual(
             call["json"]["messages"],
             [
@@ -750,7 +819,7 @@ class ProviderBoundaryTests(unittest.TestCase):
             call["json"]["chat_template_kwargs"],
             {"enable_thinking": False},
         )
-        self.assertEqual(call["json"]["reasoning_format"], "deepseek")
+        self.assertNotIn("reasoning_format", call["json"])
         self.assertIs(call["json"]["stream"], False)
         self.assertEqual(call["timeout"], config().timeout_seconds)
         self.assertIs(call["allow_redirects"], False)
@@ -885,7 +954,7 @@ class ProviderBoundaryTests(unittest.TestCase):
                 client=client,
             )
 
-    def test_local_request_rejects_invalid_llama_cpp_base_url_before_dispatch(self):
+    def test_local_request_rejects_invalid_vllm_base_url_before_dispatch(self):
         invalid_urls = {
             "wrong path": "http://127.0.0.1:8080/not-v1",
             "LM Studio native path": "http://127.0.0.1:8080/api/v1",
