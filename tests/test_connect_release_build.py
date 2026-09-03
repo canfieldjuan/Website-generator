@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import build
 from scripts.build_connect_provider import (
+    APPROVED_RELEASE_AUTHORITIES,
     BINARY_NAME,
     BUNDLE_DIRECTORY,
     BUNDLE_FILENAME,
@@ -24,7 +25,13 @@ from scripts.build_connect_provider import (
 )
 
 
-def encoded_key(value: bytes = b"P" * 32) -> str:
+def encoded_key(value: bytes | None = None) -> str:
+    if value is None:
+        return next(
+            public_key
+            for key_id, public_key in APPROVED_RELEASE_AUTHORITIES
+            if key_id == "local-connect-prod-2026-01"
+        )
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
@@ -53,6 +60,12 @@ class ConnectReleaseBuildTests(unittest.TestCase):
     def test_valid_production_keyring_is_admitted_exactly(self):
         original = self.keyring.read_bytes()
         self.assertEqual(validate_release_keyring(self.keyring), original)
+
+    def test_production_shaped_but_unapproved_authority_is_rejected(self):
+        self.write_keyring(public_key=encoded_key(b"Q" * 32))
+
+        with self.assertRaisesRegex(ReleaseBuildError, "approved production authority"):
+            validate_release_keyring(self.keyring)
 
     def test_keyring_reader_rejects_windows_reparse_metadata_before_open(self):
         path_type = type(self.keyring)

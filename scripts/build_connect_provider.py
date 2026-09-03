@@ -33,6 +33,14 @@ MAX_KEYRING_BYTES = 64 * 1024
 MAX_KEYS = 16
 KEY_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 NON_PRODUCTION_KEY_TOKENS = frozenset(("dev", "example", "fixture", "test"))
+APPROVED_RELEASE_AUTHORITIES = frozenset(
+    {
+        (
+            "local-connect-prod-2026-01",
+            "gN8pJj9W2H89LBsIJqk5ydmlxNCrbSXxAbBDYQf1fa0",
+        )
+    }
+)
 REPARSE_POINT_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 
@@ -173,6 +181,7 @@ def validate_release_keyring(path: Path) -> bytes:
             "Official packages require at least one bounded issuer key"
         )
     observed: set[str] = set()
+    observed_authorities: set[tuple[str, str]] = set()
     for item in keys:
         if not isinstance(item, dict) or set(item) != {
             "key_id",
@@ -197,8 +206,14 @@ def validate_release_keyring(path: Path) -> bytes:
             )
         if item["algorithm"] != "Ed25519":
             raise ReleaseBuildError("Official packages require Ed25519 issuer keys")
-        _decode_base64url(item["public_key_base64url"])
+        public_key = item["public_key_base64url"]
+        _decode_base64url(public_key)
         observed.add(key_id)
+        observed_authorities.add((key_id, public_key))
+    if observed_authorities != APPROVED_RELEASE_AUTHORITIES:
+        raise ReleaseBuildError(
+            "Connect entitlement keyring does not match the approved production authority"
+        )
     return content
 
 

@@ -202,10 +202,12 @@ LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE=/absolute/path/to/release/keyring.json \
 ```
 
 The build fails unless the selected file is a bounded, strict, non-empty
-Ed25519 keyring whose key IDs are explicitly production-shaped. PyInstaller
-places its exact bytes in the frozen package resource trusted by the runtime;
-`LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE` is not read by the executable and
-cannot override its authority after build.
+Ed25519 keyring that exactly matches the production authority approved in the
+release builder; a merely production-shaped key ID is insufficient. This
+semantic authority pin keeps a raced path substitution from changing which
+issuer the package trusts. PyInstaller places the validated bytes in the frozen
+package resource trusted by the runtime; `LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE`
+is not read by the executable and cannot override its authority after build.
 
 Windows release builds use the same entry point on a native Windows host:
 

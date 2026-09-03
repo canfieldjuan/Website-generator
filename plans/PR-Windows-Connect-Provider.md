@@ -79,7 +79,9 @@ candidates. Linux continues through the existing descriptor, ownership, mode,
 The release builder chooses `.exe` only on Windows. Its keyring reader rejects
 symlink and Windows reparse metadata on the leaf or any ancestor before opening
 the file, then binds the opened descriptor and completed read to the original
-file identity. CI builds
+file identity. Because that path check alone cannot exclude a raced ancestor
+swap, the parsed issuer IDs and public keys must also exactly match the
+production authority approved in the builder. CI builds
 on a native Windows runner because PyInstaller is not a cross-compiler, then
 executes the packaged entitlement status adapter. The local VM supplies the
 final package and cross-app acceptance host.
@@ -111,8 +113,9 @@ final package and cross-app acceptance host.
 - The native package job is pinned to accepted `connect-contracts` commit
   `3005d82a7be885fba36f8688b5967a5b56a0abea`; the unrelated Linux unit job keeps
   its pre-existing pin.
-- `python -m unittest -v tests.test_connect_release_build` passed all 13
-  release-builder checks on Linux, including ordinary-keyring admission plus
+- `python -m unittest -v tests.test_connect_release_build` passed all 14
+  release-builder checks on Linux, including exact approved-authority
+  admission, production-shaped authority substitution refusal, and
   symbolic-link, leaf reparse, and ancestor-reparse refusal before open.
 - `python -m unittest -v tests.test_connect_windows
   tests.test_connect_release_build` passed the earlier release-builder checks
