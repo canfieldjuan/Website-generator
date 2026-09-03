@@ -168,12 +168,12 @@ class WindowsConnectStorageTests(unittest.TestCase):
             try:
                 self.assertEqual(WINDOWS_LOCK_OFFSET, 0)
                 self.assertEqual(WINDOWS_LOCK_LENGTH, 1)
-                self.assertEqual(lock.path.read_bytes(), b"\0")
                 with self.assertRaises(EntitlementActivationError) as raised:
                     install_entitlement(source, gate)
                 self.assertEqual(raised.exception.code, ACTIVATION_BUSY_CODE)
             finally:
                 lock.close()
+            self.assertEqual(lock.path.read_bytes(), b"\0")
 
 
 if __name__ == "__main__":
