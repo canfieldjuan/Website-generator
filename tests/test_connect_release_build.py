@@ -8,10 +8,12 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+import build
 from scripts.build_connect_provider import (
     BINARY_NAME,
     BUNDLE_DIRECTORY,
     BUNDLE_FILENAME,
+    CONNECT_REFERENCE_FILES,
     KEYRING_ENV,
     ReleaseBuildError,
     build_release,
@@ -86,6 +88,18 @@ class ConnectReleaseBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(ReleaseBuildError, "public key is invalid"):
             validate_release_keyring(self.keyring)
 
+    def test_keyring_parser_normalizes_numeric_and_recursion_limits(self):
+        self.keyring.write_text('{"keys":' + "9" * 5_000 + "}", encoding="utf-8")
+        with self.assertRaisesRegex(ReleaseBuildError, "invalid JSON"):
+            validate_release_keyring(self.keyring)
+
+        with patch(
+            "scripts.build_connect_provider.json.loads",
+            side_effect=RecursionError("maximum recursion depth exceeded"),
+        ):
+            with self.assertRaisesRegex(ReleaseBuildError, "invalid JSON"):
+                validate_release_keyring(self.keyring)
+
     def test_builder_stages_fixed_resource_and_requires_expected_executable(self):
         dist = self.root / "dist"
         work = self.root / "work"
@@ -101,6 +115,13 @@ class ConnectReleaseBuildTests(unittest.TestCase):
             observed["resource_bytes"] = Path(source).read_bytes()
             observed["destination"] = destination
             staged_dist = Path(command[command.index("--distpath") + 1])
+            observed["staged_dist"] = staged_dist
+            add_data_values = [
+                command[index + 1]
+                for index, value in enumerate(command)
+                if value == "--add-data"
+            ]
+            observed["add_data_values"] = add_data_values
             staged_dist.mkdir(parents=True, exist_ok=True)
             (staged_dist / BINARY_NAME).write_bytes(b"executable")
 
@@ -115,6 +136,18 @@ class ConnectReleaseBuildTests(unittest.TestCase):
         self.assertEqual(observed["resource_name"], BUNDLE_FILENAME)
         self.assertEqual(observed["resource_bytes"], self.keyring.read_bytes())
         self.assertEqual(observed["destination"], BUNDLE_DIRECTORY)
+        self.assertEqual(observed["staged_dist"].parent.parent, dist)
+        bundled_sources = {
+            Path(value.split(os.pathsep, 1)[0]).relative_to(observed["cwd"])
+            for value in observed["add_data_values"][1:]
+        }
+        self.assertEqual(bundled_sources, set(CONNECT_REFERENCE_FILES))
+        self.assertTrue(
+            all(
+                value.split(os.pathsep, 1)[1] == f"{BUNDLE_DIRECTORY}/references"
+                for value in observed["add_data_values"][1:]
+            )
+        )
         self.assertIn("--onefile", observed["command"])
         self.assertTrue(observed["check"])
 
@@ -125,6 +158,15 @@ class ConnectReleaseBuildTests(unittest.TestCase):
                 work_dir=work,
                 runner=lambda *args, **kwargs: None,
             )
+
+    def test_build_module_resolves_frozen_reference_assets(self):
+        with patch.object(build.sys, "_MEIPASS", "/tmp/frozen-app", create=True):
+            resolved = build.runtime_resource_path("references/06-build-prompt.md")
+
+        self.assertEqual(
+            resolved,
+            "/tmp/frozen-app/website_redesign_data/references/06-build-prompt.md",
+        )
 
     def test_cli_requires_build_time_keyring_configuration(self):
         error = StringIO()

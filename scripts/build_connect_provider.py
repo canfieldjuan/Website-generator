@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +22,13 @@ KEYRING_ENV = "LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE"
 BINARY_NAME = "website-redesign-connect"
 BUNDLE_DIRECTORY = "website_redesign_data"
 BUNDLE_FILENAME = "connect-entitlement-keyring.json"
+CONNECT_REFERENCE_FILES = (
+    Path("references/03-base-template.html"),
+    Path("references/06-build-prompt.md"),
+    Path("references/07-industry-defaults.md"),
+    Path("references/09-themes.md"),
+    Path("references/10-section-orders.md"),
+)
 MAX_KEYRING_BYTES = 64 * 1024
 MAX_KEYS = 16
 KEY_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
@@ -43,7 +50,7 @@ def _strict_json_object(content: bytes) -> dict[str, Any]:
 
     try:
         value = json.loads(content, object_pairs_hook=reject_duplicates)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise ReleaseBuildError("Connect entitlement keyring is invalid JSON") from exc
     if not isinstance(value, dict):
         raise ReleaseBuildError("Connect entitlement keyring must be an object")
@@ -157,12 +164,14 @@ def build_release(
     dist_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="website-redesign-release-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix=".website-redesign-release-", dir=dist_dir
+    ) as temporary:
         temporary_root = Path(temporary)
         staged = temporary_root / BUNDLE_FILENAME
         staged_dist = temporary_root / "dist"
         staged.write_bytes(content)
-        command: Sequence[str] = (
+        command: list[str] = [
             sys.executable,
             "-m",
             "PyInstaller",
@@ -179,8 +188,20 @@ def build_release(
             str(work_dir),
             "--add-data",
             f"{staged}{os.pathsep}{BUNDLE_DIRECTORY}",
-            str(ROOT / "connect_provider.py"),
-        )
+        ]
+        for relative_path in CONNECT_REFERENCE_FILES:
+            source = ROOT / relative_path
+            if not source.is_file():
+                raise ReleaseBuildError(
+                    f"Required Connect package resource is unavailable: {relative_path}"
+                )
+            command.extend(
+                (
+                    "--add-data",
+                    f"{source}{os.pathsep}{BUNDLE_DIRECTORY}/references",
+                )
+            )
+        command.append(str(ROOT / "connect_provider.py"))
         runner(command, cwd=ROOT, check=True)
         produced = staged_dist / BINARY_NAME
         if not produced.is_file():
