@@ -63,7 +63,7 @@ current-user/SYSTEM/Administrators DACL on each newly created directory,
 verifies the owner and effective DACL on every trusted root/descendant, rejects broad content or mutation grants,
 Connect-owned reparse points, and non-regular files, accepts OWNER RIGHTS only
 as the already-validated owner, bounds every read, writes through a flushed
-destination-specific same-directory temporary file that a serialized writer
+same-directory `.<destination-filename>.tmp` file that a serialized writer
 safely reclaims after a crash, retries transient Windows sharing violations for
 a bounded interval, publishes
 `local-connect-v2-<instance_id>.json`, holds the matching hidden
