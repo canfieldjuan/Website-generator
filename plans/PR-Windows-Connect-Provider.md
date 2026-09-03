@@ -13,9 +13,10 @@ are embedded in otherwise platform-neutral provider and entitlement code.
 
 ## Scope (this PR)
 
-1. Add a small Windows filesystem adapter for Local AppData roots, reparse-point
-   refusal, bounded regular-file reads, atomic replacement, and non-blocking
-   process locks.
+1. Add a small Windows filesystem adapter for Local AppData roots, effective
+   DACL and reparse-point refusal, bounded regular-file reads, atomic
+   replacement, and non-blocking process locks over byte offset `0`, length
+   `1`.
 2. Use the accepted Windows Connect paths for runtime registration,
    application-private state, and the shared entitlement while preserving all
    existing Linux paths and checks.
@@ -45,11 +46,12 @@ are embedded in otherwise platform-neutral provider and entitlement code.
 
 Windows derives shared Connect files from `%LOCALAPPDATA%\LocalConnect` and
 private Website Redesign state from `%LOCALAPPDATA%\website-redesign\state`.
-The adapter admits only absolute per-user roots, rejects Connect-owned reparse
-points and non-regular files, bounds every read, writes through a flushed
-same-directory temporary file, and uses `msvcrt` byte-range locks for
-cross-process exclusion. Linux continues through the existing descriptor,
-ownership, mode, `flock`, and directory-`fsync` paths.
+The adapter admits only absolute per-user roots, verifies the owner and DACL on
+every trusted root/descendant, rejects broad content or mutation grants,
+Connect-owned reparse points, and non-regular files, bounds every read, writes
+through a flushed same-directory temporary file, and uses `msvcrt` byte-range
+locks for cross-process exclusion. Linux continues through the existing
+descriptor, ownership, mode, `flock`, and directory-`fsync` paths.
 
 The release builder chooses `.exe` only on Windows. CI builds on a native
 Windows runner because PyInstaller is not a cross-compiler, then executes the

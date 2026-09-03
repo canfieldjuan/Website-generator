@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -24,7 +25,12 @@ from lib.connect_v2 import (
     remove_registration_if_owned,
     write_registration,
 )
-from lib.connect_windows import WindowsFileLock, local_app_data_root
+from lib.connect_windows import (
+    WINDOWS_LOCK_LENGTH,
+    WINDOWS_LOCK_OFFSET,
+    WindowsFileLock,
+    local_app_data_root,
+)
 
 
 TOKEN = "A" * 64
@@ -101,6 +107,23 @@ class WindowsConnectStorageTests(unittest.TestCase):
                 first.close()
                 first.close()
 
+    def test_local_app_data_rejects_broad_read_acl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run(
+                [
+                    "icacls",
+                    directory,
+                    "/grant",
+                    "*S-1-1-0:(OI)(CI)R",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            with self.assertRaises(OSError):
+                local_app_data_root(directory)
+
     def test_entitlement_install_status_and_cross_process_lock_contract(self):
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -131,6 +154,9 @@ class WindowsConnectStorageTests(unittest.TestCase):
 
             lock = WindowsFileLock(destination.parent / ENTITLEMENT_LOCK_NAME)
             try:
+                self.assertEqual(WINDOWS_LOCK_OFFSET, 0)
+                self.assertEqual(WINDOWS_LOCK_LENGTH, 1)
+                self.assertEqual(lock.path.read_bytes(), b"\0")
                 with self.assertRaises(EntitlementActivationError) as raised:
                     install_entitlement(source, gate)
                 self.assertEqual(raised.exception.code, ACTIVATION_BUSY_CODE)

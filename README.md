@@ -218,10 +218,13 @@ $env:LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE = "C:\secure\connect-public-keyring.
 
 The result is `dist\website-redesign-connect.exe`. Windows discovery and the
 shared entitlement live under `%LOCALAPPDATA%\LocalConnect\`; provider-owned
-job state lives under `%LOCALAPPDATA%\website-redesign\state\`. The executable
-does not install or start a model runtime. An OpenAI-compatible vLLM endpoint
-serving the pinned model alias must already be reachable on loopback before the
-provider can publish its registration.
+job state lives under `%LOCALAPPDATA%\website-redesign\state\`. The runtime
+rejects reparse points and DACLs that grant content or mutation rights beyond
+the current user, SYSTEM, or built-in Administrators. Shared locks use byte
+offset `0`, length `1`. The executable does not install or start a model
+runtime. An OpenAI-compatible vLLM endpoint serving the pinned model alias must
+already be reachable on loopback before the provider can publish its
+registration.
 
 An official package exposes the app-local activation adapter without starting
 vLLM or the provider:
