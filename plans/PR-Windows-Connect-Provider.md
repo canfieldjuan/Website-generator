@@ -63,7 +63,8 @@ current-user/SYSTEM/Administrators DACL on each newly created directory,
 verifies the owner and effective DACL on every trusted root/descendant, rejects broad content or mutation grants,
 Connect-owned reparse points, and non-regular files, accepts OWNER RIGHTS only
 as the already-validated owner, bounds every read, writes through a flushed
-same-directory temporary file, retries transient Windows sharing violations for
+destination-specific same-directory temporary file that a serialized writer
+safely reclaims after a crash, retries transient Windows sharing violations for
 a bounded interval, publishes
 `local-connect-v2-<instance_id>.json`, holds the matching hidden
 `.local-connect-v2-<instance_id>.lock` path from before bind/publication through
@@ -103,7 +104,7 @@ final package and cross-app acceptance host.
 ## Verification
 
 - `CONNECT_CONTRACTS_DIR=../connect-contracts python -m unittest -v
-  tests.test_connect_provider tests.test_entitlement_activation` passed all 78
+  tests.test_connect_provider tests.test_entitlement_activation` passed all 79
   focused provider and entitlement tests.
 - `python -m unittest -v tests.test_connect_release_build` passed all 12
   release-builder checks on Linux, including ordinary-keyring admission plus
@@ -138,7 +139,7 @@ final package and cross-app acceptance host.
 
 ## Estimated diff size
 
-12 files, 1,675 additions, 23 deletions. The Windows storage adapter, provider
+12 files, 1,725 additions, 23 deletions. The Windows storage adapter, provider
 wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
 cannot authorize, persist, or advertise its capability.

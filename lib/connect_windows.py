@@ -13,7 +13,6 @@ import errno
 import os
 import stat
 import time
-import uuid
 from collections.abc import Callable
 from contextlib import suppress
 from functools import lru_cache
@@ -549,7 +548,7 @@ def atomic_replace_bytes(
     *,
     allow_empty: bool = False,
 ) -> None:
-    """Flush bytes to a same-directory temporary file and atomically replace."""
+    """Flush bytes through one serialized same-directory path and replace."""
     if len(content) > maximum or (not content and not allow_empty):
         raise OSError(errno.EFBIG, "replacement content is empty or oversized")
     destination = Path(destination)
@@ -564,7 +563,20 @@ def atomic_replace_bytes(
     ):
         raise OSError(errno.EACCES, "replacement destination is unsafe")
 
-    temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    try:
+        stale = temporary.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        if (
+            not stat.S_ISREG(stale.st_mode)
+            or _is_reparse(stale)
+            or not _private_windows_acl(temporary)
+        ):
+            raise OSError(errno.EACCES, "replacement temporary is unsafe")
+        with suppress(FileNotFoundError):
+            _retry_windows_file_operation(temporary.unlink)
     flags = (
         os.O_WRONLY
         | os.O_CREAT

@@ -302,6 +302,21 @@ class WindowsConnectStorageTests(unittest.TestCase):
             self.assertFalse(release.is_alive())
             self.assertEqual(destination.read_bytes(), b"new")
 
+    def test_atomic_replacement_reclaims_fixed_crash_temporary(self):
+        with tempfile.TemporaryDirectory(
+            dir=self.actual_local_app_data
+        ) as directory:
+            root = Path(directory)
+            _protect_windows_directory(root)
+            destination = root / "registration.json"
+            temporary = root / ".registration.json.tmp"
+            temporary.write_bytes(b"crash residue")
+
+            atomic_replace_bytes(destination, b"published", 32)
+
+            self.assertEqual(destination.read_bytes(), b"published")
+            self.assertFalse(temporary.exists())
+
     def test_entitlement_install_status_and_cross_process_lock_contract(self):
         with (
             tempfile.TemporaryDirectory(dir=self.actual_local_app_data) as directory,

@@ -23,7 +23,7 @@ import build
 import connect_provider
 from lib.connect_entitlement import EntitlementDecision, EntitlementGate
 from lib.connect_store import ConnectStore, JobConflict, ProviderBusy, canonical_json
-from lib.connect_windows import validate_private_regular_file
+from lib.connect_windows import atomic_replace_bytes, validate_private_regular_file
 from lib.connect_v2 import (
     APP_ID,
     CAPABILITY_ID,
@@ -1278,6 +1278,28 @@ class EntitlementTests(unittest.TestCase):
 
 
 class RegistrationTests(unittest.TestCase):
+    def test_fixed_replacement_temporary_is_reclaimed_but_not_followed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "registration.json"
+            temporary = root / ".registration.json.tmp"
+            temporary.write_bytes(b"crash residue")
+
+            with patch("lib.connect_windows._private_windows_acl", return_value=True):
+                atomic_replace_bytes(destination, b"published", 32)
+
+            self.assertEqual(destination.read_bytes(), b"published")
+            self.assertFalse(temporary.exists())
+
+            outside = root / "outside"
+            outside.write_bytes(b"unchanged")
+            temporary.symlink_to(outside)
+            with patch(
+                "lib.connect_windows._private_windows_acl", return_value=True
+            ), self.assertRaises(PermissionError):
+                atomic_replace_bytes(destination, b"replacement", 32)
+            self.assertEqual(outside.read_bytes(), b"unchanged")
+
     def test_optional_private_file_may_disappear_during_acl_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
