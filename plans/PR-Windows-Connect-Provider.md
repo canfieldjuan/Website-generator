@@ -15,8 +15,8 @@ are embedded in otherwise platform-neutral provider and entitlement code.
 
 1. Add a small Windows filesystem adapter for Local AppData roots, effective
    DACL and reparse-point refusal, bounded regular-file reads, atomic
-   replacement, and non-blocking process locks over byte offset `0`, length
-   `1`.
+   replacement with delete-sharing readers, and non-blocking process locks over
+   byte offset `0`, length `1`.
 2. Use the accepted Windows Connect paths for runtime registration,
    application-private state, and the shared entitlement while preserving all
    existing Linux paths and checks.
@@ -50,9 +50,11 @@ The adapter admits only absolute per-user roots, establishes a protected
 current-user/SYSTEM/Administrators DACL on each newly created directory,
 verifies the owner and effective DACL on every trusted root/descendant, rejects broad content or mutation grants,
 Connect-owned reparse points, and non-regular files, bounds every read, writes
-through a flushed same-directory temporary file, and uses `msvcrt` byte-range
-locks for cross-process exclusion. Linux continues through the existing
-descriptor, ownership, mode, `flock`, and directory-`fsync` paths.
+through a flushed same-directory temporary file, permits replace/cleanup while a
+reader is active, publishes one fixed path per durable v2 provider instance, and
+uses `msvcrt` byte-range locks for cross-process exclusion. Linux continues
+through the existing descriptor, ownership, mode, `flock`, and
+directory-`fsync` paths.
 
 The release builder chooses `.exe` only on Windows. CI builds on a native
 Windows runner because PyInstaller is not a cross-compiler, then executes the
@@ -81,6 +83,8 @@ and cross-app acceptance host.
 
 - Focused provider, entitlement activation, and release-builder tests on Linux.
 - The same platform-relevant tests on native Windows.
+- Native replacement while a delete-sharing reader remains open, plus
+  crash/restart publication to the same durable registration path.
 - Native PyInstaller build using the committed production public keyring.
 - Packaged `entitlement status` before activation and packaged status/install
   with a production-signed entitlement on the local Windows VM.

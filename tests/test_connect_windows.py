@@ -29,7 +29,9 @@ from lib.connect_windows import (
     WINDOWS_LOCK_LENGTH,
     WINDOWS_LOCK_OFFSET,
     WindowsFileLock,
+    _open_windows_shared_reader,
     _protect_windows_directory,
+    atomic_replace_bytes,
     local_app_data_root,
 )
 
@@ -100,6 +102,16 @@ class WindowsConnectStorageTests(unittest.TestCase):
             )
             path = write_registration(runtime, document)
             self.assertEqual(json.loads(path.read_bytes()), document)
+            restarted = registration_document(
+                instance_id=document["instance_id"],
+                port=43128,
+                token=TOKEN,
+                pid=4243,
+            )
+            restarted_path = write_registration(runtime, restarted)
+            self.assertEqual(restarted_path, path)
+            self.assertEqual(json.loads(path.read_bytes()), restarted)
+            self.assertEqual(list(runtime.glob("*.json")), [path])
 
             remove_registration_if_owned(path, "B" * 64)
             self.assertTrue(path.exists())
@@ -134,6 +146,24 @@ class WindowsConnectStorageTests(unittest.TestCase):
 
             with self.assertRaises(OSError):
                 local_app_data_root(directory)
+
+    def test_replaceable_file_reader_allows_atomic_replacement(self):
+        with tempfile.TemporaryDirectory(
+            dir=self.actual_local_app_data
+        ) as directory:
+            root = Path(directory)
+            _protect_windows_directory(root)
+            destination = root / "replaceable.json"
+            atomic_replace_bytes(destination, b"old", 16)
+
+            descriptor = _open_windows_shared_reader(destination)
+            try:
+                atomic_replace_bytes(destination, b"new", 16)
+                self.assertEqual(os.read(descriptor, 3), b"old")
+            finally:
+                os.close(descriptor)
+
+            self.assertEqual(destination.read_bytes(), b"new")
 
     def test_entitlement_install_status_and_cross_process_lock_contract(self):
         with (
