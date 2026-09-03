@@ -200,7 +200,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
             state = ensure_private_directory(root / "website-redesign/state", root=root)
             database = state / "connect-v2.sqlite3"
             store = ConnectStore(database)
-            store.instance_id
+            store.instance_id()
 
             sidecar = Path(f"{database}-wal")
             sidecar.write_bytes(b"unsafe")
@@ -211,7 +211,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
                 text=True,
             )
             with self.assertRaises(OSError):
-                store.instance_id
+                store.instance_id()
 
             sidecar.unlink()
             subprocess.run(
