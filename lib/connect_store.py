@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -44,7 +45,8 @@ class ConnectStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.parent.chmod(0o700)
+        if os.name != "nt":
+            self.path.parent.chmod(0o700)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:

@@ -16,6 +16,7 @@ from scripts.build_connect_provider import (
     CONNECT_REFERENCE_FILES,
     KEYRING_ENV,
     ReleaseBuildError,
+    binary_filename,
     build_release,
     main,
     validate_release_keyring,
@@ -131,7 +132,7 @@ class ConnectReleaseBuildTests(unittest.TestCase):
             ]
             observed["add_data_values"] = add_data_values
             staged_dist.mkdir(parents=True, exist_ok=True)
-            (staged_dist / BINARY_NAME).write_bytes(b"executable")
+            (staged_dist / binary_filename()).write_bytes(b"executable")
 
         executable = build_release(
             keyring_path=self.keyring,
@@ -140,7 +141,7 @@ class ConnectReleaseBuildTests(unittest.TestCase):
             runner=fake_runner,
         )
 
-        self.assertEqual(executable, dist / BINARY_NAME)
+        self.assertEqual(executable, dist / binary_filename())
         self.assertEqual(observed["resource_name"], BUNDLE_FILENAME)
         self.assertEqual(observed["resource_bytes"], self.keyring.read_bytes())
         self.assertEqual(observed["destination"], BUNDLE_DIRECTORY)
@@ -167,13 +168,20 @@ class ConnectReleaseBuildTests(unittest.TestCase):
                 runner=lambda *args, **kwargs: None,
             )
 
+    def test_binary_filename_matches_native_platform_convention(self):
+        self.assertEqual(binary_filename("nt"), f"{BINARY_NAME}.exe")
+        self.assertEqual(binary_filename("posix"), BINARY_NAME)
+
     def test_build_module_resolves_frozen_reference_assets(self):
         with patch.object(build.sys, "_MEIPASS", "/tmp/frozen-app", create=True):
             resolved = build.runtime_resource_path("references/06-build-prompt.md")
 
         self.assertEqual(
             resolved,
-            "/tmp/frozen-app/website_redesign_data/references/06-build-prompt.md",
+            str(
+                Path("/tmp/frozen-app")
+                / "website_redesign_data/references/06-build-prompt.md"
+            ),
         )
 
     def test_cli_requires_build_time_keyring_configuration(self):

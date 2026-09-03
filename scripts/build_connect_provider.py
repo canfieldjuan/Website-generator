@@ -39,6 +39,11 @@ class ReleaseBuildError(RuntimeError):
     """A stable release-build admission failure."""
 
 
+def binary_filename(platform_name: str | None = None) -> str:
+    selected = os.name if platform_name is None else platform_name
+    return f"{BINARY_NAME}.exe" if selected == "nt" else BINARY_NAME
+
+
 def _strict_json_object(content: bytes) -> dict[str, Any]:
     def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -75,7 +80,12 @@ def _decode_base64url(value: object) -> bytes:
 def _read_keyring(path: Path) -> bytes:
     if not path.is_absolute():
         raise ReleaseBuildError(f"{KEYRING_ENV} must be an absolute path")
-    flags = os.O_RDONLY | os.O_CLOEXEC
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOINHERIT", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     if hasattr(os, "O_NONBLOCK"):
@@ -205,12 +215,12 @@ def build_release(
             )
         command.append(str(ROOT / "connect_provider.py"))
         runner(command, cwd=ROOT, check=True)
-        produced = staged_dist / BINARY_NAME
+        produced = staged_dist / binary_filename()
         if not produced.is_file():
             raise ReleaseBuildError(
                 "PyInstaller completed without producing the expected executable"
             )
-        executable = dist_dir / BINARY_NAME
+        executable = dist_dir / binary_filename()
         os.replace(produced, executable)
 
     return executable

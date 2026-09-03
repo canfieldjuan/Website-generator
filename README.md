@@ -207,6 +207,22 @@ places its exact bytes in the frozen package resource trusted by the runtime;
 `LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE` is not read by the executable and
 cannot override its authority after build.
 
+Windows release builds use the same entry point on a native Windows host:
+
+```powershell
+py -3.12 -m venv .venv-release
+.\.venv-release\Scripts\python.exe -m pip install -r requirements-release.txt
+$env:LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE = "C:\secure\connect-public-keyring.json"
+.\.venv-release\Scripts\python.exe scripts\build_connect_provider.py
+```
+
+The result is `dist\website-redesign-connect.exe`. Windows discovery and the
+shared entitlement live under `%LOCALAPPDATA%\LocalConnect\`; provider-owned
+job state lives under `%LOCALAPPDATA%\website-redesign\state\`. The executable
+does not install or start a model runtime. An OpenAI-compatible vLLM endpoint
+serving the pinned model alias must already be reachable on loopback before the
+provider can publish its registration.
+
 An official package exposes the app-local activation adapter without starting
 vLLM or the provider:
 
@@ -214,6 +230,9 @@ vLLM or the provider:
 dist/website-redesign-connect entitlement status
 dist/website-redesign-connect entitlement install /path/to/entitlement-v1.json
 ```
+
+On Windows, use `dist\website-redesign-connect.exe` with the same `entitlement
+status` and `entitlement install` arguments.
 
 `status` reports only the stable entitlement state and whether Connect is
 active. `install` admits only a currently active issuer-signed source, then

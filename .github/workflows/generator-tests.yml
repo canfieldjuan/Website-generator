@@ -52,3 +52,44 @@ jobs:
         env:
           CONNECT_CONTRACTS_DIR: ${{ github.workspace }}/connect-contracts
       - run: python -m compileall -q build.py pipeline.py connect_provider.py lib tests
+
+  windows-connect-package:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: canfieldjuan/connect-contracts
+          ref: d46e271a86b153d8d9af2c8510a9567c8c999a78
+          path: connect-contracts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt -r requirements-release.txt
+      - name: Run native Windows storage and package tests
+        run: >-
+          python -m unittest -v
+          tests.test_connect_windows
+          tests.test_connect_release_build
+        env:
+          CONNECT_CONTRACTS_DIR: ${{ github.workspace }}/connect-contracts
+      - name: Build official Windows provider
+        run: python scripts/build_connect_provider.py
+        env:
+          LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE: ${{ github.workspace }}/connect-contracts/entitlements/v1/release/keyring.json
+      - name: Verify packaged authority and activation adapter
+        shell: pwsh
+        run: |
+          $output = & .\dist\website-redesign-connect.exe entitlement status
+          if ($LASTEXITCODE -ne 0) { throw "Packaged entitlement status failed" }
+          $status = $output | ConvertFrom-Json
+          if ($status.state -ne "missing" -or $status.active -ne $false) {
+            throw "Packaged authority did not report the expected missing state"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: website-redesign-connect-windows
+          path: dist/website-redesign-connect.exe
+          if-no-files-found: error
