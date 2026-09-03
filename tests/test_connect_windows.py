@@ -19,6 +19,7 @@ from lib.connect_entitlement import (
     entitlement_status,
     install_entitlement,
 )
+from lib.connect_store import ConnectStore
 from lib.connect_v2 import (
     ProviderLock,
     default_runtime_dir,
@@ -33,7 +34,9 @@ from lib.connect_windows import (
     WindowsFileLock,
     _protect_windows_directory,
     atomic_replace_bytes,
+    ensure_private_directory,
     local_app_data_root,
+    read_bounded_regular_file,
 )
 
 
@@ -147,6 +150,78 @@ class WindowsConnectStorageTests(unittest.TestCase):
 
             with self.assertRaises(OSError):
                 local_app_data_root(directory)
+
+    def test_owner_rights_ace_does_not_add_an_untrusted_principal(self):
+        with tempfile.TemporaryDirectory(dir=self.actual_local_app_data) as directory:
+            root = Path(directory)
+            _protect_windows_directory(root)
+            subprocess.run(
+                [
+                    "icacls",
+                    directory,
+                    "/grant",
+                    "*S-1-3-4:(OI)(CI)F",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(local_app_data_root(directory), root)
+
+    def test_private_reader_rejects_a_reparse_point_ancestor(self):
+        with (
+            tempfile.TemporaryDirectory(dir=self.actual_local_app_data) as directory,
+            patch.dict(os.environ, {"LOCALAPPDATA": directory}, clear=True),
+        ):
+            root = Path(directory)
+            _protect_windows_directory(root)
+            target = ensure_private_directory(root / "target", root=root)
+            candidate = target / "entitlement.json"
+            candidate.write_text("{}", encoding="utf-8")
+            junction = root / "LocalConnect"
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(junction), str(target)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            with self.assertRaises(OSError):
+                read_bounded_regular_file(junction / candidate.name, 16)
+
+    def test_store_rejects_unsafe_existing_database_and_sidecar(self):
+        with (
+            tempfile.TemporaryDirectory(dir=self.actual_local_app_data) as directory,
+            patch.dict(os.environ, {"LOCALAPPDATA": directory}, clear=True),
+        ):
+            root = Path(directory)
+            _protect_windows_directory(root)
+            state = ensure_private_directory(root / "website-redesign/state", root=root)
+            database = state / "connect-v2.sqlite3"
+            store = ConnectStore(database)
+            store.instance_id
+
+            sidecar = Path(f"{database}-wal")
+            sidecar.write_bytes(b"unsafe")
+            subprocess.run(
+                ["icacls", str(sidecar), "/grant", "*S-1-1-0:R"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            with self.assertRaises(OSError):
+                store.instance_id
+
+            sidecar.unlink()
+            subprocess.run(
+                ["icacls", str(database), "/grant", "*S-1-1-0:R"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            with self.assertRaises(OSError):
+                ConnectStore(database)
 
     def test_atomic_replacement_retries_a_short_lived_windows_reader(self):
         with tempfile.TemporaryDirectory(

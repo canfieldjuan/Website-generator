@@ -56,7 +56,8 @@ _SENSITIVE_FILE_ACCESS = (
     | 0x80000000  # GENERIC_READ
 )
 _TRUSTED_FIXED_SIDS = frozenset({"S-1-5-18", "S-1-5-32-544"})
-_OWNER_PLACEHOLDER_SIDS = frozenset({"S-1-3-0", "S-1-3-4"})
+_CREATOR_OWNER_SID = "S-1-3-0"
+_OWNER_RIGHTS_SID = "S-1-3-4"
 _WINDOWS_FILE_OPERATION_ATTEMPTS = 20
 _WINDOWS_FILE_OPERATION_DELAY_SECONDS = 0.025
 _WINDOWS_SHARING_WINERRORS = frozenset({5, 32, 33})
@@ -363,10 +364,9 @@ def _private_windows_acl(path: Path) -> bool:
             trustee = _sid_string(sid)
             if trustee in trusted:
                 continue
-            if (
-                trustee in _OWNER_PLACEHOLDER_SIDS
-                and header.ace_flags & _INHERIT_ONLY_ACE
-            ):
+            if trustee == _OWNER_RIGHTS_SID:
+                continue
+            if trustee == _CREATOR_OWNER_SID and header.ace_flags & _INHERIT_ONLY_ACE:
                 continue
             return False
         return True
@@ -431,6 +431,61 @@ def ensure_private_directory(path: Path, *, root: Path) -> Path:
     return destination
 
 
+def validate_private_directory(path: Path, *, root: Path) -> Path:
+    """Verify an existing Connect directory chain below a trusted root."""
+    root = Path(root)
+    destination = Path(path)
+    root_metadata = root.lstat()
+    if (
+        not stat.S_ISDIR(root_metadata.st_mode)
+        or _is_reparse(root_metadata)
+        or not _private_windows_acl(root)
+    ):
+        raise OSError(errno.EACCES, "private storage root is unsafe")
+    try:
+        relative = destination.relative_to(root)
+    except ValueError as exc:
+        raise OSError(errno.EACCES, "private directory escapes its root") from exc
+
+    current = root
+    for component in relative.parts:
+        if component in ("", os.curdir, os.pardir):
+            raise OSError(errno.EINVAL, "private directory component is unsafe")
+        current = current / component
+        metadata = current.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or _is_reparse(metadata)
+            or not _private_windows_acl(current)
+        ):
+            raise OSError(errno.EACCES, "private directory is unsafe")
+    return destination
+
+
+def validate_private_regular_file(
+    path: Path,
+    *,
+    root: Path,
+    allow_missing: bool = False,
+) -> Path:
+    """Verify one private non-reparse file and its complete ancestor chain."""
+    candidate = Path(path)
+    validate_private_directory(candidate.parent, root=root)
+    try:
+        metadata = candidate.lstat()
+    except FileNotFoundError:
+        if allow_missing:
+            return candidate
+        raise
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or _is_reparse(metadata)
+        or not _private_windows_acl(candidate)
+    ):
+        raise OSError(errno.EACCES, "private file is unsafe")
+    return candidate
+
+
 def read_bounded_regular_file(
     path: Path,
     maximum: int,
@@ -440,6 +495,8 @@ def read_bounded_regular_file(
 ) -> bytes:
     """Read one stable, bounded Windows file without accepting reparse points."""
     candidate = Path(path)
+    if require_private_acl:
+        validate_private_regular_file(candidate, root=local_app_data_root())
     before = candidate.lstat()
     if (
         not stat.S_ISREG(before.st_mode)

@@ -11,6 +11,13 @@ Connect provider.
 The root cause is that platform-specific storage, locking, and executable naming
 are embedded in otherwise platform-neutral provider and entitlement code.
 
+This exceeds the repository's 400-line target because a Windows executable that
+cannot safely authorize, persist durable jobs, publish discovery, and run the
+same native boundary tests is not a usable vertical slice. Splitting the
+filesystem adapter, SQLite admission, entitlement path, provider wiring, or
+package proof would intentionally publish an executable with a missing
+load-bearing runtime stage.
+
 ## Scope (this PR)
 
 1. Add a small Windows filesystem adapter for Local AppData roots, effective
@@ -21,7 +28,9 @@ are embedded in otherwise platform-neutral provider and entitlement code.
    application-private state, and the shared entitlement while preserving all
    existing Linux paths and checks.
 3. Make provider ownership, registration publication/cleanup, and entitlement
-   status/install work on Windows without changing the HTTP or JSON contracts.
+   status/install work on Windows without changing the HTTP or JSON contracts;
+   admit the SQLite database plus journal/WAL/SHM files against the same private
+   file and ancestor boundary.
 4. Make the PyInstaller release builder locate and publish the platform's real
    executable name.
 5. Add native-Windows tests and a Windows package job that builds the official
@@ -49,12 +58,13 @@ private Website Redesign state from `%LOCALAPPDATA%\website-redesign\state`.
 The adapter admits only absolute per-user roots, establishes a protected
 current-user/SYSTEM/Administrators DACL on each newly created directory,
 verifies the owner and effective DACL on every trusted root/descendant, rejects broad content or mutation grants,
-Connect-owned reparse points, and non-regular files, bounds every read, writes
-through a flushed same-directory temporary file, retries transient Windows
-sharing violations for a bounded interval, publishes one fixed path per durable
-v2 provider instance, and uses `msvcrt` byte-range locks for cross-process
-exclusion. Linux continues through the existing descriptor, ownership, mode,
-`flock`, and directory-`fsync` paths.
+Connect-owned reparse points, and non-regular files, accepts OWNER RIGHTS only
+as the already-validated owner, bounds every read, writes through a flushed
+same-directory temporary file, retries transient Windows sharing violations for
+a bounded interval, publishes one fixed path per durable v2 provider instance,
+validates existing and newly-created SQLite state files, and uses `msvcrt`
+byte-range locks for cross-process exclusion. Linux continues through the
+existing descriptor, ownership, mode, `flock`, and directory-`fsync` paths.
 
 The release builder chooses `.exe` only on Windows. CI builds on a native
 Windows runner because PyInstaller is not a cross-compiler, then executes the
@@ -81,7 +91,19 @@ and cross-app acceptance host.
 
 ## Verification
 
-- Focused provider, entitlement activation, and release-builder tests on Linux.
+- `CONNECT_CONTRACTS_DIR=../connect-contracts python -m unittest -v
+  tests.test_connect_provider tests.test_entitlement_activation` passed all 76
+  focused provider and entitlement tests.
+- `python -m unittest -v tests.test_connect_windows
+  tests.test_connect_release_build` passed the release-builder checks on Linux;
+  the eight native-Windows storage tests skipped as designed.
+- `python -m compileall -q connect_provider.py lib tests
+  scripts/build_connect_provider.py` passed.
+- A real local vLLM fixture build completed with the already-local
+  `Qwen3-30B-A3B-Instruct-2507` GGUF, and both required placeholder/fabrication
+  scans returned zero. This proves the unchanged generator admission path
+  without substituting OpenRouter or LM Studio; Qwen3.8 remains the product
+  target.
 - The same platform-relevant tests on native Windows.
 - Native replacement after a short-lived reader releases its handle, plus
   crash/restart publication to the same durable registration path.
@@ -94,7 +116,7 @@ and cross-app acceptance host.
 
 ## Estimated diff size
 
-Approximately 700 implementation and test lines. The Windows storage adapter,
-provider wiring, entitlement lifecycle, and native package proof are one
+11 files, 1,403 additions, 20 deletions. The Windows storage adapter, provider
+wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
-cannot authorize or advertise its capability.
+cannot authorize, persist, or advertise its capability.

@@ -12,6 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from lib.connect_windows import (
+    ensure_private_directory,
+    local_app_data_root,
+    validate_private_regular_file,
+)
+
 
 class JobConflict(RuntimeError):
     """A caller reused a job ID for a different request."""
@@ -44,17 +50,38 @@ class ConnectStore:
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if os.name != "nt":
+        self._windows_root: Path | None = None
+        if os.name == "nt":
+            self._windows_root = local_app_data_root()
+            ensure_private_directory(self.path.parent, root=self._windows_root)
+            self._validate_windows_files(allow_database_missing=True)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.parent.chmod(0o700)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
+        self._validate_windows_files(allow_database_missing=True)
         connection = sqlite3.connect(self.path, timeout=5.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
         return connection
+
+    def _validate_windows_files(self, *, allow_database_missing: bool) -> None:
+        if self._windows_root is None:
+            return
+        validate_private_regular_file(
+            self.path,
+            root=self._windows_root,
+            allow_missing=allow_database_missing,
+        )
+        for suffix in ("-journal", "-wal", "-shm"):
+            validate_private_regular_file(
+                Path(f"{self.path}{suffix}"),
+                root=self._windows_root,
+                allow_missing=True,
+            )
 
     @contextmanager
     def _connection(self):
@@ -64,6 +91,7 @@ class ConnectStore:
                 yield connection
         finally:
             connection.close()
+            self._validate_windows_files(allow_database_missing=False)
 
     def _initialize(self) -> None:
         with self._connection() as connection:
