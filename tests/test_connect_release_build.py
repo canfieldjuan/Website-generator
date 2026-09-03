@@ -141,11 +141,11 @@ class ConnectReleaseBuildTests(unittest.TestCase):
             runner=fake_runner,
         )
 
-        self.assertEqual(executable, dist / binary_filename())
+        self.assertEqual(executable, (dist / binary_filename()).resolve())
         self.assertEqual(observed["resource_name"], BUNDLE_FILENAME)
         self.assertEqual(observed["resource_bytes"], self.keyring.read_bytes())
         self.assertEqual(observed["destination"], BUNDLE_DIRECTORY)
-        self.assertEqual(observed["staged_dist"].parent.parent, dist)
+        self.assertEqual(observed["staged_dist"].parent.parent.resolve(), dist.resolve())
         bundled_sources = {
             Path(value.split(os.pathsep, 1)[0]).relative_to(observed["cwd"])
             for value in observed["add_data_values"][1:]
