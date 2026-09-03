@@ -815,7 +815,7 @@ def windows_v2_ownership_lock_path(
 ) -> Path:
     if not is_uuid4(instance_id):
         raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
-    return Path(directory) / f".local-connect-v2-{APP_ID}-{instance_id}.lock"
+    return Path(directory) / f".local-connect-v2-{instance_id}.lock"
 
 
 def acquire_registration_ownership(
