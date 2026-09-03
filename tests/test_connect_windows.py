@@ -29,6 +29,7 @@ from lib.connect_windows import (
     WINDOWS_LOCK_LENGTH,
     WINDOWS_LOCK_OFFSET,
     WindowsFileLock,
+    _protect_windows_directory,
     local_app_data_root,
 )
 
@@ -62,6 +63,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
             ),
         ):
             root = Path(directory)
+            _protect_windows_directory(root)
             self.assertEqual(local_app_data_root(), root)
             self.assertEqual(
                 default_runtime_dir(),
@@ -91,6 +93,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
                 clear=True,
             ),
         ):
+            _protect_windows_directory(Path(directory))
             runtime = default_runtime_dir()
             document = registration_document(
                 instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
@@ -115,6 +118,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
 
     def test_local_app_data_rejects_broad_read_acl(self):
         with tempfile.TemporaryDirectory(dir=self.actual_local_app_data) as directory:
+            _protect_windows_directory(Path(directory))
             self.assertEqual(local_app_data_root(directory), Path(directory))
             subprocess.run(
                 [
@@ -141,6 +145,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
             ),
         ):
             root = Path(directory)
+            _protect_windows_directory(root)
             source = root / "selected-entitlement.json"
             source.write_bytes((self.fixtures / "valid/active.json").read_bytes())
             destination = root / "LocalConnect" / ENTITLEMENT_FILE_NAME

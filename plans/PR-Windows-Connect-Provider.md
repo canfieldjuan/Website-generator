@@ -46,8 +46,9 @@ are embedded in otherwise platform-neutral provider and entitlement code.
 
 Windows derives shared Connect files from `%LOCALAPPDATA%\LocalConnect` and
 private Website Redesign state from `%LOCALAPPDATA%\website-redesign\state`.
-The adapter admits only absolute per-user roots, verifies the owner and DACL on
-every trusted root/descendant, rejects broad content or mutation grants,
+The adapter admits only absolute per-user roots, establishes a protected
+current-user/SYSTEM/Administrators DACL on each newly created directory,
+verifies the owner and effective DACL on every trusted root/descendant, rejects broad content or mutation grants,
 Connect-owned reparse points, and non-regular files, bounds every read, writes
 through a flushed same-directory temporary file, and uses `msvcrt` byte-range
 locks for cross-process exclusion. Linux continues through the existing
