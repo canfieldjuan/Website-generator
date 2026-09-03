@@ -21,11 +21,12 @@ from lib.connect_entitlement import (
 )
 from lib.connect_store import ConnectStore
 from lib.connect_v2 import (
-    ProviderLock,
+    acquire_registration_ownership,
     default_runtime_dir,
     default_state_dir,
     registration_document,
     remove_registration_if_owned,
+    windows_v2_ownership_lock_path,
     write_registration,
 )
 from lib.connect_windows import (
@@ -105,6 +106,10 @@ class WindowsConnectStorageTests(unittest.TestCase):
                 instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
             )
             path = write_registration(runtime, document)
+            self.assertEqual(
+                path.name,
+                f"local-connect-v2-website-redesign-{document['instance_id']}.json",
+            )
             self.assertEqual(json.loads(path.read_bytes()), document)
             restarted = registration_document(
                 instance_id=document["instance_id"],
@@ -122,12 +127,16 @@ class WindowsConnectStorageTests(unittest.TestCase):
             remove_registration_if_owned(path, TOKEN)
             self.assertFalse(path.exists())
 
-            state = default_state_dir()
-            state.mkdir(parents=True)
-            first = ProviderLock(state / "provider.lock")
+            ownership_lock = windows_v2_ownership_lock_path(
+                runtime, document["instance_id"]
+            )
+            first = acquire_registration_ownership(runtime, document["instance_id"])
+            self.assertIsNotNone(first)
+            assert first is not None
+            self.assertEqual(first.path, ownership_lock)
             try:
                 with self.assertRaises(RuntimeError):
-                    ProviderLock(state / "provider.lock")
+                    acquire_registration_ownership(runtime, document["instance_id"])
             finally:
                 first.close()
                 first.close()

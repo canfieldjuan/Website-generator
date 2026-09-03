@@ -802,6 +802,30 @@ def new_bearer_token() -> str:
     return secrets.token_urlsafe(TOKEN_BYTES)
 
 
+def windows_v2_registration_path(
+    directory: str | Path, instance_id: str
+) -> Path:
+    if not is_uuid4(instance_id):
+        raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
+    return Path(directory) / f"local-connect-v2-{APP_ID}-{instance_id}.json"
+
+
+def windows_v2_ownership_lock_path(
+    directory: str | Path, instance_id: str
+) -> Path:
+    if not is_uuid4(instance_id):
+        raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
+    return Path(directory) / f".local-connect-v2-{APP_ID}-{instance_id}.lock"
+
+
+def acquire_registration_ownership(
+    directory: str | Path, instance_id: str
+) -> ProviderLock | None:
+    if os.name != "nt":
+        return None
+    return ProviderLock(windows_v2_ownership_lock_path(directory, instance_id))
+
+
 def registration_document(
     *, instance_id: str, port: int, token: str, pid: int | None = None
 ) -> dict[str, Any]:
@@ -833,7 +857,9 @@ def write_registration(directory: str | Path, document: dict[str, Any]) -> Path:
     if os.name == "nt":
         root = local_app_data_root()
         ensure_private_directory(destination_dir, root=root)
-        destination = destination_dir / f"{APP_ID}-{document['instance_id']}.json"
+        destination = windows_v2_registration_path(
+            destination_dir, document["instance_id"]
+        )
         content = (json.dumps(document, indent=2) + "\n").encode("utf-8")
         atomic_replace_bytes(destination, content, MAX_REGISTRATION_BYTES)
         return destination

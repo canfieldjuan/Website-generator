@@ -22,6 +22,7 @@ from lib.connect_windows import ensure_private_directory, local_app_data_root
 from lib.connect_v2 import (
     ProviderLock,
     ProviderRuntime,
+    acquire_registration_ownership,
     create_app,
     default_runtime_dir,
     default_state_dir,
@@ -145,10 +146,18 @@ def main(argv: list[str] | None = None) -> int:
 
     runtime: ProviderRuntime | None = None
     registration_path: Path | None = None
+    registration_ownership: ProviderLock | None = None
     token = new_bearer_token()
     listener: socket.socket | None = None
     try:
         store = ConnectStore(state_dir / "connect-v2.sqlite3")
+        try:
+            registration_ownership = acquire_registration_ownership(
+                runtime_dir, store.instance_id()
+            )
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         runtime = ProviderRuntime(store)
         app = create_app(runtime, token)
         config = uvicorn.Config(
@@ -179,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
         if listener is not None:
             listener.close()
         provider_lock.close()
+        if registration_ownership is not None:
+            registration_ownership.close()
 
 
 if __name__ == "__main__":

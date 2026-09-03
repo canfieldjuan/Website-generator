@@ -47,6 +47,8 @@ from lib.connect_v2 import (
     resolve_connect_generation_config,
     sanitize_display_name,
     validate_job_request,
+    windows_v2_ownership_lock_path,
+    windows_v2_registration_path,
     write_registration,
 )
 from lib.generation import (
@@ -1093,15 +1095,37 @@ class GenerationSeamTests(unittest.TestCase):
                 state_dir=Path(directory) / "state",
             )
             observed = {"connected": False}
+            ownership_events = []
+
+            class RegistrationOwnership:
+                def close(self):
+                    ownership_events.append("released")
+
+            def acquire_ownership(runtime_dir, instance_id):
+                ownership_events.append(
+                    (
+                        "acquired",
+                        Path(runtime_dir),
+                        instance_id,
+                    )
+                )
+                return RegistrationOwnership()
 
             def assert_listening(runtime_dir, document):
+                self.assertEqual(ownership_events[0][0], "acquired")
+                self.assertNotIn("released", ownership_events)
                 endpoint = urlsplit(document["transport"]["base_url"])
                 with socket.create_connection(
                     (endpoint.hostname, endpoint.port),
                     timeout=1.0,
                 ):
                     observed["connected"] = True
+                ownership_events.append("published")
                 return Path(runtime_dir) / "registration.json"
+
+            def record_cleanup(_path, _token):
+                self.assertNotIn("released", ownership_events)
+                ownership_events.append("registration-removed")
 
             with patch.object(
                 connect_provider,
@@ -1118,10 +1142,22 @@ class GenerationSeamTests(unittest.TestCase):
                 connect_provider,
                 "write_registration",
                 side_effect=assert_listening,
+            ), patch.object(
+                connect_provider,
+                "acquire_registration_ownership",
+                side_effect=acquire_ownership,
+            ), patch.object(
+                connect_provider,
+                "remove_registration_if_owned",
+                side_effect=record_cleanup,
             ), patch.object(connect_provider.uvicorn.Server, "run"):
                 self.assertEqual(connect_provider.main(), 0)
 
             self.assertTrue(observed["connected"])
+            self.assertEqual(
+                ownership_events[1:],
+                ["published", "registration-removed", "released"],
+            )
 
 
 class EntitlementTests(unittest.TestCase):
@@ -1240,6 +1276,24 @@ class EntitlementTests(unittest.TestCase):
 
 
 class RegistrationTests(unittest.TestCase):
+    def test_windows_v2_runtime_paths_are_fixed_by_durable_identity(self):
+        instance_id = "11111111-1111-4111-8111-111111111111"
+        directory = Path("C:/LocalConnect/runtime/v2/providers")
+
+        self.assertEqual(
+            windows_v2_registration_path(directory, instance_id).name,
+            f"local-connect-v2-{APP_ID}-{instance_id}.json",
+        )
+        self.assertEqual(
+            windows_v2_ownership_lock_path(directory, instance_id).name,
+            f".local-connect-v2-{APP_ID}-{instance_id}.lock",
+        )
+        for invalid in ("", "CON", "11111111-1111-1111-8111-111111111111"):
+            with self.subTest(instance_id=invalid), self.assertRaises(ValueError):
+                windows_v2_registration_path(directory, invalid)
+            with self.subTest(instance_id=invalid), self.assertRaises(ValueError):
+                windows_v2_ownership_lock_path(directory, invalid)
+
     def test_registration_is_private_atomic_and_token_rotates(self):
         with tempfile.TemporaryDirectory() as directory:
             store = ConnectStore(Path(directory) / "state" / "connect.sqlite3")

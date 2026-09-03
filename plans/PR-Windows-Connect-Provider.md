@@ -23,10 +23,11 @@ load-bearing runtime stage.
 1. Add a small Windows filesystem adapter for Local AppData roots, effective
    DACL and reparse-point refusal, bounded regular-file reads, atomic
    replacement with bounded sharing-violation retry, and non-blocking process
-   locks over byte offset `0`, length `1`.
+   locks over byte offset `0`, length `1`, including the shared v2 durable
+   namespace ownership lock held across publication and serving.
 2. Use the accepted Windows Connect paths for runtime registration,
-   application-private state, and the shared entitlement while preserving all
-   existing Linux paths and checks.
+   application-private state, the shared durable-instance ownership lock, and
+   the shared entitlement while preserving all existing Linux paths and checks.
 3. Make provider ownership, registration publication/cleanup, and entitlement
    status/install work on Windows without changing the HTTP or JSON contracts;
    admit the SQLite database plus journal/WAL/SHM files against the same private
@@ -62,10 +63,12 @@ verifies the owner and effective DACL on every trusted root/descendant, rejects 
 Connect-owned reparse points, and non-regular files, accepts OWNER RIGHTS only
 as the already-validated owner, bounds every read, writes through a flushed
 same-directory temporary file, retries transient Windows sharing violations for
-a bounded interval, publishes one fixed path per durable v2 provider instance,
-validates existing and newly-created SQLite state files, and uses `msvcrt`
-byte-range locks for cross-process exclusion. Linux continues through the
-existing descriptor, ownership, mode, `flock`, and directory-`fsync` paths.
+a bounded interval, publishes
+`local-connect-v2-<app_id>-<instance_id>.json`, holds the matching hidden
+`.lock` path from before bind/publication through token-owned cleanup, validates
+existing and newly-created SQLite state files, and uses `msvcrt` byte-range
+locks for cross-process exclusion. Linux continues through the existing
+descriptor, ownership, mode, `flock`, and directory-`fsync` paths.
 
 The release builder chooses `.exe` only on Windows. Its keyring reader rejects
 symlink and Windows reparse metadata before opening the file, then binds the
@@ -95,7 +98,7 @@ final package and cross-app acceptance host.
 ## Verification
 
 - `CONNECT_CONTRACTS_DIR=../connect-contracts python -m unittest -v
-  tests.test_connect_provider tests.test_entitlement_activation` passed all 76
+  tests.test_connect_provider tests.test_entitlement_activation` passed all 77
   focused provider and entitlement tests.
 - `python -m unittest -v tests.test_connect_release_build` passed all 12
   release-builder checks on Linux, including ordinary-keyring admission plus
@@ -130,7 +133,7 @@ final package and cross-app acceptance host.
 
 ## Estimated diff size
 
-11 files, 1,472 additions, 23 deletions. The Windows storage adapter, provider
+12 files, 1,574 additions, 23 deletions. The Windows storage adapter, provider
 wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
 cannot authorize, persist, or advertise its capability.
