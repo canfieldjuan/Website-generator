@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: canfieldjuan/connect-contracts
-          ref: d46e271a86b153d8d9af2c8510a9567c8c999a78
+          ref: 3005d82a7be885fba36f8688b5967a5b56a0abea
           path: connect-contracts
       - uses: actions/setup-python@v5
         with:
