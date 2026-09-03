@@ -100,10 +100,18 @@ and cross-app acceptance host.
 - `python -m compileall -q connect_provider.py lib tests
   scripts/build_connect_provider.py` passed.
 - A real local vLLM fixture build completed with the already-local
-  `Qwen3-30B-A3B-Instruct-2507` GGUF, and both required placeholder/fabrication
-  scans returned zero. This proves the unchanged generator admission path
-  without substituting OpenRouter or LM Studio; Qwen3.8 remains the product
-  target.
+  `Qwen3-30B-A3B-Instruct-2507` GGUF. The exact build command was
+  `LOCAL_GENERATION_MODEL=qwen/qwen3-30b-a3b-instruct-2507
+  GENERATION_MAX_OUTPUT_TOKENS=8191 python build.py
+  examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
+  --skip-deploy`.
+- `grep -cE '\[TRUST_TRAILER\]|\[SERVICE_PROMISE\]|\[TRADE_DISPLAY\]|\[CITY\]|
+  \[YEARS\]|\[SERVICE_AREA\]'
+  outputs/builds/drees-plumbing-inc/index.html` returned `0`.
+- `grep -ciE 'Upfront Flat-Rate|Surprise Fees|Free Estimates|Owner Answers'
+  outputs/builds/drees-plumbing-inc/index.html` returned `0`.
+- This proves the unchanged generator admission path without substituting
+  OpenRouter or LM Studio; Qwen3.8 remains the product target.
 - The same platform-relevant tests on native Windows.
 - Native replacement after a short-lived reader releases its handle, plus
   crash/restart publication to the same durable registration path.
@@ -116,7 +124,7 @@ and cross-app acceptance host.
 
 ## Estimated diff size
 
-11 files, 1,403 additions, 20 deletions. The Windows storage adapter, provider
+11 files, 1,411 additions, 20 deletions. The Windows storage adapter, provider
 wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
 cannot authorize, persist, or advertise its capability.
