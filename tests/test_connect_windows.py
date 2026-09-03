@@ -2,6 +2,8 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -29,7 +31,6 @@ from lib.connect_windows import (
     WINDOWS_LOCK_LENGTH,
     WINDOWS_LOCK_OFFSET,
     WindowsFileLock,
-    _open_windows_shared_reader,
     _protect_windows_directory,
     atomic_replace_bytes,
     local_app_data_root,
@@ -147,7 +148,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 local_app_data_root(directory)
 
-    def test_replaceable_file_reader_allows_atomic_replacement(self):
+    def test_atomic_replacement_retries_a_short_lived_windows_reader(self):
         with tempfile.TemporaryDirectory(
             dir=self.actual_local_app_data
         ) as directory:
@@ -156,13 +157,20 @@ class WindowsConnectStorageTests(unittest.TestCase):
             destination = root / "replaceable.json"
             atomic_replace_bytes(destination, b"old", 16)
 
-            descriptor = _open_windows_shared_reader(destination)
-            try:
-                atomic_replace_bytes(destination, b"new", 16)
-                self.assertEqual(os.read(descriptor, 3), b"old")
-            finally:
+            descriptor = os.open(destination, os.O_RDONLY)
+
+            def release_reader():
+                time.sleep(0.05)
                 os.close(descriptor)
 
+            release = threading.Thread(target=release_reader)
+            release.start()
+            try:
+                atomic_replace_bytes(destination, b"new", 16)
+            finally:
+                release.join(timeout=1)
+
+            self.assertFalse(release.is_alive())
             self.assertEqual(destination.read_bytes(), b"new")
 
     def test_entitlement_install_status_and_cross_process_lock_contract(self):
