@@ -107,7 +107,7 @@ Results so far:
 
 - The focused activation, route-gate, and release-builder suite passed 32
   tests.
-- The exact-head GitHub unit job passed all 234 Website Generator tests,
+- The exact-head GitHub unit job passed all 236 Website Generator tests,
   including the final release-keyring parser regression.
 - Ruff lint and format checks passed for all new Python files.
 - PyInstaller 6.22.2 produced `dist/website-redesign-connect` with the
