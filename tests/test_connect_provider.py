@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ import build
 import connect_provider
 from lib.connect_entitlement import EntitlementDecision, EntitlementGate
 from lib.connect_store import ConnectStore, JobConflict, ProviderBusy, canonical_json
+from lib.connect_windows import validate_private_regular_file
 from lib.connect_v2 import (
     APP_ID,
     CAPABILITY_ID,
@@ -1276,6 +1278,45 @@ class EntitlementTests(unittest.TestCase):
 
 
 class RegistrationTests(unittest.TestCase):
+    def test_optional_private_file_may_disappear_during_acl_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = root / "connect-v2.sqlite3-wal"
+            candidate.write_bytes(b"transient")
+            missing_errors = (
+                FileNotFoundError(errno.ENOENT, "sidecar disappeared"),
+                OSError(3, "sidecar path disappeared"),
+            )
+
+            for disappeared in missing_errors:
+                with self.subTest(error=type(disappeared).__name__), patch(
+                    "lib.connect_windows.validate_private_directory"
+                ), patch(
+                    "lib.connect_windows._private_windows_acl",
+                    side_effect=disappeared,
+                ):
+                    self.assertEqual(
+                        validate_private_regular_file(
+                            candidate,
+                            root=root,
+                            allow_missing=True,
+                        ),
+                        candidate,
+                    )
+
+            disappeared = FileNotFoundError(errno.ENOENT, "sidecar disappeared")
+            with patch(
+                "lib.connect_windows.validate_private_directory"
+            ), patch(
+                "lib.connect_windows._private_windows_acl",
+                side_effect=disappeared,
+            ), self.assertRaises(FileNotFoundError):
+                validate_private_regular_file(
+                    candidate,
+                    root=root,
+                    allow_missing=False,
+                )
+
     def test_windows_v2_runtime_paths_are_fixed_by_durable_identity(self):
         instance_id = "11111111-1111-4111-8111-111111111111"
         directory = Path("C:/LocalConnect/runtime/v2/providers")

@@ -50,6 +50,7 @@ load-bearing runtime stage.
 - `lib/connect_windows.py`
 - `scripts/build_connect_provider.py`
 - `tests/test_connect_release_build.py`
+- `tests/test_connect_provider.py`
 - `tests/test_connect_windows.py`
 - `plans/PR-Windows-Connect-Provider.md`
 
@@ -100,7 +101,7 @@ final package and cross-app acceptance host.
 ## Verification
 
 - `CONNECT_CONTRACTS_DIR=../connect-contracts python -m unittest -v
-  tests.test_connect_provider tests.test_entitlement_activation` passed all 77
+  tests.test_connect_provider tests.test_entitlement_activation` passed all 78
   focused provider and entitlement tests.
 - `python -m unittest -v tests.test_connect_release_build` passed all 12
   release-builder checks on Linux, including ordinary-keyring admission plus
@@ -135,7 +136,7 @@ final package and cross-app acceptance host.
 
 ## Estimated diff size
 
-12 files, 1,574 additions, 23 deletions. The Windows storage adapter, provider
+12 files, 1,665 additions, 23 deletions. The Windows storage adapter, provider
 wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
 cannot authorize, persist, or advertise its capability.

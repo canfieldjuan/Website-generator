@@ -473,16 +473,19 @@ def validate_private_regular_file(
     validate_private_directory(candidate.parent, root=root)
     try:
         metadata = candidate.lstat()
-    except FileNotFoundError:
-        if allow_missing:
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or _is_reparse(metadata)
+            or not _private_windows_acl(candidate)
+        ):
+            raise OSError(errno.EACCES, "private file is unsafe")
+    except OSError as exc:
+        missing = isinstance(exc, FileNotFoundError) or (
+            exc.errno in {2, 3} or getattr(exc, "winerror", None) in {2, 3}
+        )
+        if allow_missing and missing:
             return candidate
         raise
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or _is_reparse(metadata)
-        or not _private_windows_acl(candidate)
-    ):
-        raise OSError(errno.EACCES, "private file is unsafe")
     return candidate
 
 

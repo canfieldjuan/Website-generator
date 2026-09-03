@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 import subprocess
@@ -10,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import lib.connect_windows as connect_windows
 from lib.connect_entitlement import (
     ACTIVATION_BUSY_CODE,
     ENTITLEMENT_FILE_NAME,
@@ -38,6 +40,7 @@ from lib.connect_windows import (
     ensure_private_directory,
     local_app_data_root,
     read_bounded_regular_file,
+    validate_private_regular_file,
 )
 
 
@@ -231,6 +234,46 @@ class WindowsConnectStorageTests(unittest.TestCase):
             )
             with self.assertRaises(OSError):
                 ConnectStore(database)
+
+    def test_optional_sidecar_may_disappear_during_acl_validation(self):
+        with tempfile.TemporaryDirectory(
+            dir=self.actual_local_app_data
+        ) as directory:
+            root = Path(directory)
+            _protect_windows_directory(root)
+            sidecar = root / "connect-v2.sqlite3-wal"
+            sidecar.write_bytes(b"transient")
+            original_acl_check = connect_windows._private_windows_acl
+
+            def disappear_during_acl(path):
+                if Path(path) == sidecar:
+                    sidecar.unlink()
+                    raise FileNotFoundError(errno.ENOENT, "sidecar disappeared")
+                return original_acl_check(path)
+
+            with patch(
+                "lib.connect_windows._private_windows_acl",
+                side_effect=disappear_during_acl,
+            ):
+                self.assertEqual(
+                    validate_private_regular_file(
+                        sidecar,
+                        root=root,
+                        allow_missing=True,
+                    ),
+                    sidecar,
+                )
+
+            sidecar.write_bytes(b"transient")
+            with patch(
+                "lib.connect_windows._private_windows_acl",
+                side_effect=disappear_during_acl,
+            ), self.assertRaises(FileNotFoundError):
+                validate_private_regular_file(
+                    sidecar,
+                    root=root,
+                    allow_missing=False,
+                )
 
     def test_atomic_replacement_retries_a_short_lived_windows_reader(self):
         with tempfile.TemporaryDirectory(
