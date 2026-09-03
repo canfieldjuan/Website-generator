@@ -100,6 +100,14 @@ class ConnectReleaseBuildTests(unittest.TestCase):
             with self.assertRaisesRegex(ReleaseBuildError, "invalid JSON"):
                 validate_release_keyring(self.keyring)
 
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO support is unavailable")
+    def test_keyring_reader_rejects_fifo_without_waiting_for_a_writer(self):
+        fifo = self.root / "keyring.fifo"
+        os.mkfifo(fifo)
+
+        with self.assertRaisesRegex(ReleaseBuildError, "bounded regular file"):
+            validate_release_keyring(fifo)
+
     def test_builder_stages_fixed_resource_and_requires_expected_executable(self):
         dist = self.root / "dist"
         work = self.root / "work"
@@ -173,6 +181,19 @@ class ConnectReleaseBuildTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), redirect_stderr(error):
             self.assertEqual(main([]), 2)
         self.assertIn(f"{KEYRING_ENV} is required", error.getvalue())
+
+    def test_cli_normalizes_release_filesystem_errors(self):
+        error = StringIO()
+        with (
+            patch.dict(os.environ, {KEYRING_ENV: str(self.keyring)}, clear=True),
+            patch(
+                "scripts.build_connect_provider.build_release",
+                side_effect=OSError("destination unavailable"),
+            ),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(main([]), 2)
+        self.assertIn("Release build failed: destination unavailable", error.getvalue())
 
 
 if __name__ == "__main__":

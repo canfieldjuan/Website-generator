@@ -78,6 +78,8 @@ def _read_keyring(path: Path) -> bytes:
     flags = os.O_RDONLY | os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
     try:
         descriptor = os.open(path, flags)
         try:
@@ -235,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
             dist_dir=args.dist_dir,
             work_dir=args.work_dir,
         )
-    except (ReleaseBuildError, subprocess.CalledProcessError) as exc:
+    except (ReleaseBuildError, subprocess.CalledProcessError, OSError) as exc:
         print(f"Release build failed: {exc}", file=sys.stderr)
         return 2
     print(executable)

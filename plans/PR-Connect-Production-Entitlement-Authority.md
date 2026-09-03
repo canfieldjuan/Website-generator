@@ -105,13 +105,15 @@ negative cases so it does not mutate the active license while probing failures.
 
 Results so far:
 
-- The focused activation, route-gate, and release-builder suite passed 30
+- The focused activation, route-gate, and release-builder suite passed 32
   tests.
 - The exact-head GitHub unit job passed all 234 Website Generator tests,
   including the final release-keyring parser regression.
 - Ruff lint and format checks passed for all new Python files.
 - PyInstaller 6.22.2 produced `dist/website-redesign-connect` with the
   production public keyring and all five Connect generation reference assets.
+- Release keyring reads reject FIFOs without waiting for a writer, and
+  destination filesystem failures stay inside the stable CLI error contract.
 - Packaged `entitlement status` reported `missing` before activation and
   `active` after installing the production-signed license. The source command
   continued to report `authority_unavailable`.
