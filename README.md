@@ -188,17 +188,31 @@ Every Connect route also requires the independently signed local entitlement
 feature `connect.capability_exchange`. The license is read from
 `$XDG_CONFIG_HOME/local-connect/entitlement-v1.json` (or
 `~/.config/local-connect/entitlement-v1.json`) on each request, so activation or
-expiry takes effect without restarting the provider. Source checkouts contain
-no official issuer key and therefore fail closed; official keyring and license
-provisioning are tracked in issue #27. Test fixture keys must never be used as
-production authority.
+expiry takes effect without restarting the provider. Source execution never
+loads an issuer key and therefore fails closed. Test fixture keys must never be
+used as production authority.
+
+Official Linux release builds embed the production public keyring at build time:
+
+```bash
+python3 -m venv .venv-release
+.venv-release/bin/pip install -r requirements-release.txt
+LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE=/absolute/path/to/release/keyring.json \
+  .venv-release/bin/python scripts/build_connect_provider.py
+```
+
+The build fails unless the selected file is a bounded, strict, non-empty
+Ed25519 keyring whose key IDs are explicitly production-shaped. PyInstaller
+places its exact bytes in the frozen package resource trusted by the runtime;
+`LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE` is not read by the executable and
+cannot override its authority after build.
 
 An official package exposes the app-local activation adapter without starting
 vLLM or the provider:
 
 ```bash
-python connect_provider.py entitlement status
-python connect_provider.py entitlement install /path/to/entitlement-v1.json
+dist/website-redesign-connect entitlement status
+dist/website-redesign-connect entitlement install /path/to/entitlement-v1.json
 ```
 
 `status` reports only the stable entitlement state and whether Connect is
@@ -209,9 +223,8 @@ existing licenses fail closed and cannot be used to write another path.
 If durability or final verification fails after promotion, the prior license is
 restored (or the new candidate is removed when none existed).
 Activation becomes visible to every participating app on its next entitlement
-check; no provider restart is needed. A source checkout reports
-`authority_unavailable` until issue #27 supplies the official packaged public
-keyring, and it cannot install a production license.
+check; no provider restart is needed. A source checkout continues to report
+`authority_unavailable` and cannot install a production license.
 
 Only one process and one active generation job are allowed for that state.
 Identical caller-owned job IDs replay idempotently; conflicting reuse is
