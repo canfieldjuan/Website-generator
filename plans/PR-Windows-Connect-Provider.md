@@ -97,7 +97,8 @@ final package and cross-app acceptance host.
 
 ## Deferred
 
-- Email Watcher discovery and cross-app Windows acceptance are the next slice.
+- Email Watcher discovery and cross-app Windows acceptance are the paired
+  consumer slice in `eom-email-watcher` PR #82.
 - Named pipes, a broker, auto-launch, installer UI, code signing, auto-update,
   remote inference, OpenRouter fallback for Connect, and macOS packaging.
 - General portal/UI work and unrelated generation behavior.
@@ -131,19 +132,33 @@ final package and cross-app acceptance host.
   outputs/builds/drees-plumbing-inc/index.html` returned `0`.
 - This proves the unchanged generator admission path without substituting
   OpenRouter or LM Studio; Qwen3.8 remains the product target.
-- The same platform-relevant tests on native Windows.
-- Native replacement after a short-lived reader releases its handle, plus
-  crash/restart publication to the same durable registration path.
-- Native PyInstaller build using the committed production public keyring.
-- Packaged `entitlement status` before activation and packaged status/install
-  with a production-signed entitlement on the local Windows VM.
-- Provider registration, authentication, and one deterministic packaged job on
-  the local Windows VM; actual model quality remains covered by the existing
-  Linux real-generation acceptance.
+- GitHub Actions run `33791632959` at provider commit
+  `a1b404f7ce4973aaa66c93da46cbf00a3cc7b43b` completed successfully. Native
+  Windows job `100769355885` ran 23 storage/release tests (`OK`, one intentional
+  platform skip), built the official PyInstaller executable, and passed its
+  packaged authority/status check.
+- The provider artifact used for local acceptance had SHA-256
+  `8bbd357ca95903fd285bcc4fc356cf5638046fee740688a685edbb61eb2511ff`.
+- On the local Windows 11 VM, the packaged provider accepted the
+  production-signed entitlement, published one authenticated capability from
+  durable instance `dab2c8a9-5375-490d-9b5f-fc6e906ad288`, and completed job
+  `70056a8f-a173-4ef0-a3bd-67165f12ca30`.
+- The packaged Email Watcher engine discovered that provider and reconciled the
+  completed HTML artifact. Provider output and consumer export were both 63,616
+  bytes with SHA-256
+  `97920ed3503ded39ab70e4809af4ba60a3dc3bd6af2eb622302f6cdb1ec500e3`.
+- Acceptance exposed two proof-harness assumptions, not product defects: the
+  optical-media script root needed normalization before PowerShell use, and the
+  installed sidecar uses the fixed name `eom-mail-engine.exe`. The copied seed
+  SQLite file also retained the ISO read-only attribute; the proof cleared that
+  media attribute before reconciliation. The final media contains those
+  harness corrections, but the successful run reused the already-installed
+  proof root instead of destructively resetting the VM. Actual model quality
+  remains covered by the existing Linux real-generation acceptance.
 
 ## Estimated diff size
 
-12 files, 1,795 additions, 23 deletions. The Windows storage adapter, provider
+12 files, 1,810 additions, 23 deletions. The Windows storage adapter, provider
 wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
 cannot authorize, persist, or advertise its capability.
