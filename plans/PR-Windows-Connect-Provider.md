@@ -161,7 +161,7 @@ final package and cross-app acceptance host.
 
 ## Estimated diff size
 
-12 files, 1,810 additions, 23 deletions. The Windows storage adapter, provider
+12 files, 1,849 additions, 29 deletions. The Windows storage adapter, provider
 wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
 cannot authorize, persist, or advertise its capability.
