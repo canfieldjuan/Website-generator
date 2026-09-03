@@ -22,7 +22,9 @@ import json
 import hashlib
 import argparse
 import copy
+import sys
 from datetime import date
+from pathlib import Path
 from urllib.parse import quote_plus
 
 from lib.images import fetch_unsplash_hero, generate_image_openrouter
@@ -64,12 +66,23 @@ from lib.generation import (
 # replacing [VERCEL_URL_PLACEHOLDER]. The Resend-backed auto-send
 # path is still used by pipeline.py (the redesign flow).
 
-BUILD_PROMPT_PATH = "references/06-build-prompt.md"
-INDUSTRY_DEFAULTS_PATH = "references/07-industry-defaults.md"
-BASE_TEMPLATE_PATH = "references/03-base-template.html"
-THEMES_CATALOG_PATH = "references/09-themes.md"
-SECTION_ORDERS_PATH = "references/10-section-orders.md"
-EMAIL_PROMPT_PATH = "references/08-pitch-email-prompt.md"
+FROZEN_RESOURCE_DIRECTORY = "website_redesign_data"
+
+
+def runtime_resource_path(relative_path):
+    """Resolve packaged resources without changing source-checkout behavior."""
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if isinstance(bundle_root, str):
+        return str(Path(bundle_root) / FROZEN_RESOURCE_DIRECTORY / relative_path)
+    return relative_path
+
+
+BUILD_PROMPT_PATH = runtime_resource_path("references/06-build-prompt.md")
+INDUSTRY_DEFAULTS_PATH = runtime_resource_path("references/07-industry-defaults.md")
+BASE_TEMPLATE_PATH = runtime_resource_path("references/03-base-template.html")
+THEMES_CATALOG_PATH = runtime_resource_path("references/09-themes.md")
+SECTION_ORDERS_PATH = runtime_resource_path("references/10-section-orders.md")
+EMAIL_PROMPT_PATH = runtime_resource_path("references/08-pitch-email-prompt.md")
 BUILD_OUTPUT_ROOT = os.path.join("outputs", "builds")
 # Email drafts live in a SIBLING directory, never inside BUILD_OUTPUT_ROOT/<slug>/.
 # The Vercel deploy uses outputs/builds/<slug>/ as its root; anything in there

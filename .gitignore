@@ -17,6 +17,9 @@ ENV/
 
 # Build outputs (per-prospect generated sites + mirrored images)
 outputs/
+build/
+dist/
+*.spec
 
 # Vercel CLI state
 .vercel/
