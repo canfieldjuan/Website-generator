@@ -13,6 +13,15 @@ The root cause is the absent build-time trust anchor, not the route gate or the
 activation installer. This slice packages the accepted public authority and
 proves the existing gate with a real production-signed entitlement.
 
+The roughly 600-line change is indivisible at the release boundary: embedding
+only the public key would produce a package that authorizes requests but cannot
+run an accepted generation job without its prompt/template assets, while a
+builder without negative keyring and package-layout tests could emit a broken
+official binary. Splitting those pieces would merge an intermediate release
+path that cannot satisfy the issue acceptance contract. Most of the surface is
+the release-specific test and evidence record; the runtime change is limited to
+resolving the same five existing resource paths inside a frozen package.
+
 ## Scope (this PR)
 
 1. Add a reproducible PyInstaller release entry point for
@@ -28,10 +37,13 @@ proves the existing gate with a real production-signed entitlement.
 5. Build the official executable, install one active production-signed
    `connect.capability_exchange` entitlement through the existing CLI, and
    exercise the packaged deny/allow paths including one real JSON-to-HTML job.
+6. Ensure changes to the release builder trigger the existing generator test
+   workflow on pull requests and main pushes.
 
 ### Files touched
 
 - `.gitignore`
+- `.github/workflows/generator-tests.yml`
 - `requirements-release.txt`
 - `build.py`
 - `scripts/__init__.py`
