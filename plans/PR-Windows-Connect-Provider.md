@@ -1,0 +1,167 @@
+# PR: Windows Local Connect provider package
+
+## Why this slice exists
+
+The release builder can only produce a usable Linux provider. On Windows the
+runtime imports `fcntl` unconditionally, requires XDG paths, rejects entitlement
+storage and reads outside POSIX, applies Unix modes, and looks for a suffixless
+PyInstaller output. A Windows build host alone therefore produces no usable
+Connect provider.
+
+The root cause is that platform-specific storage, locking, and executable naming
+are embedded in otherwise platform-neutral provider and entitlement code.
+
+This exceeds the repository's 400-line target because a Windows executable that
+cannot safely authorize, persist durable jobs, publish discovery, and run the
+same native boundary tests is not a usable vertical slice. Splitting the
+filesystem adapter, SQLite admission, entitlement path, provider wiring, or
+package proof would intentionally publish an executable with a missing
+load-bearing runtime stage.
+
+## Scope (this PR)
+
+1. Add a small Windows filesystem adapter for Local AppData roots, effective
+   DACL and reparse-point refusal, bounded regular-file reads, atomic
+   replacement with bounded sharing-violation retry, and non-blocking process
+   locks over byte offset `0`, length `1`, including the shared v2 durable
+   namespace ownership lock held across publication and serving.
+2. Use the accepted Windows Connect paths for runtime registration,
+   application-private state, the shared durable-instance ownership lock, and
+   the shared entitlement while preserving all existing Linux paths and checks.
+3. Make provider ownership, registration publication/cleanup, and entitlement
+   status/install work on Windows without changing the HTTP or JSON contracts;
+   admit the SQLite database plus journal/WAL/SHM files against the same private
+   file and ancestor boundary.
+4. Make the PyInstaller release builder locate and publish the platform's real
+   executable name, and refuse a release-authority keyring reached through a
+   symlink or Windows reparse point.
+5. Add native-Windows tests and a Windows package job that builds the official
+   public authority into the executable and proves packaged status execution.
+6. Document the Windows package and its local model-runtime requirement.
+
+### Files touched
+
+- `.github/workflows/generator-tests.yml`
+- `README.md`
+- `connect_provider.py`
+- `lib/connect_entitlement.py`
+- `lib/connect_store.py`
+- `lib/connect_v2.py`
+- `lib/connect_windows.py`
+- `scripts/build_connect_provider.py`
+- `tests/test_connect_release_build.py`
+- `tests/test_connect_provider.py`
+- `tests/test_connect_windows.py`
+- `plans/PR-Windows-Connect-Provider.md`
+
+## Mechanism
+
+Windows derives shared Connect files from `%LOCALAPPDATA%\LocalConnect` and
+private Website Redesign state from `%LOCALAPPDATA%\website-redesign\state`.
+The adapter admits only absolute per-user roots, establishes a protected
+current-user/SYSTEM/Administrators DACL on each newly created directory,
+verifies the owner and effective DACL on every trusted root/descendant, rejects broad content or mutation grants,
+Connect-owned reparse points, and non-regular files, accepts OWNER RIGHTS only
+as the already-validated owner, bounds every read, writes through a flushed
+same-directory `.<destination-filename>.tmp` file that a serialized writer
+safely reclaims after a crash, retries transient Windows sharing violations for
+a bounded interval, publishes
+`local-connect-v2-<instance_id>.json`, holds the matching hidden
+`.local-connect-v2-<instance_id>.lock` path from before bind/publication through
+token-owned cleanup in the sibling direct-addressed `locks` directory, validates
+existing and newly-created SQLite state files, and uses `msvcrt` byte-range
+locks for cross-process exclusion. The ownership key intentionally excludes the
+application ID so one durable namespace cannot gain two live owners during an
+application rename; consumers never enumerate persistent locks as registration
+candidates. Linux continues through the existing descriptor, ownership, mode,
+`flock`, and directory-`fsync` paths.
+
+The release builder chooses `.exe` only on Windows. Its keyring reader rejects
+symlink and Windows reparse metadata on the leaf or any ancestor before opening
+the file, then binds the opened descriptor and completed read to the original
+file identity. Because that path check alone cannot exclude a raced ancestor
+swap, the parsed issuer IDs and public keys must also exactly match the
+production authority approved in the builder. CI builds
+on a native Windows runner because PyInstaller is not a cross-compiler, then
+executes the packaged entitlement status adapter. The local VM supplies the
+final package and cross-app acceptance host.
+
+## Intentional
+
+- The provider remains exact-loopback HTTP with the same rotating bearer token,
+  capability, routes, payloads, durable job identity, and generation output.
+- The bundled authority remains the public production keyring; no private key
+  or entitlement is committed or uploaded by CI.
+- Connect still requires the pinned local model through an OpenAI-compatible
+  loopback vLLM endpoint.
+- Missing or unsafe Windows storage fails Connect closed; it does not disable
+  standalone generation.
+
+## Deferred
+
+- Email Watcher discovery and cross-app Windows acceptance are the paired
+  consumer slice in `eom-email-watcher` PR #82.
+- Named pipes, a broker, auto-launch, installer UI, code signing, auto-update,
+  remote inference, OpenRouter fallback for Connect, and macOS packaging.
+- General portal/UI work and unrelated generation behavior.
+
+## Verification
+
+- `CONNECT_CONTRACTS_DIR=../connect-contracts python -m unittest -v
+  tests.test_connect_provider tests.test_entitlement_activation` passed all 79
+  focused provider and entitlement tests.
+- The native package job is pinned to accepted `connect-contracts` commit
+  `3005d82a7be885fba36f8688b5967a5b56a0abea`; the unrelated Linux unit job keeps
+  its pre-existing pin.
+- `python -m unittest -v tests.test_connect_release_build` passed all 14
+  release-builder checks on Linux, including exact approved-authority
+  admission, production-shaped authority substitution refusal, and
+  symbolic-link, leaf reparse, and ancestor-reparse refusal before open.
+- `python -m unittest -v tests.test_connect_windows
+  tests.test_connect_release_build` passed the earlier release-builder checks
+  on Linux; the eight native-Windows storage tests skipped as designed.
+- `python -m compileall -q connect_provider.py lib tests
+  scripts/build_connect_provider.py` passed.
+- A real local vLLM fixture build completed with the already-local
+  `Qwen3-30B-A3B-Instruct-2507` GGUF. The exact build command was
+  `LOCAL_GENERATION_MODEL=qwen/qwen3-30b-a3b-instruct-2507
+  GENERATION_MAX_OUTPUT_TOKENS=8191 python build.py
+  examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
+  --skip-deploy`.
+- `grep -cE '\[TRUST_TRAILER\]|\[SERVICE_PROMISE\]|\[TRADE_DISPLAY\]|\[CITY\]|
+  \[YEARS\]|\[SERVICE_AREA\]'
+  outputs/builds/drees-plumbing-inc/index.html` returned `0`.
+- `grep -ciE 'Upfront Flat-Rate|Surprise Fees|Free Estimates|Owner Answers'
+  outputs/builds/drees-plumbing-inc/index.html` returned `0`.
+- This proves the unchanged generator admission path without substituting
+  OpenRouter or LM Studio; Qwen3.8 remains the product target.
+- GitHub Actions run `33791632959` at provider commit
+  `a1b404f7ce4973aaa66c93da46cbf00a3cc7b43b` completed successfully. Native
+  Windows job `100769355885` ran 23 storage/release tests (`OK`, one intentional
+  platform skip), built the official PyInstaller executable, and passed its
+  packaged authority/status check.
+- The provider artifact used for local acceptance had SHA-256
+  `8bbd357ca95903fd285bcc4fc356cf5638046fee740688a685edbb61eb2511ff`.
+- On the local Windows 11 VM, the packaged provider accepted the
+  production-signed entitlement, published one authenticated capability from
+  durable instance `dab2c8a9-5375-490d-9b5f-fc6e906ad288`, and completed job
+  `70056a8f-a173-4ef0-a3bd-67165f12ca30`.
+- The packaged Email Watcher engine discovered that provider and reconciled the
+  completed HTML artifact. Provider output and consumer export were both 63,616
+  bytes with SHA-256
+  `97920ed3503ded39ab70e4809af4ba60a3dc3bd6af2eb622302f6cdb1ec500e3`.
+- Acceptance exposed two proof-harness assumptions, not product defects: the
+  optical-media script root needed normalization before PowerShell use, and the
+  installed sidecar uses the fixed name `eom-mail-engine.exe`. The copied seed
+  SQLite file also retained the ISO read-only attribute; the proof cleared that
+  media attribute before reconciliation. The final media contains those
+  harness corrections, but the successful run reused the already-installed
+  proof root instead of destructively resetting the VM. Actual model quality
+  remains covered by the existing Linux real-generation acceptance.
+
+## Estimated diff size
+
+12 files, 1,849 additions, 29 deletions. The Windows storage adapter, provider
+wiring, entitlement lifecycle, state admission, and native package proof are one
+vertical slice: splitting them would knowingly publish an executable that
+cannot authorize, persist, or advertise its capability.

@@ -6,23 +6,32 @@ import unittest
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import build
 from scripts.build_connect_provider import (
+    APPROVED_RELEASE_AUTHORITIES,
     BINARY_NAME,
     BUNDLE_DIRECTORY,
     BUNDLE_FILENAME,
     CONNECT_REFERENCE_FILES,
     KEYRING_ENV,
     ReleaseBuildError,
+    binary_filename,
     build_release,
     main,
     validate_release_keyring,
 )
 
 
-def encoded_key(value: bytes = b"P" * 32) -> str:
+def encoded_key(value: bytes | None = None) -> str:
+    if value is None:
+        return next(
+            public_key
+            for key_id, public_key in APPROVED_RELEASE_AUTHORITIES
+            if key_id == "local-connect-prod-2026-01"
+        )
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
@@ -51,6 +60,73 @@ class ConnectReleaseBuildTests(unittest.TestCase):
     def test_valid_production_keyring_is_admitted_exactly(self):
         original = self.keyring.read_bytes()
         self.assertEqual(validate_release_keyring(self.keyring), original)
+
+    def test_production_shaped_but_unapproved_authority_is_rejected(self):
+        self.write_keyring(public_key=encoded_key(b"Q" * 32))
+
+        with self.assertRaisesRegex(ReleaseBuildError, "approved production authority"):
+            validate_release_keyring(self.keyring)
+
+    def test_keyring_reader_rejects_windows_reparse_metadata_before_open(self):
+        path_type = type(self.keyring)
+        real_lstat = path_type.lstat
+
+        def lstat_with_reparse_leaf(candidate):
+            metadata = real_lstat(candidate)
+            if candidate == self.keyring:
+                return SimpleNamespace(
+                    st_mode=metadata.st_mode,
+                    st_size=metadata.st_size,
+                    st_file_attributes=0x400,
+                )
+            return metadata
+
+        with (
+            patch.object(
+                path_type,
+                "lstat",
+                autospec=True,
+                side_effect=lstat_with_reparse_leaf,
+            ),
+            patch("scripts.build_connect_provider.os.open") as open_file,
+            self.assertRaisesRegex(ReleaseBuildError, "bounded regular file"),
+        ):
+            validate_release_keyring(self.keyring)
+        open_file.assert_not_called()
+
+    def test_keyring_reader_rejects_reparse_point_ancestor_before_open(self):
+        path_type = type(self.keyring)
+        real_lstat = path_type.lstat
+
+        def lstat_with_reparse_ancestor(candidate):
+            metadata = real_lstat(candidate)
+            if candidate == self.root:
+                return SimpleNamespace(
+                    st_mode=metadata.st_mode,
+                    st_file_attributes=0x400,
+                )
+            return metadata
+
+        with (
+            patch.object(
+                path_type,
+                "lstat",
+                autospec=True,
+                side_effect=lstat_with_reparse_ancestor,
+            ),
+            patch("scripts.build_connect_provider.os.open") as open_file,
+            self.assertRaisesRegex(ReleaseBuildError, "unsafe path ancestor"),
+        ):
+            validate_release_keyring(self.keyring)
+        open_file.assert_not_called()
+
+    def test_keyring_reader_rejects_symbolic_link(self):
+        target = self.root / "real-keyring.json"
+        self.keyring.replace(target)
+        self.keyring.symlink_to(target)
+
+        with self.assertRaisesRegex(ReleaseBuildError, "bounded regular file"):
+            validate_release_keyring(self.keyring)
 
     def test_missing_empty_partial_duplicate_and_test_keyrings_fail_closed(self):
         with self.assertRaisesRegex(ReleaseBuildError, "unavailable"):
@@ -131,7 +207,7 @@ class ConnectReleaseBuildTests(unittest.TestCase):
             ]
             observed["add_data_values"] = add_data_values
             staged_dist.mkdir(parents=True, exist_ok=True)
-            (staged_dist / BINARY_NAME).write_bytes(b"executable")
+            (staged_dist / binary_filename()).write_bytes(b"executable")
 
         executable = build_release(
             keyring_path=self.keyring,
@@ -140,11 +216,11 @@ class ConnectReleaseBuildTests(unittest.TestCase):
             runner=fake_runner,
         )
 
-        self.assertEqual(executable, dist / BINARY_NAME)
+        self.assertEqual(executable, (dist / binary_filename()).resolve())
         self.assertEqual(observed["resource_name"], BUNDLE_FILENAME)
         self.assertEqual(observed["resource_bytes"], self.keyring.read_bytes())
         self.assertEqual(observed["destination"], BUNDLE_DIRECTORY)
-        self.assertEqual(observed["staged_dist"].parent.parent, dist)
+        self.assertEqual(observed["staged_dist"].parent.parent.resolve(), dist.resolve())
         bundled_sources = {
             Path(value.split(os.pathsep, 1)[0]).relative_to(observed["cwd"])
             for value in observed["add_data_values"][1:]
@@ -167,13 +243,20 @@ class ConnectReleaseBuildTests(unittest.TestCase):
                 runner=lambda *args, **kwargs: None,
             )
 
+    def test_binary_filename_matches_native_platform_convention(self):
+        self.assertEqual(binary_filename("nt"), f"{BINARY_NAME}.exe")
+        self.assertEqual(binary_filename("posix"), BINARY_NAME)
+
     def test_build_module_resolves_frozen_reference_assets(self):
         with patch.object(build.sys, "_MEIPASS", "/tmp/frozen-app", create=True):
             resolved = build.runtime_resource_path("references/06-build-prompt.md")
 
         self.assertEqual(
             resolved,
-            "/tmp/frozen-app/website_redesign_data/references/06-build-prompt.md",
+            str(
+                Path("/tmp/frozen-app")
+                / "website_redesign_data/references/06-build-prompt.md"
+            ),
         )
 
     def test_cli_requires_build_time_keyring_configuration(self):

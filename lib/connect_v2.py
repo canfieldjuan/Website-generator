@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import fcntl
 import hashlib
 import hmac
 import ipaddress
@@ -23,6 +22,11 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import unquote_to_bytes, urlsplit
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore[assignment]
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from python_multipart import MultipartParser
@@ -30,6 +34,15 @@ from python_multipart.multipart import parse_options_header
 
 import build
 from lib.connect_entitlement import EntitlementGate
+from lib.connect_windows import (
+    WindowsFileLock,
+    WindowsLockBusy,
+    atomic_replace_bytes,
+    ensure_private_directory,
+    local_app_data_root,
+    read_bounded_regular_file,
+    unlink_regular_file,
+)
 from lib.connect_store import (
     ConnectStore,
     JobConflict,
@@ -63,6 +76,7 @@ MAX_INPUT_BYTES = 200_000
 MAX_REQUEST_BYTES = 65_536
 MAX_MULTIPART_BYTES = MAX_INPUT_BYTES + MAX_REQUEST_BYTES + 65_536
 TOKEN_BYTES = 48
+MAX_REGISTRATION_BYTES = 16 * 1024
 
 UUID4_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -86,6 +100,18 @@ class ProviderLock:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._windows_lock: WindowsFileLock | None = None
+        self._handle = None
+        if os.name == "nt":
+            try:
+                self._windows_lock = WindowsFileLock(self.path)
+            except WindowsLockBusy as exc:
+                raise RuntimeError(
+                    "Another Website Redesign Connect provider already owns this state."
+                ) from exc
+            return
+        if fcntl is None:
+            raise RuntimeError("Provider file locking is unavailable.")
         self._handle = self.path.open("a+")
         os.chmod(self.path, 0o600)
         try:
@@ -97,7 +123,11 @@ class ProviderLock:
             ) from exc
 
     def close(self) -> None:
-        if self._handle.closed:
+        if self._windows_lock is not None:
+            self._windows_lock.close()
+            self._windows_lock = None
+            return
+        if self._handle is None or self._handle.closed:
             return
         fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
         self._handle.close()
@@ -743,6 +773,8 @@ def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
 
 
 def default_runtime_dir() -> Path:
+    if os.name == "nt":
+        return local_app_data_root() / "LocalConnect" / "runtime" / "v2" / "providers"
     configured = os.environ.get("XDG_RUNTIME_DIR")
     if not configured:
         raise RuntimeError(
@@ -755,6 +787,8 @@ def default_runtime_dir() -> Path:
 
 
 def default_state_dir() -> Path:
+    if os.name == "nt":
+        return local_app_data_root() / APP_ID / "state"
     root = os.environ.get("XDG_STATE_HOME")
     if root:
         state_root = Path(root)
@@ -766,6 +800,32 @@ def default_state_dir() -> Path:
 
 def new_bearer_token() -> str:
     return secrets.token_urlsafe(TOKEN_BYTES)
+
+
+def windows_v2_registration_path(
+    directory: str | Path, instance_id: str
+) -> Path:
+    if not is_uuid4(instance_id):
+        raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
+    return Path(directory) / f"local-connect-v2-{instance_id}.json"
+
+
+def windows_v2_ownership_lock_path(
+    directory: str | Path, instance_id: str
+) -> Path:
+    if not is_uuid4(instance_id):
+        raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
+    return Path(directory).parent / "locks" / f".local-connect-v2-{instance_id}.lock"
+
+
+def acquire_registration_ownership(
+    directory: str | Path, instance_id: str
+) -> ProviderLock | None:
+    if os.name != "nt":
+        return None
+    lock_path = windows_v2_ownership_lock_path(directory, instance_id)
+    ensure_private_directory(lock_path.parent, root=local_app_data_root())
+    return ProviderLock(lock_path)
 
 
 def registration_document(
@@ -796,6 +856,15 @@ def registration_document(
 
 def write_registration(directory: str | Path, document: dict[str, Any]) -> Path:
     destination_dir = Path(directory)
+    if os.name == "nt":
+        root = local_app_data_root()
+        ensure_private_directory(destination_dir, root=root)
+        destination = windows_v2_registration_path(
+            destination_dir, document["instance_id"]
+        )
+        content = (json.dumps(document, indent=2) + "\n").encode("utf-8")
+        atomic_replace_bytes(destination, content, MAX_REGISTRATION_BYTES)
+        return destination
     destination_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(destination_dir, 0o700)
     destination = destination_dir / f"{APP_ID}-{document['instance_id']}.json"
@@ -835,7 +904,13 @@ def write_registration(directory: str | Path, document: dict[str, Any]) -> Path:
 def remove_registration_if_owned(path: str | Path, token: str) -> None:
     registration_path = Path(path)
     try:
-        current = json.loads(registration_path.read_text(encoding="utf-8"))
+        if os.name == "nt":
+            content = read_bounded_regular_file(
+                registration_path, MAX_REGISTRATION_BYTES
+            )
+            current = json.loads(content)
+        else:
+            current = json.loads(registration_path.read_text(encoding="utf-8"))
     except (
         FileNotFoundError,
         OSError,
@@ -857,8 +932,11 @@ def remove_registration_if_owned(path: str | Path, token: str) -> None:
         and hmac.compare_digest(current_token, token)
     ):
         try:
-            registration_path.unlink()
-        except FileNotFoundError:
+            if os.name == "nt":
+                unlink_regular_file(registration_path)
+            else:
+                registration_path.unlink()
+        except (FileNotFoundError, OSError):
             pass
 
 

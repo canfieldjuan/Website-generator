@@ -202,10 +202,31 @@ LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE=/absolute/path/to/release/keyring.json \
 ```
 
 The build fails unless the selected file is a bounded, strict, non-empty
-Ed25519 keyring whose key IDs are explicitly production-shaped. PyInstaller
-places its exact bytes in the frozen package resource trusted by the runtime;
-`LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE` is not read by the executable and
-cannot override its authority after build.
+Ed25519 keyring that exactly matches the production authority approved in the
+release builder; a merely production-shaped key ID is insufficient. This
+semantic authority pin keeps a raced path substitution from changing which
+issuer the package trusts. PyInstaller places the validated bytes in the frozen
+package resource trusted by the runtime; `LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE`
+is not read by the executable and cannot override its authority after build.
+
+Windows release builds use the same entry point on a native Windows host:
+
+```powershell
+py -3.12 -m venv .venv-release
+.\.venv-release\Scripts\python.exe -m pip install -r requirements-release.txt
+$env:LOCAL_CONNECT_ENTITLEMENT_KEYRING_FILE = "C:\secure\connect-public-keyring.json"
+.\.venv-release\Scripts\python.exe scripts\build_connect_provider.py
+```
+
+The result is `dist\website-redesign-connect.exe`. Windows discovery and the
+shared entitlement live under `%LOCALAPPDATA%\LocalConnect\`; provider-owned
+job state lives under `%LOCALAPPDATA%\website-redesign\state\`. The runtime
+rejects reparse points and DACLs that grant content or mutation rights beyond
+the current user, SYSTEM, or built-in Administrators. Shared locks use byte
+offset `0`, length `1`. The executable does not install or start a model
+runtime. An OpenAI-compatible vLLM endpoint serving the pinned model alias must
+already be reachable on loopback before the provider can publish its
+registration.
 
 An official package exposes the app-local activation adapter without starting
 vLLM or the provider:
@@ -214,6 +235,9 @@ vLLM or the provider:
 dist/website-redesign-connect entitlement status
 dist/website-redesign-connect entitlement install /path/to/entitlement-v1.json
 ```
+
+On Windows, use `dist\website-redesign-connect.exe` with the same `entitlement
+status` and `entitlement install` arguments.
 
 `status` reports only the stable entitlement state and whether Connect is
 active. `install` admits only a currently active issuer-signed source, then

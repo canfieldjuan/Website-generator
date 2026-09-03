@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ import build
 import connect_provider
 from lib.connect_entitlement import EntitlementDecision, EntitlementGate
 from lib.connect_store import ConnectStore, JobConflict, ProviderBusy, canonical_json
+from lib.connect_windows import atomic_replace_bytes, validate_private_regular_file
 from lib.connect_v2 import (
     APP_ID,
     CAPABILITY_ID,
@@ -47,6 +49,8 @@ from lib.connect_v2 import (
     resolve_connect_generation_config,
     sanitize_display_name,
     validate_job_request,
+    windows_v2_ownership_lock_path,
+    windows_v2_registration_path,
     write_registration,
 )
 from lib.generation import (
@@ -1093,15 +1097,45 @@ class GenerationSeamTests(unittest.TestCase):
                 state_dir=Path(directory) / "state",
             )
             observed = {"connected": False}
+            ownership_events = []
+
+            class StateLock:
+                def __init__(self, path):
+                    ownership_events.append(("state-acquired", Path(path)))
+
+                def close(self):
+                    ownership_events.append("state-released")
+
+            class RegistrationOwnership:
+                def close(self):
+                    ownership_events.append("ownership-released")
+
+            def acquire_ownership(runtime_dir, instance_id):
+                ownership_events.append(
+                    (
+                        "ownership-acquired",
+                        Path(runtime_dir),
+                        instance_id,
+                    )
+                )
+                return RegistrationOwnership()
 
             def assert_listening(runtime_dir, document):
+                self.assertEqual(ownership_events[0][0], "state-acquired")
+                self.assertEqual(ownership_events[1][0], "ownership-acquired")
+                self.assertNotIn("ownership-released", ownership_events)
                 endpoint = urlsplit(document["transport"]["base_url"])
                 with socket.create_connection(
                     (endpoint.hostname, endpoint.port),
                     timeout=1.0,
                 ):
                     observed["connected"] = True
+                ownership_events.append("published")
                 return Path(runtime_dir) / "registration.json"
+
+            def record_cleanup(_path, _token):
+                self.assertNotIn("ownership-released", ownership_events)
+                ownership_events.append("registration-removed")
 
             with patch.object(
                 connect_provider,
@@ -1118,10 +1152,31 @@ class GenerationSeamTests(unittest.TestCase):
                 connect_provider,
                 "write_registration",
                 side_effect=assert_listening,
+            ), patch.object(
+                connect_provider,
+                "acquire_registration_ownership",
+                side_effect=acquire_ownership,
+            ), patch.object(
+                connect_provider,
+                "remove_registration_if_owned",
+                side_effect=record_cleanup,
+            ), patch.object(
+                connect_provider,
+                "ProviderLock",
+                StateLock,
             ), patch.object(connect_provider.uvicorn.Server, "run"):
                 self.assertEqual(connect_provider.main(), 0)
 
             self.assertTrue(observed["connected"])
+            self.assertEqual(
+                ownership_events[2:],
+                [
+                    "published",
+                    "registration-removed",
+                    "ownership-released",
+                    "state-released",
+                ],
+            )
 
 
 class EntitlementTests(unittest.TestCase):
@@ -1240,6 +1295,89 @@ class EntitlementTests(unittest.TestCase):
 
 
 class RegistrationTests(unittest.TestCase):
+    def test_fixed_replacement_temporary_is_reclaimed_but_not_followed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "registration.json"
+            temporary = root / ".registration.json.tmp"
+            temporary.write_bytes(b"crash residue")
+
+            with patch("lib.connect_windows._private_windows_acl", return_value=True):
+                atomic_replace_bytes(destination, b"published", 32)
+
+            self.assertEqual(destination.read_bytes(), b"published")
+            self.assertFalse(temporary.exists())
+
+            outside = root / "outside"
+            outside.write_bytes(b"unchanged")
+            temporary.symlink_to(outside)
+            with patch(
+                "lib.connect_windows._private_windows_acl", return_value=True
+            ), self.assertRaises(PermissionError):
+                atomic_replace_bytes(destination, b"replacement", 32)
+            self.assertEqual(outside.read_bytes(), b"unchanged")
+
+    def test_optional_private_file_may_disappear_during_acl_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = root / "connect-v2.sqlite3-wal"
+            candidate.write_bytes(b"transient")
+            missing_errors = (
+                FileNotFoundError(errno.ENOENT, "sidecar disappeared"),
+                OSError(3, "sidecar path disappeared"),
+            )
+
+            for disappeared in missing_errors:
+                with self.subTest(error=type(disappeared).__name__), patch(
+                    "lib.connect_windows.validate_private_directory"
+                ), patch(
+                    "lib.connect_windows._private_windows_acl",
+                    side_effect=disappeared,
+                ):
+                    self.assertEqual(
+                        validate_private_regular_file(
+                            candidate,
+                            root=root,
+                            allow_missing=True,
+                        ),
+                        candidate,
+                    )
+
+            disappeared = FileNotFoundError(errno.ENOENT, "sidecar disappeared")
+            with patch(
+                "lib.connect_windows.validate_private_directory"
+            ), patch(
+                "lib.connect_windows._private_windows_acl",
+                side_effect=disappeared,
+            ), self.assertRaises(FileNotFoundError):
+                validate_private_regular_file(
+                    candidate,
+                    root=root,
+                    allow_missing=False,
+                )
+
+    def test_windows_v2_runtime_paths_are_fixed_by_durable_identity(self):
+        instance_id = "11111111-1111-4111-8111-111111111111"
+        directory = Path("C:/LocalConnect/runtime/v2/providers")
+
+        self.assertEqual(
+            windows_v2_registration_path(directory, instance_id).name,
+            f"local-connect-v2-{instance_id}.json",
+        )
+        self.assertEqual(
+            windows_v2_ownership_lock_path(directory, instance_id).name,
+            f".local-connect-v2-{instance_id}.lock",
+        )
+        self.assertEqual(
+            windows_v2_ownership_lock_path(directory, instance_id).parent,
+            directory.parent / "locks",
+        )
+        for invalid in ("", "CON", "11111111-1111-1111-8111-111111111111"):
+            with self.subTest(instance_id=invalid), self.assertRaises(ValueError):
+                windows_v2_registration_path(directory, invalid)
+            with self.subTest(instance_id=invalid), self.assertRaises(ValueError):
+                windows_v2_ownership_lock_path(directory, invalid)
+
     def test_registration_is_private_atomic_and_token_rotates(self):
         with tempfile.TemporaryDirectory() as directory:
             store = ConnectStore(Path(directory) / "state" / "connect.sqlite3")

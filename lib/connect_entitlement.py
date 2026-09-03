@@ -28,6 +28,16 @@ except ImportError:  # pragma: no cover - exercised only off the initial Unix ta
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from lib.connect_windows import (
+    WindowsFileLock,
+    WindowsLockBusy,
+    atomic_replace_bytes,
+    ensure_private_directory,
+    local_app_data_root,
+    read_bounded_regular_file,
+    unlink_regular_file,
+)
+
 
 FEATURE_ID = "connect.capability_exchange"
 ENTITLEMENT_FILE_NAME = "entitlement-v1.json"
@@ -86,7 +96,9 @@ class EntitlementGate:
     def from_installation(cls) -> "EntitlementGate":
         return cls(
             path=_entitlement_path(
-                os.environ.get("XDG_CONFIG_HOME"), os.environ.get("HOME")
+                os.environ.get("XDG_CONFIG_HOME"),
+                os.environ.get("HOME"),
+                os.environ.get("LOCALAPPDATA"),
             ),
             keys=_load_bundled_keyring(),
             now=lambda: datetime.now(timezone.utc),
@@ -142,6 +154,8 @@ def install_entitlement(
 
     candidate = _read_activation_source(Path(source))
     _admit_candidate(candidate, selected_gate)
+    if os.name == "nt":
+        return _install_entitlement_windows(candidate, selected_gate)
 
     directory_fd: int | None = None
     lock_fd: int | None = None
@@ -212,6 +226,18 @@ def install_entitlement(
 
 
 def _read_activation_source(path: Path) -> bytes:
+    if os.name == "nt":
+        try:
+            return read_bounded_regular_file(
+                path,
+                MAX_ENTITLEMENT_BYTES,
+                require_private_acl=False,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise EntitlementActivationError(
+                SOURCE_INVALID_CODE,
+                "The selected Connect entitlement source is invalid.",
+            ) from exc
     required_flags = ("O_NOFOLLOW", "O_CLOEXEC", "O_NONBLOCK")
     if os.name != "posix" or any(not hasattr(os, flag) for flag in required_flags):
         raise EntitlementActivationError(
@@ -270,6 +296,94 @@ def _admit_candidate(content: bytes, gate: EntitlementGate) -> None:
             NOT_ACTIVE_CODE,
             "The selected Connect entitlement is not currently active.",
         )
+
+
+def _install_entitlement_windows(
+    candidate: bytes, gate: EntitlementGate
+) -> dict[str, Any]:
+    assert gate.path is not None
+    destination = gate.path
+    lock: WindowsFileLock | None = None
+    promoted = False
+    previous: bytes | None = None
+    try:
+        root = local_app_data_root()
+        ensure_private_directory(destination.parent, root=root)
+        try:
+            lock = WindowsFileLock(destination.parent / ENTITLEMENT_LOCK_NAME)
+        except WindowsLockBusy as exc:
+            raise EntitlementActivationError(
+                ACTIVATION_BUSY_CODE,
+                "Another Connect entitlement activation is in progress.",
+            ) from exc
+
+        previous = _read_existing_windows_entitlement(destination)
+        _admit_candidate(candidate, gate)
+        atomic_replace_bytes(destination, candidate, MAX_ENTITLEMENT_BYTES)
+        promoted = True
+        installed = read_bounded_regular_file(destination, MAX_ENTITLEMENT_BYTES)
+        assert gate.keys is not None
+        decision = _evaluate_entitlement(installed, gate.keys, gate.now())
+        if installed != candidate or not decision.is_active:
+            raise EntitlementActivationError(
+                INSTALL_FAILED_CODE,
+                "The installed Connect entitlement did not verify as active.",
+            )
+        return {"state": decision.value, "active": True}
+    except EntitlementActivationError:
+        if promoted:
+            _restore_windows_entitlement(destination, previous)
+        raise
+    except OSError as exc:
+        if promoted:
+            _restore_windows_entitlement(destination, previous)
+        raise EntitlementActivationError(
+            STORAGE_UNAVAILABLE_CODE,
+            "The shared Connect entitlement could not be stored durably.",
+        ) from exc
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def _read_existing_windows_entitlement(path: Path) -> bytes | None:
+    try:
+        return read_bounded_regular_file(path, MAX_ENTITLEMENT_BYTES, allow_empty=True)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise EntitlementActivationError(
+            STORAGE_UNAVAILABLE_CODE,
+            "The existing Connect entitlement is not a safe regular file.",
+        ) from exc
+
+
+def _restore_windows_entitlement(destination: Path, previous: bytes | None) -> None:
+    try:
+        if previous is None:
+            try:
+                unlink_regular_file(destination)
+            except FileNotFoundError:
+                pass
+            if destination.exists():
+                raise OSError(errno.EIO, "candidate removal failed")
+            return
+        atomic_replace_bytes(
+            destination,
+            previous,
+            MAX_ENTITLEMENT_BYTES,
+            allow_empty=True,
+        )
+        restored = read_bounded_regular_file(
+            destination, MAX_ENTITLEMENT_BYTES, allow_empty=True
+        )
+        if restored != previous:
+            raise OSError(errno.EIO, "prior entitlement restoration mismatch")
+    except OSError as exc:
+        raise EntitlementActivationError(
+            INSTALL_FAILED_CODE,
+            "The prior Connect entitlement could not be restored safely.",
+        ) from exc
 
 
 def _open_private_directory(path: Path) -> int:
@@ -625,8 +739,19 @@ def _read_bounded(descriptor: int, maximum: int) -> bytes:
 
 
 def _entitlement_path(
-    xdg_config_home: str | None, home: str | None
+    xdg_config_home: str | None,
+    home: str | None,
+    local_app_data: str | None = None,
 ) -> Path | None:
+    if os.name == "nt":
+        try:
+            return (
+                local_app_data_root(local_app_data)
+                / "LocalConnect"
+                / ENTITLEMENT_FILE_NAME
+            )
+        except OSError:
+            return None
     if xdg_config_home:
         root = Path(xdg_config_home)
     elif home:
@@ -769,6 +894,11 @@ def _validate_claims(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _read_private_entitlement(path: Path) -> bytes | None:
+    if os.name == "nt":
+        try:
+            return read_bounded_regular_file(path, MAX_ENTITLEMENT_BYTES)
+        except OSError:
+            return None
     required_flags = ("O_NOFOLLOW", "O_CLOEXEC", "O_NONBLOCK")
     if os.name != "posix" or not hasattr(os, "geteuid") or any(
         not hasattr(os, flag) for flag in required_flags

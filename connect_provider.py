@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import sys
 from pathlib import Path
@@ -17,10 +18,11 @@ from lib.connect_entitlement import (
     install_entitlement,
 )
 from lib.connect_store import ConnectStore
+from lib.connect_windows import ensure_private_directory, local_app_data_root
 from lib.connect_v2 import (
-    DEFAULT_LOCAL_MODEL,
     ProviderLock,
     ProviderRuntime,
+    acquire_registration_ownership,
     create_app,
     default_runtime_dir,
     default_state_dir,
@@ -117,11 +119,16 @@ def main(argv: list[str] | None = None) -> int:
         state_dir = args.state_dir or default_state_dir()
         if not runtime_dir.is_absolute() or not state_dir.is_absolute():
             raise RuntimeError("Connect runtime and state directories must be absolute.")
-    except RuntimeError as exc:
+        if os.name == "nt":
+            windows_root = local_app_data_root()
+            ensure_private_directory(runtime_dir, root=windows_root)
+            ensure_private_directory(state_dir, root=windows_root)
+    except (OSError, RuntimeError) as exc:
         print(f"Connect provider configuration failed: {exc}", file=sys.stderr)
         return 2
-    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    state_dir.chmod(0o700)
+    if os.name != "nt":
+        state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        state_dir.chmod(0o700)
 
     try:
         generation_config = resolve_connect_generation_config()
@@ -139,10 +146,18 @@ def main(argv: list[str] | None = None) -> int:
 
     runtime: ProviderRuntime | None = None
     registration_path: Path | None = None
+    registration_ownership: ProviderLock | None = None
     token = new_bearer_token()
     listener: socket.socket | None = None
     try:
         store = ConnectStore(state_dir / "connect-v2.sqlite3")
+        try:
+            registration_ownership = acquire_registration_ownership(
+                runtime_dir, store.instance_id()
+            )
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         runtime = ProviderRuntime(store)
         app = create_app(runtime, token)
         config = uvicorn.Config(
@@ -172,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
             runtime.close()
         if listener is not None:
             listener.close()
+        if registration_ownership is not None:
+            registration_ownership.close()
         provider_lock.close()
 
 

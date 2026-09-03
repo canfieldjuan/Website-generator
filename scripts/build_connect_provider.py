@@ -33,10 +33,40 @@ MAX_KEYRING_BYTES = 64 * 1024
 MAX_KEYS = 16
 KEY_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 NON_PRODUCTION_KEY_TOKENS = frozenset(("dev", "example", "fixture", "test"))
+APPROVED_RELEASE_AUTHORITIES = frozenset(
+    {
+        (
+            "local-connect-prod-2026-01",
+            "gN8pJj9W2H89LBsIJqk5ydmlxNCrbSXxAbBDYQf1fa0",
+        )
+    }
+)
+REPARSE_POINT_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 
 class ReleaseBuildError(RuntimeError):
     """A stable release-build admission failure."""
+
+
+def _is_reparse(metadata: os.stat_result) -> bool:
+    return bool(
+        getattr(metadata, "st_file_attributes", 0) & REPARSE_POINT_ATTRIBUTE
+    )
+
+
+def _reject_reparse_ancestors(path: Path) -> None:
+    """Reject indirection in every directory leading to a release input."""
+    for ancestor in path.parents:
+        metadata = ancestor.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or _is_reparse(metadata):
+            raise ReleaseBuildError(
+                "Connect entitlement keyring has an unsafe path ancestor"
+            )
+
+
+def binary_filename(platform_name: str | None = None) -> str:
+    selected = os.name if platform_name is None else platform_name
+    return f"{BINARY_NAME}.exe" if selected == "nt" else BINARY_NAME
 
 
 def _strict_json_object(content: bytes) -> dict[str, Any]:
@@ -75,18 +105,36 @@ def _decode_base64url(value: object) -> bytes:
 def _read_keyring(path: Path) -> bytes:
     if not path.is_absolute():
         raise ReleaseBuildError(f"{KEYRING_ENV} must be an absolute path")
-    flags = os.O_RDONLY | os.O_CLOEXEC
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOINHERIT", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     if hasattr(os, "O_NONBLOCK"):
         flags |= os.O_NONBLOCK
     try:
+        _reject_reparse_ancestors(path)
+        before = path.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or _is_reparse(before)
+            or not 0 < before.st_size <= MAX_KEYRING_BYTES
+        ):
+            raise ReleaseBuildError(
+                "Connect entitlement keyring must be a bounded regular file"
+            )
         descriptor = os.open(path, flags)
         try:
-            metadata = os.fstat(descriptor)
+            opened = os.fstat(descriptor)
             if (
-                not stat.S_ISREG(metadata.st_mode)
-                or not 0 < metadata.st_size <= MAX_KEYRING_BYTES
+                not stat.S_ISREG(opened.st_mode)
+                or _is_reparse(opened)
+                or not 0 < opened.st_size <= MAX_KEYRING_BYTES
+                or (opened.st_dev, opened.st_ino, opened.st_size)
+                != (before.st_dev, before.st_ino, before.st_size)
             ):
                 raise ReleaseBuildError(
                     "Connect entitlement keyring must be a bounded regular file"
@@ -100,6 +148,15 @@ def _read_keyring(path: Path) -> bytes:
                 chunks.append(chunk)
                 remaining -= len(chunk)
             content = b"".join(chunks)
+            after = os.fstat(descriptor)
+            if (
+                len(content) != before.st_size
+                or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            ):
+                raise ReleaseBuildError(
+                    "Connect entitlement keyring changed while being read"
+                )
         finally:
             os.close(descriptor)
     except ReleaseBuildError:
@@ -124,6 +181,7 @@ def validate_release_keyring(path: Path) -> bytes:
             "Official packages require at least one bounded issuer key"
         )
     observed: set[str] = set()
+    observed_authorities: set[tuple[str, str]] = set()
     for item in keys:
         if not isinstance(item, dict) or set(item) != {
             "key_id",
@@ -148,8 +206,14 @@ def validate_release_keyring(path: Path) -> bytes:
             )
         if item["algorithm"] != "Ed25519":
             raise ReleaseBuildError("Official packages require Ed25519 issuer keys")
-        _decode_base64url(item["public_key_base64url"])
+        public_key = item["public_key_base64url"]
+        _decode_base64url(public_key)
         observed.add(key_id)
+        observed_authorities.add((key_id, public_key))
+    if observed_authorities != APPROVED_RELEASE_AUTHORITIES:
+        raise ReleaseBuildError(
+            "Connect entitlement keyring does not match the approved production authority"
+        )
     return content
 
 
@@ -205,12 +269,12 @@ def build_release(
             )
         command.append(str(ROOT / "connect_provider.py"))
         runner(command, cwd=ROOT, check=True)
-        produced = staged_dist / BINARY_NAME
+        produced = staged_dist / binary_filename()
         if not produced.is_file():
             raise ReleaseBuildError(
                 "PyInstaller completed without producing the expected executable"
             )
-        executable = dist_dir / BINARY_NAME
+        executable = dist_dir / binary_filename()
         os.replace(produced, executable)
 
     return executable
