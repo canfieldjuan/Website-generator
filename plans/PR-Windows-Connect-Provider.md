@@ -32,7 +32,8 @@ load-bearing runtime stage.
    admit the SQLite database plus journal/WAL/SHM files against the same private
    file and ancestor boundary.
 4. Make the PyInstaller release builder locate and publish the platform's real
-   executable name.
+   executable name, and refuse a release-authority keyring reached through a
+   symlink or Windows reparse point.
 5. Add native-Windows tests and a Windows package job that builds the official
    public authority into the executable and proves packaged status execution.
 6. Document the Windows package and its local model-runtime requirement.
@@ -66,10 +67,12 @@ validates existing and newly-created SQLite state files, and uses `msvcrt`
 byte-range locks for cross-process exclusion. Linux continues through the
 existing descriptor, ownership, mode, `flock`, and directory-`fsync` paths.
 
-The release builder chooses `.exe` only on Windows. CI builds on a native
-Windows runner because PyInstaller is not a cross-compiler, then executes the
-packaged entitlement status adapter. The local VM supplies the final package
-and cross-app acceptance host.
+The release builder chooses `.exe` only on Windows. Its keyring reader rejects
+symlink and Windows reparse metadata before opening the file, then binds the
+opened descriptor and completed read to the original file identity. CI builds
+on a native Windows runner because PyInstaller is not a cross-compiler, then
+executes the packaged entitlement status adapter. The local VM supplies the
+final package and cross-app acceptance host.
 
 ## Intentional
 
@@ -94,9 +97,12 @@ and cross-app acceptance host.
 - `CONNECT_CONTRACTS_DIR=../connect-contracts python -m unittest -v
   tests.test_connect_provider tests.test_entitlement_activation` passed all 76
   focused provider and entitlement tests.
+- `python -m unittest -v tests.test_connect_release_build` passed all 12
+  release-builder checks on Linux, including ordinary-keyring admission plus
+  symbolic-link and synthetic Windows reparse refusal.
 - `python -m unittest -v tests.test_connect_windows
-  tests.test_connect_release_build` passed the release-builder checks on Linux;
-  the eight native-Windows storage tests skipped as designed.
+  tests.test_connect_release_build` passed the earlier release-builder checks
+  on Linux; the eight native-Windows storage tests skipped as designed.
 - `python -m compileall -q connect_provider.py lib tests
   scripts/build_connect_provider.py` passed.
 - A real local vLLM fixture build completed with the already-local
@@ -124,7 +130,7 @@ and cross-app acceptance host.
 
 ## Estimated diff size
 
-11 files, 1,411 additions, 20 deletions. The Windows storage adapter, provider
+11 files, 1,472 additions, 23 deletions. The Windows storage adapter, provider
 wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
 cannot authorize, persist, or advertise its capability.

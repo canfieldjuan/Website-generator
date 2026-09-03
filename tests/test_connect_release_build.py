@@ -6,6 +6,7 @@ import unittest
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import build
@@ -52,6 +53,29 @@ class ConnectReleaseBuildTests(unittest.TestCase):
     def test_valid_production_keyring_is_admitted_exactly(self):
         original = self.keyring.read_bytes()
         self.assertEqual(validate_release_keyring(self.keyring), original)
+
+    def test_keyring_reader_rejects_windows_reparse_metadata_before_open(self):
+        metadata = self.keyring.lstat()
+        reparse = SimpleNamespace(
+            st_mode=metadata.st_mode,
+            st_size=metadata.st_size,
+            st_file_attributes=0x400,
+        )
+        with (
+            patch.object(Path, "lstat", return_value=reparse),
+            patch("scripts.build_connect_provider.os.open") as open_file,
+            self.assertRaisesRegex(ReleaseBuildError, "bounded regular file"),
+        ):
+            validate_release_keyring(self.keyring)
+        open_file.assert_not_called()
+
+    def test_keyring_reader_rejects_symbolic_link(self):
+        target = self.root / "real-keyring.json"
+        self.keyring.replace(target)
+        self.keyring.symlink_to(target)
+
+        with self.assertRaisesRegex(ReleaseBuildError, "bounded regular file"):
+            validate_release_keyring(self.keyring)
 
     def test_missing_empty_partial_duplicate_and_test_keyrings_fail_closed(self):
         with self.assertRaisesRegex(ReleaseBuildError, "unavailable"):
