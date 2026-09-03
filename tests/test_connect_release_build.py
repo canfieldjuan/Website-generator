@@ -55,16 +55,54 @@ class ConnectReleaseBuildTests(unittest.TestCase):
         self.assertEqual(validate_release_keyring(self.keyring), original)
 
     def test_keyring_reader_rejects_windows_reparse_metadata_before_open(self):
-        metadata = self.keyring.lstat()
-        reparse = SimpleNamespace(
-            st_mode=metadata.st_mode,
-            st_size=metadata.st_size,
-            st_file_attributes=0x400,
-        )
+        path_type = type(self.keyring)
+        real_lstat = path_type.lstat
+
+        def lstat_with_reparse_leaf(candidate):
+            metadata = real_lstat(candidate)
+            if candidate == self.keyring:
+                return SimpleNamespace(
+                    st_mode=metadata.st_mode,
+                    st_size=metadata.st_size,
+                    st_file_attributes=0x400,
+                )
+            return metadata
+
         with (
-            patch.object(Path, "lstat", return_value=reparse),
+            patch.object(
+                path_type,
+                "lstat",
+                autospec=True,
+                side_effect=lstat_with_reparse_leaf,
+            ),
             patch("scripts.build_connect_provider.os.open") as open_file,
             self.assertRaisesRegex(ReleaseBuildError, "bounded regular file"),
+        ):
+            validate_release_keyring(self.keyring)
+        open_file.assert_not_called()
+
+    def test_keyring_reader_rejects_reparse_point_ancestor_before_open(self):
+        path_type = type(self.keyring)
+        real_lstat = path_type.lstat
+
+        def lstat_with_reparse_ancestor(candidate):
+            metadata = real_lstat(candidate)
+            if candidate == self.root:
+                return SimpleNamespace(
+                    st_mode=metadata.st_mode,
+                    st_file_attributes=0x400,
+                )
+            return metadata
+
+        with (
+            patch.object(
+                path_type,
+                "lstat",
+                autospec=True,
+                side_effect=lstat_with_reparse_ancestor,
+            ),
+            patch("scripts.build_connect_provider.os.open") as open_file,
+            self.assertRaisesRegex(ReleaseBuildError, "unsafe path ancestor"),
         ):
             validate_release_keyring(self.keyring)
         open_file.assert_not_called()

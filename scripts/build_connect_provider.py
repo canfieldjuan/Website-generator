@@ -46,6 +46,16 @@ def _is_reparse(metadata: os.stat_result) -> bool:
     )
 
 
+def _reject_reparse_ancestors(path: Path) -> None:
+    """Reject indirection in every directory leading to a release input."""
+    for ancestor in path.parents:
+        metadata = ancestor.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or _is_reparse(metadata):
+            raise ReleaseBuildError(
+                "Connect entitlement keyring has an unsafe path ancestor"
+            )
+
+
 def binary_filename(platform_name: str | None = None) -> str:
     selected = os.name if platform_name is None else platform_name
     return f"{BINARY_NAME}.exe" if selected == "nt" else BINARY_NAME
@@ -98,6 +108,7 @@ def _read_keyring(path: Path) -> bytes:
     if hasattr(os, "O_NONBLOCK"):
         flags |= os.O_NONBLOCK
     try:
+        _reject_reparse_ancestors(path)
         before = path.lstat()
         if (
             not stat.S_ISREG(before.st_mode)

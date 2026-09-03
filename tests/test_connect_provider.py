@@ -1099,14 +1099,21 @@ class GenerationSeamTests(unittest.TestCase):
             observed = {"connected": False}
             ownership_events = []
 
+            class StateLock:
+                def __init__(self, path):
+                    ownership_events.append(("state-acquired", Path(path)))
+
+                def close(self):
+                    ownership_events.append("state-released")
+
             class RegistrationOwnership:
                 def close(self):
-                    ownership_events.append("released")
+                    ownership_events.append("ownership-released")
 
             def acquire_ownership(runtime_dir, instance_id):
                 ownership_events.append(
                     (
-                        "acquired",
+                        "ownership-acquired",
                         Path(runtime_dir),
                         instance_id,
                     )
@@ -1114,8 +1121,9 @@ class GenerationSeamTests(unittest.TestCase):
                 return RegistrationOwnership()
 
             def assert_listening(runtime_dir, document):
-                self.assertEqual(ownership_events[0][0], "acquired")
-                self.assertNotIn("released", ownership_events)
+                self.assertEqual(ownership_events[0][0], "state-acquired")
+                self.assertEqual(ownership_events[1][0], "ownership-acquired")
+                self.assertNotIn("ownership-released", ownership_events)
                 endpoint = urlsplit(document["transport"]["base_url"])
                 with socket.create_connection(
                     (endpoint.hostname, endpoint.port),
@@ -1126,7 +1134,7 @@ class GenerationSeamTests(unittest.TestCase):
                 return Path(runtime_dir) / "registration.json"
 
             def record_cleanup(_path, _token):
-                self.assertNotIn("released", ownership_events)
+                self.assertNotIn("ownership-released", ownership_events)
                 ownership_events.append("registration-removed")
 
             with patch.object(
@@ -1152,13 +1160,22 @@ class GenerationSeamTests(unittest.TestCase):
                 connect_provider,
                 "remove_registration_if_owned",
                 side_effect=record_cleanup,
+            ), patch.object(
+                connect_provider,
+                "ProviderLock",
+                StateLock,
             ), patch.object(connect_provider.uvicorn.Server, "run"):
                 self.assertEqual(connect_provider.main(), 0)
 
             self.assertTrue(observed["connected"])
             self.assertEqual(
-                ownership_events[1:],
-                ["published", "registration-removed", "released"],
+                ownership_events[2:],
+                [
+                    "published",
+                    "registration-removed",
+                    "ownership-released",
+                    "state-released",
+                ],
             )
 
 

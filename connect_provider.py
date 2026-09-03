@@ -187,9 +187,9 @@ def main(argv: list[str] | None = None) -> int:
             runtime.close()
         if listener is not None:
             listener.close()
-        provider_lock.close()
         if registration_ownership is not None:
             registration_ownership.close()
+        provider_lock.close()
 
 
 if __name__ == "__main__":
