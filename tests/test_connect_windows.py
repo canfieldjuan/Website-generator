@@ -111,7 +111,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
             path = write_registration(runtime, document)
             self.assertEqual(
                 path.name,
-                f"local-connect-v2-website-redesign-{document['instance_id']}.json",
+                f"local-connect-v2-{document['instance_id']}.json",
             )
             self.assertEqual(json.loads(path.read_bytes()), document)
             restarted = registration_document(

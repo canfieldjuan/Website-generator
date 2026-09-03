@@ -65,7 +65,7 @@ Connect-owned reparse points, and non-regular files, accepts OWNER RIGHTS only
 as the already-validated owner, bounds every read, writes through a flushed
 same-directory temporary file, retries transient Windows sharing violations for
 a bounded interval, publishes
-`local-connect-v2-<app_id>-<instance_id>.json`, holds the matching hidden
+`local-connect-v2-<instance_id>.json`, holds the matching hidden
 `.local-connect-v2-<instance_id>.lock` path from before bind/publication through
 token-owned cleanup in the sibling direct-addressed `locks` directory, validates
 existing and newly-created SQLite state files, and uses `msvcrt` byte-range
