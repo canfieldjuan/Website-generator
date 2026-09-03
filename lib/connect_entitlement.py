@@ -228,7 +228,11 @@ def install_entitlement(
 def _read_activation_source(path: Path) -> bytes:
     if os.name == "nt":
         try:
-            return read_bounded_regular_file(path, MAX_ENTITLEMENT_BYTES)
+            return read_bounded_regular_file(
+                path,
+                MAX_ENTITLEMENT_BYTES,
+                require_private_acl=False,
+            )
         except (OSError, TypeError, ValueError) as exc:
             raise EntitlementActivationError(
                 SOURCE_INVALID_CODE,

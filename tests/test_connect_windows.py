@@ -29,6 +29,7 @@ from lib.connect_windows import (
     WINDOWS_LOCK_LENGTH,
     WINDOWS_LOCK_OFFSET,
     WindowsFileLock,
+    _current_user_sid,
     local_app_data_root,
 )
 
@@ -36,9 +37,32 @@ from lib.connect_windows import (
 TOKEN = "A" * 64
 
 
+def make_private_root(path: Path) -> None:
+    subprocess.run(
+        [
+            "icacls",
+            str(path),
+            "/grant:r",
+            f"*{_current_user_sid()}:(OI)(CI)F",
+            "*S-1-5-18:(OI)(CI)F",
+            "*S-1-5-32-544:(OI)(CI)F",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["icacls", str(path), "/inheritance:r"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 @unittest.skipUnless(os.name == "nt", "native Windows storage tests")
 class WindowsConnectStorageTests(unittest.TestCase):
     def setUp(self):
+        self.actual_local_app_data = os.environ.get("LOCALAPPDATA")
         configured = os.environ.get("CONNECT_CONTRACTS_DIR")
         if not configured:
             self.skipTest("CONNECT_CONTRACTS_DIR is required")
@@ -47,6 +71,11 @@ class WindowsConnectStorageTests(unittest.TestCase):
         self.now = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
     def test_default_paths_share_local_app_data_without_xdg(self):
+        if self.actual_local_app_data:
+            self.assertEqual(
+                local_app_data_root(self.actual_local_app_data),
+                Path(self.actual_local_app_data),
+            )
         with (
             tempfile.TemporaryDirectory() as directory,
             patch.dict(
@@ -56,6 +85,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
             ),
         ):
             root = Path(directory)
+            make_private_root(root)
             self.assertEqual(local_app_data_root(), root)
             self.assertEqual(
                 default_runtime_dir(),
@@ -85,6 +115,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
                 clear=True,
             ),
         ):
+            make_private_root(Path(directory))
             runtime = default_runtime_dir()
             document = registration_document(
                 instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
@@ -109,6 +140,8 @@ class WindowsConnectStorageTests(unittest.TestCase):
 
     def test_local_app_data_rejects_broad_read_acl(self):
         with tempfile.TemporaryDirectory() as directory:
+            make_private_root(Path(directory))
+            self.assertEqual(local_app_data_root(directory), Path(directory))
             subprocess.run(
                 [
                     "icacls",
@@ -134,6 +167,7 @@ class WindowsConnectStorageTests(unittest.TestCase):
             ),
         ):
             root = Path(directory)
+            make_private_root(root)
             source = root / "selected-entitlement.json"
             source.write_bytes((self.fixtures / "valid/active.json").read_bytes())
             destination = root / "LocalConnect" / ENTITLEMENT_FILE_NAME
