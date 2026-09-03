@@ -133,10 +133,12 @@ class WindowsConnectStorageTests(unittest.TestCase):
             ownership_lock = windows_v2_ownership_lock_path(
                 runtime, document["instance_id"]
             )
+            self.assertEqual(ownership_lock.parent, runtime.parent / "locks")
             first = acquire_registration_ownership(runtime, document["instance_id"])
             self.assertIsNotNone(first)
             assert first is not None
             self.assertEqual(first.path, ownership_lock)
+            self.assertNotIn(ownership_lock, runtime.iterdir())
             try:
                 with self.assertRaises(RuntimeError):
                     acquire_registration_ownership(runtime, document["instance_id"])

@@ -815,7 +815,7 @@ def windows_v2_ownership_lock_path(
 ) -> Path:
     if not is_uuid4(instance_id):
         raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
-    return Path(directory) / f".local-connect-v2-{instance_id}.lock"
+    return Path(directory).parent / "locks" / f".local-connect-v2-{instance_id}.lock"
 
 
 def acquire_registration_ownership(
@@ -823,7 +823,9 @@ def acquire_registration_ownership(
 ) -> ProviderLock | None:
     if os.name != "nt":
         return None
-    return ProviderLock(windows_v2_ownership_lock_path(directory, instance_id))
+    lock_path = windows_v2_ownership_lock_path(directory, instance_id)
+    ensure_private_directory(lock_path.parent, root=local_app_data_root())
+    return ProviderLock(lock_path)
 
 
 def registration_document(

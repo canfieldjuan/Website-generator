@@ -67,11 +67,13 @@ same-directory temporary file, retries transient Windows sharing violations for
 a bounded interval, publishes
 `local-connect-v2-<app_id>-<instance_id>.json`, holds the matching hidden
 `.local-connect-v2-<instance_id>.lock` path from before bind/publication through
-token-owned cleanup, validates existing and newly-created SQLite state files,
-and uses `msvcrt` byte-range locks for cross-process exclusion. The ownership
-key intentionally excludes the application ID so one durable namespace cannot
-gain two live owners during an application rename. Linux continues through the
-existing descriptor, ownership, mode, `flock`, and directory-`fsync` paths.
+token-owned cleanup in the sibling direct-addressed `locks` directory, validates
+existing and newly-created SQLite state files, and uses `msvcrt` byte-range
+locks for cross-process exclusion. The ownership key intentionally excludes the
+application ID so one durable namespace cannot gain two live owners during an
+application rename; consumers never enumerate persistent locks as registration
+candidates. Linux continues through the existing descriptor, ownership, mode,
+`flock`, and directory-`fsync` paths.
 
 The release builder chooses `.exe` only on Windows. Its keyring reader rejects
 symlink and Windows reparse metadata before opening the file, then binds the
@@ -136,7 +138,7 @@ final package and cross-app acceptance host.
 
 ## Estimated diff size
 
-12 files, 1,665 additions, 23 deletions. The Windows storage adapter, provider
+12 files, 1,675 additions, 23 deletions. The Windows storage adapter, provider
 wiring, entitlement lifecycle, state admission, and native package proof are one
 vertical slice: splitting them would knowingly publish an executable that
 cannot authorize, persist, or advertise its capability.

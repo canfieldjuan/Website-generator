@@ -1329,6 +1329,10 @@ class RegistrationTests(unittest.TestCase):
             windows_v2_ownership_lock_path(directory, instance_id).name,
             f".local-connect-v2-{instance_id}.lock",
         )
+        self.assertEqual(
+            windows_v2_ownership_lock_path(directory, instance_id).parent,
+            directory.parent / "locks",
+        )
         for invalid in ("", "CON", "11111111-1111-1111-8111-111111111111"):
             with self.subTest(instance_id=invalid), self.assertRaises(ValueError):
                 windows_v2_registration_path(directory, invalid)
