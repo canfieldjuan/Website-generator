@@ -1658,6 +1658,32 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(read_registration.call_count, 2)
         unlink_registration.assert_not_called()
 
+    def test_windows_token_cleanup_skips_busy_owned_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            instance_id = str(uuid.uuid4())
+            candidate = (
+                windows_v2_registration_path(runtime, instance_id)
+                if os.name == "nt"
+                else runtime / f"{APP_ID}-{instance_id}.json"
+            )
+            candidate.write_text("{}", encoding="utf-8")
+
+            with (
+                patch.object(
+                    connect_v2,
+                    "_try_acquire_registration_cleanup_ownership",
+                    return_value=(False, None),
+                ) as acquire_ownership,
+                patch.object(
+                    connect_v2, "_remove_registration_if_owned", return_value=True
+                ) as remove_registration,
+            ):
+                self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+
+            acquire_ownership.assert_called_once_with(runtime, instance_id)
+            remove_registration.assert_not_called()
+
     def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"

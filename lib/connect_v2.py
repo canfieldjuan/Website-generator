@@ -788,6 +788,17 @@ def acquire_registration_ownership(
     return ProviderLock(lock_path)
 
 
+def _try_acquire_registration_cleanup_ownership(
+    directory: str | Path, instance_id: str
+) -> tuple[bool, ProviderLock | None]:
+    if os.name != "nt":
+        return True, None
+    try:
+        return True, acquire_registration_ownership(directory, instance_id)
+    except RuntimeError:
+        return False, None
+
+
 def registration_document(
     *, instance_id: str, port: int, token: str, pid: int | None = None
 ) -> dict[str, Any]:
@@ -1088,13 +1099,24 @@ def remove_registration_for_token(directory: str | Path, token: str) -> int:
         if match is None:
             continue
         candidate_instance_id = match.group(1)
-        if _remove_registration_if_owned(
-            candidate,
-            token,
-            raise_on_io_error=True,
-            expected_instance_id=candidate_instance_id,
-        ):
-            removed += 1
+        ownership_available, registration_ownership = (
+            _try_acquire_registration_cleanup_ownership(
+                provider_dir, candidate_instance_id
+            )
+        )
+        if not ownership_available:
+            continue
+        try:
+            if _remove_registration_if_owned(
+                candidate,
+                token,
+                raise_on_io_error=True,
+                expected_instance_id=candidate_instance_id,
+            ):
+                removed += 1
+        finally:
+            if registration_ownership is not None:
+                registration_ownership.close()
     return removed
 
 
