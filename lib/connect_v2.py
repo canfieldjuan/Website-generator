@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import hmac
 import ipaddress
@@ -17,7 +18,7 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -86,6 +87,46 @@ UUID4_PATTERN = re.compile(
 )
 IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _registration_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+    )
+
+
+@dataclass
+class _PosixRegistrationSnapshot:
+    directory_fd: int
+    name: str
+    identity: tuple[int, int, int, int]
+    content: bytes
+
+    def close(self) -> None:
+        if self.directory_fd < 0:
+            return
+        os.close(self.directory_fd)
+        self.directory_fd = -1
+
+    def unlink_if_same(self) -> bool:
+        try:
+            visible = os.stat(
+                self.name,
+                dir_fd=self.directory_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return False
+        if (
+            not stat.S_ISREG(visible.st_mode)
+            or _registration_identity(visible) != self.identity
+        ):
+            return False
+        os.unlink(self.name, dir_fd=self.directory_fd)
+        return True
 
 
 class ProtocolError(ValueError):
@@ -820,51 +861,197 @@ def write_registration(directory: str | Path, document: dict[str, Any]) -> Path:
                 pass
 
 
+def _read_posix_registration(
+    path: Path,
+) -> _PosixRegistrationSnapshot | None:
+    required_flags = ("O_CLOEXEC", "O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK")
+    if (
+        os.name != "posix"
+        or any(not hasattr(os, flag) for flag in required_flags)
+        or os.open not in os.supports_dir_fd
+        or os.stat not in os.supports_dir_fd
+        or os.stat not in os.supports_follow_symlinks
+        or os.unlink not in os.supports_dir_fd
+    ):
+        raise OSError(errno.ENOSYS, "safe registration cleanup is unavailable")
+    if path.name in ("", os.curdir, os.pardir):
+        return None
+
+    directory_fd = os.open(
+        path.parent,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    descriptor: int | None = None
+    try:
+        try:
+            visible_before = os.stat(
+                path.name,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return None
+        if (
+            not stat.S_ISREG(visible_before.st_mode)
+            or not 0 < visible_before.st_size <= MAX_REGISTRATION_BYTES
+        ):
+            return None
+
+        try:
+            descriptor = os.open(
+                path.name,
+                os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=directory_fd,
+            )
+        except FileNotFoundError:
+            return None
+        except OSError:
+            try:
+                visible_after_failure = os.stat(
+                    path.name,
+                    dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                return None
+            if (
+                not stat.S_ISREG(visible_after_failure.st_mode)
+                or _registration_identity(visible_after_failure)
+                != _registration_identity(visible_before)
+            ):
+                return None
+            raise
+
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or not 0 < opened.st_size <= MAX_REGISTRATION_BYTES
+            or _registration_identity(opened)
+            != _registration_identity(visible_before)
+        ):
+            return None
+
+        content = bytearray()
+        while len(content) <= MAX_REGISTRATION_BYTES:
+            chunk = os.read(
+                descriptor,
+                min(8192, MAX_REGISTRATION_BYTES + 1 - len(content)),
+            )
+            if not chunk:
+                break
+            content.extend(chunk)
+
+        opened_after = os.fstat(descriptor)
+        try:
+            visible_after = os.stat(
+                path.name,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return None
+        identity = _registration_identity(opened)
+        if (
+            len(content) != opened.st_size
+            or len(content) > MAX_REGISTRATION_BYTES
+            or _registration_identity(opened_after) != identity
+            or _registration_identity(visible_after) != identity
+        ):
+            return None
+
+        snapshot = _PosixRegistrationSnapshot(
+            directory_fd=directory_fd,
+            name=path.name,
+            identity=identity,
+            content=bytes(content),
+        )
+        directory_fd = -1
+        return snapshot
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+
+def _read_registration_bytes(
+    path: Path,
+) -> tuple[bytes, _PosixRegistrationSnapshot | None] | None:
+    if os.name == "nt":
+        return read_bounded_regular_file(path, MAX_REGISTRATION_BYTES), None
+    snapshot = _read_posix_registration(path)
+    if snapshot is None:
+        return None
+    return snapshot.content, snapshot
+
+
 def remove_registration_if_owned(
     path: str | Path, token: str, *, raise_on_io_error: bool = False
 ) -> bool:
-    registration_path = Path(path)
+    return _remove_registration_if_owned(
+        Path(path),
+        token,
+        raise_on_io_error=raise_on_io_error,
+    )
+
+
+def _remove_registration_if_owned(
+    registration_path: Path,
+    token: str,
+    *,
+    raise_on_io_error: bool,
+    expected_instance_id: str | None = None,
+) -> bool:
+    snapshot: _PosixRegistrationSnapshot | None = None
     try:
-        if os.name == "nt":
-            content = read_bounded_regular_file(
-                registration_path, MAX_REGISTRATION_BYTES
-            )
-            current = json.loads(content)
-        else:
-            current = json.loads(registration_path.read_text(encoding="utf-8"))
+        admitted = _read_registration_bytes(registration_path)
     except FileNotFoundError:
         return False
     except OSError:
         if raise_on_io_error:
             raise
         return False
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+    if admitted is None:
         return False
-    if not isinstance(current, dict):
-        return False
-    current_auth = current.get("auth")
-    if not isinstance(current_auth, dict):
-        return False
-    current_token = current_auth.get("token")
-    if (
-        isinstance(current_token, str)
-        and current_token.isascii()
-        and token.isascii()
-        and hmac.compare_digest(current_token, token)
-    ):
+    content, snapshot = admitted
+    try:
+        try:
+            current = json.loads(content)
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            return False
+        if not isinstance(current, dict):
+            return False
+        if expected_instance_id is not None and (
+            current.get("app_id") != APP_ID
+            or current.get("instance_id") != expected_instance_id
+        ):
+            return False
+        current_auth = current.get("auth")
+        if not isinstance(current_auth, dict):
+            return False
+        current_token = current_auth.get("token")
+        if not (
+            isinstance(current_token, str)
+            and current_token.isascii()
+            and token.isascii()
+            and hmac.compare_digest(current_token, token)
+        ):
+            return False
         try:
             if os.name == "nt":
                 unlink_regular_file(registration_path)
-            else:
-                registration_path.unlink()
+                return True
+            assert snapshot is not None
+            return snapshot.unlink_if_same()
         except FileNotFoundError:
             return False
         except OSError:
             if raise_on_io_error:
                 raise
             return False
-        return True
-    return False
+    finally:
+        if snapshot is not None:
+            snapshot.close()
 
 
 def remove_registration_for_token(directory: str | Path, token: str) -> int:
@@ -894,42 +1081,12 @@ def remove_registration_for_token(directory: str | Path, token: str) -> int:
         if match is None:
             continue
         candidate_instance_id = match.group(1)
-        try:
-            if os.name == "nt":
-                content = read_bounded_regular_file(candidate, MAX_REGISTRATION_BYTES)
-            else:
-                metadata = candidate.lstat()
-                if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_REGISTRATION_BYTES:
-                    continue
-                content = candidate.read_bytes()
-            current = json.loads(content)
-        except FileNotFoundError:
-            continue
-        except OSError:
-            raise
-        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
-            continue
-        if not isinstance(current, dict) or current.get("app_id") != APP_ID:
-            continue
-        instance_id = current.get("instance_id")
-        auth = current.get("auth")
-        if instance_id != candidate_instance_id or not isinstance(auth, dict):
-            continue
-        current_token = auth.get("token")
-        if (
-            not isinstance(current_token, str)
-            or not current_token.isascii()
-            or not hmac.compare_digest(current_token, token)
+        if _remove_registration_if_owned(
+            candidate,
+            token,
+            raise_on_io_error=True,
+            expected_instance_id=candidate_instance_id,
         ):
-            continue
-        expected = (
-            windows_v2_registration_path(provider_dir, instance_id)
-            if os.name == "nt"
-            else provider_dir / f"{APP_ID}-{instance_id}.json"
-        )
-        if candidate != expected:
-            continue
-        if remove_registration_if_owned(candidate, token, raise_on_io_error=True):
             removed += 1
     return removed
 

@@ -7,6 +7,7 @@ import socket
 import stat
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from starlette.requests import Request
 
 import build
 import connect_provider
+import lib.connect_v2 as connect_v2
 from lib.connect_entitlement import EntitlementDecision, EntitlementGate
 from lib.connect_store import ConnectStore, JobConflict, ProviderBusy, canonical_json
 from lib.connect_windows import atomic_replace_bytes, validate_private_regular_file
@@ -32,6 +34,7 @@ from lib.connect_v2 import (
     CAPABILITY_VERSION,
     DEFAULT_LOCAL_MODEL,
     MAX_INPUT_BYTES,
+    MAX_REGISTRATION_BYTES,
     OUTPUT_MEDIA_TYPE,
     ProviderLock,
     ProviderRuntime,
@@ -1560,6 +1563,52 @@ class RegistrationTests(unittest.TestCase):
                 with self.subTest(token=invalid), self.assertRaises(ValueError):
                     remove_registration_for_token(runtime, invalid)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_token_cleanup_skips_mixed_unsafe_candidates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            owned = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            owned_path = write_registration(runtime, owned)
+
+            symlink_id = str(uuid.uuid4())
+            symlink_target = root / "symlink-target.json"
+            symlink_target.write_text(
+                json.dumps(
+                    registration_document(
+                        instance_id=symlink_id, port=43128, token=TOKEN, pid=4243
+                    )
+                ),
+                encoding="utf-8",
+            )
+            symlink_path = runtime / f"{APP_ID}-{symlink_id}.json"
+            symlink_path.symlink_to(symlink_target)
+
+            fifo_id = str(uuid.uuid4())
+            fifo_path = runtime / f"{APP_ID}-{fifo_id}.json"
+            os.mkfifo(fifo_path)
+
+            oversized_id = str(uuid.uuid4())
+            oversized_path = runtime / f"{APP_ID}-{oversized_id}.json"
+            oversized_document = json.dumps(
+                registration_document(
+                    instance_id=oversized_id, port=43129, token=TOKEN, pid=4244
+                )
+            ).encode("utf-8")
+            oversized_path.write_bytes(
+                oversized_document
+                + b" " * (MAX_REGISTRATION_BYTES + 1 - len(oversized_document))
+            )
+
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(owned_path.exists())
+            self.assertTrue(symlink_path.is_symlink())
+            self.assertTrue(symlink_target.exists())
+            self.assertTrue(fifo_path.exists())
+            self.assertTrue(oversized_path.exists())
+
     def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"
@@ -1570,7 +1619,7 @@ class RegistrationTests(unittest.TestCase):
             unlink_target = (
                 "lib.connect_v2.unlink_regular_file"
                 if os.name == "nt"
-                else "pathlib.Path.unlink"
+                else "lib.connect_v2._PosixRegistrationSnapshot.unlink_if_same"
             )
 
             with patch(unlink_target, side_effect=PermissionError("temporarily locked")):
@@ -1592,11 +1641,7 @@ class RegistrationTests(unittest.TestCase):
             canonical.write_text("{}", encoding="utf-8")
             unrelated = runtime / "unrelated.json"
             unrelated.write_text("{}", encoding="utf-8")
-            read_target = (
-                "lib.connect_v2.read_bounded_regular_file"
-                if os.name == "nt"
-                else "pathlib.Path.read_bytes"
-            )
+            read_target = "lib.connect_v2._read_registration_bytes"
 
             with patch(read_target, side_effect=PermissionError("temporarily locked")):
                 with self.assertRaises(PermissionError):
@@ -1612,6 +1657,7 @@ class RegistrationTests(unittest.TestCase):
             "invalid auth shape": b'{"auth":"invalid"}',
             "invalid UTF-8": b"\xff",
             "excessive nesting": b"[" * 1_200 + b"0" + b"]" * 1_200,
+            "oversized integer": b'{"value":' + b"9" * 5_000 + b"}",
             "non-ASCII token": '{"auth":{"token":"caf\u00e9"}}'.encode("utf-8"),
         }
         for label, content in malformed_contents.items():
@@ -1622,6 +1668,110 @@ class RegistrationTests(unittest.TestCase):
                 remove_registration_if_owned(path, TOKEN)
 
                 self.assertTrue(path.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_rejects_final_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "owned.json"
+            target.write_text(
+                json.dumps({"auth": {"token": TOKEN}}), encoding="utf-8"
+            )
+            registration = root / "registration.json"
+            registration.symlink_to(target)
+
+            self.assertFalse(remove_registration_if_owned(registration, TOKEN))
+            self.assertTrue(registration.is_symlink())
+            self.assertTrue(target.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_rejects_oversized_regular_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registration = Path(directory) / "registration.json"
+            document = json.dumps({"auth": {"token": TOKEN}}).encode("utf-8")
+            registration.write_bytes(
+                document + b" " * (MAX_REGISTRATION_BYTES + 1 - len(document))
+            )
+            self.assertEqual(registration.stat().st_size, MAX_REGISTRATION_BYTES + 1)
+
+            self.assertFalse(remove_registration_if_owned(registration, TOKEN))
+            self.assertTrue(registration.exists())
+
+            registration.write_bytes(
+                document + b" " * (MAX_REGISTRATION_BYTES - len(document))
+            )
+            self.assertEqual(registration.stat().st_size, MAX_REGISTRATION_BYTES)
+            self.assertTrue(remove_registration_if_owned(registration, TOKEN))
+            self.assertFalse(registration.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_does_not_block_on_fifo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registration = Path(directory) / "registration.json"
+            os.mkfifo(registration)
+            outcome = []
+            errors = []
+
+            def cleanup():
+                try:
+                    outcome.append(remove_registration_if_owned(registration, TOKEN))
+                except Exception as exc:  # pragma: no cover - assertion reports detail
+                    errors.append(exc)
+
+            worker = threading.Thread(target=cleanup, daemon=True)
+            worker.start()
+            worker.join(timeout=0.25)
+            blocked = worker.is_alive()
+            if blocked:
+                writer = None
+                deadline = time.monotonic() + 1
+                while writer is None and time.monotonic() < deadline:
+                    try:
+                        writer = os.open(registration, os.O_WRONLY | os.O_NONBLOCK)
+                    except OSError as exc:
+                        if exc.errno != errno.ENXIO:
+                            raise
+                        time.sleep(0.01)
+                if writer is not None:
+                    os.close(writer)
+                worker.join(timeout=1)
+
+            self.assertFalse(blocked, "registration cleanup blocked while opening a FIFO")
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(outcome, [False])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_rejects_replacement_before_unlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registration = root / "registration.json"
+            registration.write_text(
+                json.dumps({"auth": {"token": TOKEN}, "marker": "original"}),
+                encoding="utf-8",
+            )
+            replacement = root / "replacement.json"
+            replacement.write_text(
+                json.dumps({"auth": {"token": TOKEN}, "marker": "replacement"}),
+                encoding="utf-8",
+            )
+            original_unlink = connect_v2._PosixRegistrationSnapshot.unlink_if_same
+
+            def replace_before_unlink(snapshot):
+                os.replace(replacement, registration)
+                return original_unlink(snapshot)
+
+            with patch.object(
+                connect_v2._PosixRegistrationSnapshot,
+                "unlink_if_same",
+                new=replace_before_unlink,
+            ):
+                self.assertFalse(remove_registration_if_owned(registration, TOKEN))
+
+            self.assertEqual(
+                json.loads(registration.read_text(encoding="utf-8"))["marker"],
+                "replacement",
+            )
 
     def test_registration_boundaries_and_exclusive_lock_fail_closed(self):
         instance_id = str(uuid.uuid4())
