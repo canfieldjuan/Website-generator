@@ -2,5 +2,6 @@
 set -euo pipefail
 
 printf '%s\n' \
-    'scripts/start_llama_server.sh is retired; use scripts/start_vllm_server.sh.' >&2
+    'scripts/start_llama_server.sh is retired; Website Generator now requires operator-managed Ollama.' \
+    'Install and start Ollama, make qwen3-30b-a3b:latest available, then rerun the application.' >&2
 exit 2
