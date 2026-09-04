@@ -27,6 +27,12 @@ entitlement cryptography or authority, the standalone provider CLI default,
 Ollama daemon/model management, OpenRouter behavior, deployment, billing, or
 any unrelated Connect hardening issue.
 
+This slice exceeds the repository's 400-line soft target because the managed
+readiness handshake, the one-child native controller, the operator controls,
+and installed-Windows smoke form one end-to-end lifecycle contract. Splitting
+any one of them would leave either an unowned provider process, controls with
+no packaged implementation, or packaging with no operator-visible proof.
+
 ## Scope (this PR)
 
 1. Add an opt-in machine-readable readiness line to the existing provider CLI
@@ -40,7 +46,19 @@ any unrelated Connect hardening issue.
    verify its bundled engine resource, launch the native app, and stop it
    cleanly on the ephemeral runner.
 
-## Execution contract
+### Files touched
+
+- `.github/workflows/generator-tests.yml`
+- `README.md`
+- `connect_provider.py`
+- `desktop/src-tauri/src/lib.rs`
+- `desktop/src/engine.ts`
+- `desktop/src/main.ts`
+- `desktop/src/styles.css`
+- `plans/PR-Desktop-Connect-Lifecycle.md`
+- `tests/test_connect_provider.py`
+
+## Mechanism
 
 - Entitlement status and install execute the packaged engine's existing
   `entitlement` subcommands. Rust never parses, copies, signs, or persists the
@@ -49,15 +67,18 @@ any unrelated Connect hardening issue.
   It then launches the same executable with an explicit desktop-managed serve
   flag. The Python process emits exactly one compact readiness envelope only
   after its loopback listener and owner-private registration are live.
-- Rust accepts only that readiness envelope within a bounded startup window.
-  Early exit, malformed/multiple output, or timeout kills and reaps the child
-  and reports a stable error. A second start is idempotent; a second provider
-  process is never created.
+- Rust accepts only that readiness envelope within a bounded 60-second startup
+  window sized for the three sequential Ollama preflight requests plus packaged
+  executable startup. Early exit, malformed/multiple output, or timeout kills
+  and reaps the child and reports a stable error. A second start is idempotent;
+  a second provider process is never created.
 - Stop and normal window close kill and wait for only the child held by this
   application instance. The desktop does not discover or terminate a
   separately launched provider.
 - Entitlement-status failure is reported independently from managed-process
   state, so it cannot hide a running child or remove the operator's Stop path.
+- Standalone generation may disable activation and provider startup while it
+  owns the model, but it cannot disable Stop for an already-running provider.
 - The app never sends an OpenRouter setting or API key into Connect. Connect
   remains local-Ollama-only and still performs its own preflight.
 

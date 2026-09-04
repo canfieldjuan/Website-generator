@@ -30,7 +30,7 @@ const ENGINE_ACTIVE: u8 = 1;
 const ENGINE_CANCELLED: u8 = 2;
 const MAX_LIFECYCLE_OUTPUT_BYTES: usize = 16 * 1024;
 const CONNECT_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
-const CONNECT_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+const CONNECT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

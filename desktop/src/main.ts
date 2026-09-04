@@ -168,33 +168,33 @@ app.innerHTML = `
 
             <button class="text-action" id="check-model-button" type="button">Check model connection</button>
           </fieldset>
-
-          <fieldset class="connect-fieldset">
-            <legend>Local Connect</legend>
-            <div class="connect-panel">
-              <div class="connect-intro">
-                <b>Share website generation with your local apps</b>
-                <p>Activation and startup are explicit. Standalone website generation remains available either way.</p>
-              </div>
-              <dl class="connect-status-list">
-                <div>
-                  <dt>Connect access</dt>
-                  <dd id="connect-entitlement">Checking…</dd>
-                </div>
-                <div>
-                  <dt>Local provider</dt>
-                  <dd id="connect-provider">Stopped</dd>
-                </div>
-              </dl>
-              <p class="connect-feedback" id="connect-feedback" aria-live="polite">Checking Local Connect…</p>
-              <div class="connect-actions">
-                <button class="button button--quiet-dark" id="connect-activate" type="button">Activate from file</button>
-                <button class="button button--connect" id="connect-start" type="button" disabled>Start Connect</button>
-                <button class="text-action connect-stop" id="connect-stop" type="button" disabled>Stop</button>
-              </div>
-            </div>
-          </fieldset>
         </form>
+
+        <fieldset class="connect-fieldset">
+          <legend>Local Connect</legend>
+          <div class="connect-panel">
+            <div class="connect-intro">
+              <b>Share website generation with your local apps</b>
+              <p>Activation and startup are explicit. Standalone website generation remains available either way.</p>
+            </div>
+            <dl class="connect-status-list">
+              <div>
+                <dt>Connect access</dt>
+                <dd id="connect-entitlement">Checking…</dd>
+              </div>
+              <div>
+                <dt>Local provider</dt>
+                <dd id="connect-provider">Stopped</dd>
+              </div>
+            </dl>
+            <p class="connect-feedback" id="connect-feedback" aria-live="polite">Checking Local Connect…</p>
+            <div class="connect-actions">
+              <button class="button button--quiet-dark" id="connect-activate" type="button">Activate from file</button>
+              <button class="button button--connect" id="connect-start" type="button" disabled>Start Connect</button>
+              <button class="text-action connect-stop" id="connect-stop" type="button" disabled>Stop</button>
+            </div>
+          </div>
+        </fieldset>
 
         <div class="brief-actions">
           <button class="button button--primary" id="generate-button" type="button">
@@ -414,10 +414,9 @@ function showError(error: unknown): void {
 function renderConnectControls(): void {
   const inactive = !connectSnapshot?.entitlement_active;
   const running = connectSnapshot?.provider_running === true;
-  const disabled = busy || connectBusy;
-  connectActivate.disabled = disabled || running;
-  connectStart.disabled = disabled || inactive || running;
-  connectStop.disabled = disabled || !running;
+  connectActivate.disabled = busy || connectBusy || running;
+  connectStart.disabled = busy || connectBusy || inactive || running;
+  connectStop.disabled = connectBusy || !running;
 }
 
 function applyConnectStatus(status: ConnectStatus): void {
