@@ -81,6 +81,7 @@ MAX_REQUEST_BYTES = 65_536
 MAX_MULTIPART_BYTES = MAX_INPUT_BYTES + MAX_REQUEST_BYTES + 65_536
 TOKEN_BYTES = 48
 MAX_REGISTRATION_BYTES = 16 * 1024
+REGISTRATION_OWNERSHIP_RETRY_SECONDS = 0.05
 
 UUID4_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -779,19 +780,32 @@ def windows_v2_ownership_lock_path(
 
 
 def acquire_registration_ownership(
-    directory: str | Path, instance_id: str
+    directory: str | Path,
+    instance_id: str,
+    *,
+    wait_timeout: float = 0.0,
 ) -> ProviderLock | None:
+    if not math.isfinite(wait_timeout) or wait_timeout < 0:
+        raise ValueError("Registration ownership wait_timeout must be non-negative.")
     if os.name == "nt":
         lock_path = windows_v2_ownership_lock_path(directory, instance_id)
         ensure_private_directory(lock_path.parent, root=local_app_data_root())
-        return ProviderLock(lock_path)
-    if not is_uuid4(instance_id):
-        raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
-    provider_dir = Path(directory)
-    provider_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(provider_dir, 0o700)
-    lock_path = provider_dir / f".{APP_ID}-{instance_id}.lock"
-    return ProviderLock(lock_path)
+    else:
+        if not is_uuid4(instance_id):
+            raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
+        provider_dir = Path(directory)
+        provider_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(provider_dir, 0o700)
+        lock_path = provider_dir / f".{APP_ID}-{instance_id}.lock"
+    deadline = time.monotonic() + wait_timeout
+    while True:
+        try:
+            return ProviderLock(lock_path)
+        except RuntimeError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(REGISTRATION_OWNERSHIP_RETRY_SECONDS, remaining))
 
 
 def _try_acquire_registration_cleanup_ownership(

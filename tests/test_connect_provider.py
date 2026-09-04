@@ -1235,7 +1235,11 @@ class GenerationSeamTests(unittest.TestCase):
                 def close(self):
                     ownership_events.append("ownership-released")
 
-            def acquire_ownership(runtime_dir, instance_id):
+            def acquire_ownership(runtime_dir, instance_id, *, wait_timeout):
+                self.assertEqual(
+                    wait_timeout,
+                    connect_provider.REGISTRATION_OWNERSHIP_STARTUP_WAIT_SECONDS,
+                )
                 ownership_events.append(
                     (
                         "ownership-acquired",
@@ -1707,6 +1711,34 @@ class RegistrationTests(unittest.TestCase):
             self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
             self.assertFalse(path.exists())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX registration ownership")
+    def test_provider_ownership_waits_for_inflight_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            instance_id = str(uuid.uuid4())
+            cleanup_ownership = acquire_registration_ownership(runtime, instance_id)
+            self.assertIsNotNone(cleanup_ownership)
+            with self.assertRaises(RuntimeError):
+                acquire_registration_ownership(
+                    runtime, instance_id, wait_timeout=0.0
+                )
+
+            def release_cleanup():
+                time.sleep(0.05)
+                if cleanup_ownership is not None:
+                    cleanup_ownership.close()
+
+            release = threading.Thread(target=release_cleanup)
+            release.start()
+            provider_ownership = acquire_registration_ownership(
+                runtime, instance_id, wait_timeout=1.0
+            )
+            try:
+                self.assertFalse(release.is_alive())
+            finally:
+                provider_ownership.close()
+                release.join(timeout=1)
+
     def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"
@@ -1882,6 +1914,11 @@ class RegistrationTests(unittest.TestCase):
             registration_document(
                 instance_id=instance_id, port=1, token=TOKEN, pid=False
             )
+        for invalid_wait in (-0.1, float("nan"), float("inf")):
+            with self.subTest(wait_timeout=invalid_wait), self.assertRaises(ValueError):
+                acquire_registration_ownership(
+                    Path("runtime"), instance_id, wait_timeout=invalid_wait
+                )
 
         with tempfile.TemporaryDirectory() as directory:
             lock_path = Path(directory) / "provider.lock"
