@@ -1521,11 +1521,22 @@ class RegistrationTests(unittest.TestCase):
             same_pid_replacement_path = write_registration(
                 runtime, same_pid_replacement
             )
+            non_ascii = {
+                **registration_document(
+                    instance_id=str(uuid.uuid4()),
+                    port=43130,
+                    token="D" * 64,
+                    pid=4244,
+                ),
+                "auth": {"scheme": "bearer", "token": "café"},
+            }
+            non_ascii_path = write_registration(runtime, non_ascii)
 
             self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
             self.assertFalse(terminated_path.exists())
             self.assertTrue(replacement_path.exists())
             self.assertTrue(same_pid_replacement_path.exists())
+            self.assertTrue(non_ascii_path.exists())
             self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
             for invalid in (None, False, "", "short", "!" * 64):
                 with self.subTest(token=invalid), self.assertRaises(ValueError):

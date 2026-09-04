@@ -899,8 +899,10 @@ def remove_registration_for_token(directory: str | Path, token: str) -> int:
         if not is_uuid4(instance_id) or not isinstance(auth, dict):
             continue
         current_token = auth.get("token")
-        if not isinstance(current_token, str) or not hmac.compare_digest(
-            current_token, token
+        if (
+            not isinstance(current_token, str)
+            or not current_token.isascii()
+            or not hmac.compare_digest(current_token, token)
         ):
             continue
         expected = (
