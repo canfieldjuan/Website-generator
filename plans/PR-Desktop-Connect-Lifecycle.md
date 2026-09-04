@@ -157,7 +157,7 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 ## Estimated diff size
 
-Approximately 1,100 added lines across 9 files for the provider readiness
-adapter, native lifecycle controller, compact UI surface, tests, and Windows
-smoke step. The provider HTTP contract and generation stack are not part of
-this diff.
+The final patch contains 1,416 additions and 19 deletions across 9 files for
+the provider readiness adapter, native lifecycle controller, compact UI
+surface, tests, and Windows smoke step. The provider HTTP contract and
+generation stack are not part of this diff.
