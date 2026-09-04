@@ -5,8 +5,13 @@ import {
   checkEngine,
   exportProspect,
   generateSite,
+  getConnectStatus,
   importProspect,
+  installConnectEntitlement,
   saveArtifact,
+  startConnect,
+  stopConnect,
+  type ConnectStatus,
 } from "./engine";
 import {
   AttemptGate,
@@ -163,6 +168,32 @@ app.innerHTML = `
 
             <button class="text-action" id="check-model-button" type="button">Check model connection</button>
           </fieldset>
+
+          <fieldset class="connect-fieldset">
+            <legend>Local Connect</legend>
+            <div class="connect-panel">
+              <div class="connect-intro">
+                <b>Share website generation with your local apps</b>
+                <p>Activation and startup are explicit. Standalone website generation remains available either way.</p>
+              </div>
+              <dl class="connect-status-list">
+                <div>
+                  <dt>Connect access</dt>
+                  <dd id="connect-entitlement">Checking…</dd>
+                </div>
+                <div>
+                  <dt>Local provider</dt>
+                  <dd id="connect-provider">Stopped</dd>
+                </div>
+              </dl>
+              <p class="connect-feedback" id="connect-feedback" aria-live="polite">Checking Local Connect…</p>
+              <div class="connect-actions">
+                <button class="button button--quiet-dark" id="connect-activate" type="button">Activate from file</button>
+                <button class="button button--connect" id="connect-start" type="button" disabled>Start Connect</button>
+                <button class="text-action connect-stop" id="connect-stop" type="button" disabled>Stop</button>
+              </div>
+            </div>
+          </fieldset>
         </form>
 
         <div class="brief-actions">
@@ -224,12 +255,20 @@ const previewWrap = element<HTMLElement>("preview-wrap");
 const emptyPreview = element<HTMLElement>("empty-preview");
 const receipt = element<HTMLElement>("artifact-receipt");
 const openRouterKey = element<HTMLInputElement>("openrouter-key");
+const connectEntitlement = element<HTMLElement>("connect-entitlement");
+const connectProvider = element<HTMLElement>("connect-provider");
+const connectFeedback = element<HTMLElement>("connect-feedback");
+const connectActivate = element<HTMLButtonElement>("connect-activate");
+const connectStart = element<HTMLButtonElement>("connect-start");
+const connectStop = element<HTMLButtonElement>("connect-stop");
 
 let sourceDocument: ProspectDocument = {};
 let activeProvider: "local" | "openrouter" = "local";
 let previewUrl: string | null = null;
 let busy = false;
 let activeGeneration: Promise<void> | null = null;
+let connectBusy = false;
+let connectSnapshot: ConnectStatus | null = null;
 const attempts = new AttemptGate();
 const editedProspectFields = new Set<ProspectFieldKey>();
 
@@ -249,6 +288,17 @@ const prospectControlFields: Record<string, ProspectFieldKey> = {
   "owner-email": "ownerEmail",
   "formspree-endpoint": "formspreeEndpoint",
   services: "servicesText",
+};
+
+const entitlementLabels: Record<string, string> = {
+  active: "Active",
+  authority_unavailable: "Issuer keys unavailable",
+  missing: "Not activated",
+  invalid: "Invalid",
+  not_yet_valid: "Not active yet",
+  expired: "Expired",
+  feature_missing: "Website generation not included",
+  unavailable: "Unavailable",
 };
 
 function inputValue(id: string): string {
@@ -353,11 +403,59 @@ function setBusy(value: boolean, cancellable = true): void {
   generateButton.disabled = value;
   cancelButton.hidden = !value || !cancellable;
   previewWrap.dataset.generating = String(value && cancellable);
+  renderConnectControls();
 }
 
 function showError(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   setStatus(message || "Website generation failed.", "error");
+}
+
+function renderConnectControls(): void {
+  const inactive = !connectSnapshot?.entitlement_active;
+  const running = connectSnapshot?.provider_running === true;
+  const disabled = busy || connectBusy;
+  connectActivate.disabled = disabled || running;
+  connectStart.disabled = disabled || inactive || running;
+  connectStop.disabled = disabled || !running;
+}
+
+function applyConnectStatus(status: ConnectStatus): void {
+  connectSnapshot = status;
+  connectEntitlement.textContent = entitlementLabels[status.entitlement_state] ?? "Unavailable";
+  connectProvider.textContent = status.provider_running ? "Running" : "Stopped";
+  renderConnectControls();
+}
+
+function setConnectBusy(value: boolean): void {
+  connectBusy = value;
+  renderConnectControls();
+}
+
+function connectErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message || "Local Connect is unavailable.";
+}
+
+async function refreshConnectStatus(): Promise<void> {
+  setConnectBusy(true);
+  connectFeedback.textContent = "Checking Local Connect…";
+  try {
+    const status = await getConnectStatus();
+    applyConnectStatus(status);
+    connectFeedback.textContent = status.provider_running
+      ? "Website generation is available to authenticated local apps."
+      : status.entitlement_active
+        ? "Connect access is active. Start the provider when you want to share this capability."
+        : "Activate Connect with an issuer-signed entitlement file.";
+  } catch (error) {
+    connectSnapshot = null;
+    connectEntitlement.textContent = "Unavailable";
+    connectProvider.textContent = "Stopped";
+    connectFeedback.textContent = connectErrorMessage(error);
+  } finally {
+    setConnectBusy(false);
+  }
 }
 
 form.addEventListener("input", (event) => {
@@ -433,6 +531,54 @@ checkModelButton.addEventListener("click", async () => {
     showError(error);
   } finally {
     setBusy(false);
+  }
+});
+
+connectActivate.addEventListener("click", async () => {
+  setConnectBusy(true);
+  connectFeedback.textContent = "Choose the issuer-signed entitlement file…";
+  try {
+    const status = await installConnectEntitlement();
+    if (!status) {
+      connectFeedback.textContent = "Activation cancelled. No Connect settings changed.";
+      return;
+    }
+    applyConnectStatus(status);
+    connectFeedback.textContent = status.entitlement_active
+      ? "Connect access is active. Start the provider when needed."
+      : "The selected entitlement is not active. Choose a current issuer-signed file.";
+  } catch (error) {
+    connectFeedback.textContent = connectErrorMessage(error);
+  } finally {
+    setConnectBusy(false);
+  }
+});
+
+connectStart.addEventListener("click", async () => {
+  setConnectBusy(true);
+  connectFeedback.textContent = "Starting the Local Connect provider…";
+  try {
+    const status = await startConnect();
+    applyConnectStatus(status);
+    connectFeedback.textContent = "Website generation is available to authenticated local apps.";
+  } catch (error) {
+    connectFeedback.textContent = connectErrorMessage(error);
+  } finally {
+    setConnectBusy(false);
+  }
+});
+
+connectStop.addEventListener("click", async () => {
+  setConnectBusy(true);
+  connectFeedback.textContent = "Stopping the Local Connect provider…";
+  try {
+    const status = await stopConnect();
+    applyConnectStatus(status);
+    connectFeedback.textContent = "Local Connect stopped. Standalone generation is still available.";
+  } catch (error) {
+    connectFeedback.textContent = connectErrorMessage(error);
+  } finally {
+    setConnectBusy(false);
   }
 });
 
@@ -527,3 +673,4 @@ window.addEventListener("beforeunload", () => {
 });
 
 writeFields(emptyProspectFields());
+void refreshConnectStatus();

@@ -1,0 +1,117 @@
+# Desktop Local Connect lifecycle
+
+## Why this slice exists
+
+The Website Generator can now work as a standalone desktop application, and
+the same packaged engine can serve the Local Connect v2 capability. The
+remaining gap is operational ownership: activation and provider startup still
+require a terminal, so the native app does not actually make its existing
+Connect capability available to an operator.
+
+The root cause is not missing generation behavior or capability discovery.
+The provider, signed-entitlement validator, durable job store, registration,
+and HTTP contract already exist. The missing seam is a bounded native
+lifecycle controller around that exact packaged provider.
+
+A correct fix must let the desktop report the privacy-bounded entitlement
+state, select and install an issuer-signed entitlement through the existing
+activation adapter, and start/stop one provider child owned by the desktop.
+Startup must become successful only after the existing provider has completed
+Ollama preflight and published its registration. The child must be stopped and
+reaped on operator request or normal desktop shutdown. Standalone generation
+must remain available when Connect is inactive.
+
+This work must not change prospect preparation, generated HTML, admission,
+Local Connect manifests/routes/job semantics, discovery directories,
+entitlement cryptography or authority, the standalone provider CLI default,
+Ollama daemon/model management, OpenRouter behavior, deployment, billing, or
+any unrelated Connect hardening issue.
+
+## Scope (this PR)
+
+1. Add an opt-in machine-readable readiness line to the existing provider CLI
+   while preserving its no-argument standalone behavior.
+2. Add bounded Tauri commands for entitlement status/install and for
+   start/status/stop of one desktop-owned provider child.
+3. Add a compact Local Connect section to the operator UI. It reports only
+   stable entitlement/provider states and never blocks the standalone build
+   form.
+4. Extend Windows packaging acceptance to install the exact-head NSIS build,
+   verify its bundled engine resource, launch the native app, and stop it
+   cleanly on the ephemeral runner.
+
+## Execution contract
+
+- Entitlement status and install execute the packaged engine's existing
+  `entitlement` subcommands. Rust never parses, copies, signs, or persists the
+  license itself, and the selected source path is not returned to the UI.
+- Provider start first requires the activation adapter to report `active`.
+  It then launches the same executable with an explicit desktop-managed serve
+  flag. The Python process emits exactly one compact readiness envelope only
+  after its loopback listener and owner-private registration are live.
+- Rust accepts only that readiness envelope within a bounded startup window.
+  Early exit, malformed/multiple output, or timeout kills and reaps the child
+  and reports a stable error. A second start is idempotent; a second provider
+  process is never created.
+- Stop and normal window close kill and wait for only the child held by this
+  application instance. The desktop does not discover or terminate a
+  separately launched provider.
+- Entitlement-status failure is reported independently from managed-process
+  state, so it cannot hide a running child or remove the operator's Stop path.
+- The app never sends an OpenRouter setting or API key into Connect. Connect
+  remains local-Ollama-only and still performs its own preflight.
+
+## Intentional
+
+- Local Connect is mandatory as a product capability but not a prerequisite
+  for using the standalone Website Generator. An unavailable entitlement is a
+  visible Connect state, not a generation failure.
+- Activation uses a native file picker because entitlement acquisition and
+  issuer operations remain outside this application.
+- Lifecycle state is session-owned. The existing provider lock remains the
+  cross-process authority if another standalone instance is already running.
+- No auto-start is added. Starting a provider is an explicit operator action;
+  the app does not unexpectedly reserve the model runtime or advertise a
+  capability merely because its window opened.
+
+## Deferred
+
+- Entitlement purchase/issuance, account UI, updater, installer signing, and
+  auto-start at login.
+- Managing Ollama, downloading models, arbitrary provider discovery UI, job
+  history UI, and consumer-specific workflow buttons.
+- Connect cleanup/style hardening already tracked outside issue #38.
+
+## Verification
+
+- `python -m pytest -q`: 249 tests passed, 34 platform/fixture tests skipped,
+  and 355 subtests passed. The provider lifecycle cases cover explicit managed
+  readiness, stop/owner-EOF/invalid control input, and preservation of the
+  no-command standalone mode.
+- `python -m compileall -q build.py pipeline.py connect_provider.py lib tests`:
+  passed.
+- `npm test` from `desktop/`: 1 test file passed, 14 tests passed.
+- `npm run build` from `desktop/`: TypeScript and Vite production build passed.
+- `cargo fmt --check` from `desktop/src-tauri/`: passed.
+- `cargo test` from `desktop/src-tauri/`: 20 tests passed. The lifecycle cases
+  cover exact/bounded readiness, inactive entitlement, duplicate start,
+  timeout and early-exit cleanup, graceful stop/reap, and reconciled state after
+  a forced fallback, plus independent provider state when entitlement status is
+  unavailable. The Windows run adds the process-tree cancellation regression.
+- `cargo clippy --all-targets --all-features -- -D warnings` from
+  `desktop/src-tauri/`: passed.
+- `python connect_provider.py entitlement status`: returned the expected
+  fail-closed source state `authority_unavailable` without starting Ollama or
+  the provider.
+- `.github/workflows/generator-tests.yml`: parsed as valid YAML.
+- The Windows package job builds the packaged engine and NSIS installer,
+  installs the exact PR head on its ephemeral runner, verifies the installed
+  bundled engine can report entitlement status, launches the installed GUI,
+  and requests a clean close before using a bounded smoke-only fallback.
+
+## Estimated diff size
+
+Approximately 1,100 added lines across 9 files for the provider readiness
+adapter, native lifecycle controller, compact UI surface, tests, and Windows
+smoke step. The provider HTTP contract and generation stack are not part of
+this diff.

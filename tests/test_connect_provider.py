@@ -1,5 +1,6 @@
 import errno
 import hashlib
+import io
 import json
 import os
 import socket
@@ -9,6 +10,7 @@ import threading
 import unittest
 import uuid
 from datetime import datetime, timezone
+from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -1090,6 +1092,66 @@ class GenerationSeamTests(unittest.TestCase):
             ), patch.object(connect_provider, "write_registration") as write:
                 self.assertEqual(connect_provider.main(), 2)
                 write.assert_not_called()
+
+    def test_desktop_managed_serve_emits_one_readiness_envelope(self):
+        class ReadinessOutput(io.StringIO):
+            closed_by_provider = False
+
+            def close(self):
+                self.closed_by_provider = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(
+                command="serve",
+                desktop_managed=True,
+                runtime_dir=Path(directory) / "runtime",
+                state_dir=Path(directory) / "state",
+            )
+            output = ReadinessOutput()
+            with patch.object(
+                connect_provider,
+                "parse_args",
+                return_value=args,
+            ), patch.object(
+                connect_provider,
+                "resolve_connect_generation_config",
+                return_value=SimpleNamespace(),
+            ), patch.object(
+                connect_provider,
+                "preflight_generation_provider",
+            ), patch.object(
+                connect_provider,
+                "start_desktop_shutdown_watcher",
+            ) as watcher, patch.object(
+                connect_provider.uvicorn.Server,
+                "run",
+            ), redirect_stdout(output):
+                self.assertEqual(connect_provider.main(), 0)
+
+            self.assertEqual(output.getvalue(), '{"ready":true}\n')
+            self.assertTrue(output.closed_by_provider)
+            watcher.assert_called_once()
+
+    def test_desktop_shutdown_pipe_stops_the_managed_server(self):
+        for signal in (b"stop\n", b"stop\r\n", b""):
+            with self.subTest(signal=signal):
+                server = SimpleNamespace(should_exit=False)
+
+                connect_provider.watch_desktop_shutdown(server, io.BytesIO(signal))
+
+                self.assertTrue(server.should_exit)
+
+        server = SimpleNamespace(should_exit=False)
+        connect_provider.watch_desktop_shutdown(server, io.BytesIO(b"continue\n"))
+        self.assertFalse(server.should_exit)
+
+    def test_no_command_preserves_standalone_serve_mode(self):
+        standalone = connect_provider.parse_args([])
+        managed = connect_provider.parse_args(["serve", "--desktop-managed"])
+
+        self.assertIsNone(standalone.command)
+        self.assertEqual(managed.command, "serve")
+        self.assertTrue(managed.desktop_managed)
 
     def test_registration_is_published_only_after_listener_accepts_connections(self):
         with tempfile.TemporaryDirectory() as directory:

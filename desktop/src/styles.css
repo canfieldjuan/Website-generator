@@ -526,6 +526,92 @@ textarea:focus {
   cursor: pointer;
 }
 
+.connect-fieldset {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.connect-panel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  background: #edf3f3;
+  border: 1px solid #b9c9cc;
+  box-shadow: inset 4px 0 var(--teal);
+}
+
+.connect-intro {
+  display: grid;
+  gap: 5px;
+}
+
+.connect-intro b {
+  font-family: Bahnschrift, "Arial Narrow", sans-serif;
+  font-size: 0.9rem;
+}
+
+.connect-intro p,
+.connect-feedback {
+  margin: 0;
+  color: var(--graphite);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.connect-status-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.connect-status-list div {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid #ccd7d9;
+}
+
+.connect-status-list dt {
+  color: #687b81;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.connect-status-list dd {
+  margin: 4px 0 0;
+  font-family: Bahnschrift, "Arial Narrow", sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.connect-feedback {
+  min-height: 2.1em;
+}
+
+.connect-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.button--quiet-dark {
+  color: #244149;
+  background: transparent;
+  border-color: #94a7ac;
+}
+
+.button--connect {
+  color: #fff;
+  background: var(--teal);
+  border-color: var(--teal);
+}
+
+.connect-stop {
+  margin: 0 0 0 auto;
+}
+
 .brief-actions {
   display: flex;
   align-items: center;
@@ -848,6 +934,20 @@ textarea:focus {
 
   .provider-options {
     grid-template-columns: 1fr;
+  }
+
+  .connect-status-list {
+    grid-template-columns: 1fr;
+  }
+
+  .connect-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .connect-stop {
+    align-self: center;
+    margin: 4px 0 0;
   }
 
   .brief-actions {

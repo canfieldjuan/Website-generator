@@ -8,7 +8,9 @@ import json
 import os
 import socket
 import sys
+import threading
 from pathlib import Path
+from typing import BinaryIO, TextIO
 
 import uvicorn
 
@@ -78,6 +80,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "desktop",
         help="Handle one private desktop JSON request on stdin.",
     )
+    serve = commands.add_parser(
+        "serve",
+        help="Run the Local Connect provider.",
+    )
+    serve.add_argument(
+        "--desktop-managed",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     return parser.parse_args(argv)
 
 
@@ -113,6 +124,36 @@ def _run_entitlement_command(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0
+
+
+def watch_desktop_shutdown(server: uvicorn.Server, source: BinaryIO) -> None:
+    """Ask a desktop-managed server to exit when its owner stops or disappears."""
+    try:
+        signal = source.readline()
+    except (OSError, ValueError):
+        signal = b""
+    if signal in (b"", b"stop\n", b"stop\r\n"):
+        server.should_exit = True
+
+
+def start_desktop_shutdown_watcher(
+    server: uvicorn.Server, source: BinaryIO
+) -> threading.Thread:
+    watcher = threading.Thread(
+        target=watch_desktop_shutdown,
+        args=(server, source),
+        name="desktop-connect-shutdown",
+        daemon=True,
+    )
+    watcher.start()
+    return watcher
+
+
+def emit_desktop_readiness(output: TextIO) -> None:
+    """Write the one desktop handshake and close its dedicated output pipe."""
+    output.write('{"ready":true}\n')
+    output.flush()
+    output.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -173,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
             access_log=False,
             server_header=False,
         )
+        server = uvicorn.Server(config)
         listener = bind_loopback_listener(config.backlog)
         port = int(listener.getsockname()[1])
         registration = registration_document(
@@ -181,11 +223,18 @@ def main(argv: list[str] | None = None) -> int:
             token=token,
         )
         registration_path = write_registration(runtime_dir, registration)
-        print(
-            f"Website Redesign Connect v2 is available at "
-            f"http://127.0.0.1:{port}/"
-        )
-        uvicorn.Server(config).run(sockets=[listener])
+        desktop_managed = getattr(args, "desktop_managed", False)
+        if desktop_managed:
+            input_stream = getattr(sys.stdin, "buffer", sys.stdin)
+            start_desktop_shutdown_watcher(server, input_stream)
+            emit_desktop_readiness(sys.stdout)
+        else:
+            print(
+                f"Website Redesign Connect v2 is available at "
+                f"http://127.0.0.1:{port}/",
+                flush=True,
+            )
+        server.run(sockets=[listener])
         return 0
     finally:
         if registration_path is not None:
