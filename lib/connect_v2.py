@@ -881,6 +881,19 @@ def remove_registration_for_token(directory: str | Path, token: str) -> int:
 
     removed = 0
     for candidate in candidates:
+        if os.name == "nt":
+            match = re.fullmatch(
+                rf"local-connect-v2-({UUID4_PATTERN.pattern[1:-1]})\.json",
+                candidate.name,
+            )
+        else:
+            match = re.fullmatch(
+                rf"{re.escape(APP_ID)}-({UUID4_PATTERN.pattern[1:-1]})\.json",
+                candidate.name,
+            )
+        if match is None:
+            continue
+        candidate_instance_id = match.group(1)
         try:
             if os.name == "nt":
                 content = read_bounded_regular_file(candidate, MAX_REGISTRATION_BYTES)
@@ -890,19 +903,17 @@ def remove_registration_for_token(directory: str | Path, token: str) -> int:
                     continue
                 content = candidate.read_bytes()
             current = json.loads(content)
-        except (
-            FileNotFoundError,
-            OSError,
-            UnicodeDecodeError,
-            json.JSONDecodeError,
-            RecursionError,
-        ):
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
             continue
         if not isinstance(current, dict) or current.get("app_id") != APP_ID:
             continue
         instance_id = current.get("instance_id")
         auth = current.get("auth")
-        if not is_uuid4(instance_id) or not isinstance(auth, dict):
+        if instance_id != candidate_instance_id or not isinstance(auth, dict):
             continue
         current_token = auth.get("token")
         if (

@@ -1578,6 +1578,33 @@ class RegistrationTests(unittest.TestCase):
 
             self.assertTrue(path.exists())
 
+    def test_token_cleanup_retries_canonical_read_failure_and_ignores_other_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            runtime.mkdir()
+            instance_id = str(uuid.uuid4())
+            canonical = (
+                windows_v2_registration_path(runtime, instance_id)
+                if os.name == "nt"
+                else runtime / f"{APP_ID}-{instance_id}.json"
+            )
+            canonical.write_text("{}", encoding="utf-8")
+            unrelated = runtime / "unrelated.json"
+            unrelated.write_text("{}", encoding="utf-8")
+            read_target = (
+                "lib.connect_v2.read_bounded_regular_file"
+                if os.name == "nt"
+                else "pathlib.Path.read_bytes"
+            )
+
+            with patch(read_target, side_effect=PermissionError("temporarily locked")):
+                with self.assertRaises(PermissionError):
+                    remove_registration_for_token(runtime, TOKEN)
+
+            canonical.unlink()
+            with patch(read_target, side_effect=AssertionError("must not read")):
+                self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+
     def test_malformed_registration_never_removes_or_aborts_cleanup(self):
         malformed_contents = {
             "array root": b"[]",
