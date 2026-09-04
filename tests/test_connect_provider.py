@@ -1739,6 +1739,56 @@ class RegistrationTests(unittest.TestCase):
                 provider_ownership.close()
                 release.join(timeout=1)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX registration ownership")
+    def test_posix_ownership_lock_rejects_unsafe_entries_without_following(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            instance_id = str(uuid.uuid4())
+            lock_path = runtime / f".{APP_ID}-{instance_id}.lock"
+            victim = root / "victim.txt"
+            victim.write_text("do not touch", encoding="utf-8")
+            os.chmod(victim, 0o640)
+            lock_path.symlink_to(victim)
+            document = registration_document(
+                instance_id=instance_id, port=43127, token=TOKEN, pid=4242
+            )
+            registration = write_registration(runtime, document)
+
+            with self.assertRaises(RuntimeError):
+                acquire_registration_ownership(runtime, instance_id)
+            self.assertEqual(stat.S_IMODE(victim.stat().st_mode), 0o640)
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+            self.assertTrue(registration.exists())
+
+            def assert_cleanup_lock_unavailable():
+                ownership_available, ownership = (
+                    connect_v2._try_acquire_registration_cleanup_ownership(
+                        runtime, instance_id
+                    )
+                )
+                self.assertFalse(ownership_available)
+                self.assertIsNone(ownership)
+
+            lock_path.unlink()
+            os.mkfifo(lock_path)
+            assert_cleanup_lock_unavailable()
+            lock_path.unlink()
+            lock_path.mkdir()
+            assert_cleanup_lock_unavailable()
+            lock_path.rmdir()
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unix_socket:
+                unix_socket.bind(str(lock_path))
+                assert_cleanup_lock_unavailable()
+            lock_path.unlink()
+            os.link(victim, lock_path)
+            assert_cleanup_lock_unavailable()
+            self.assertEqual(stat.S_IMODE(victim.stat().st_mode), 0o640)
+            lock_path.unlink()
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(registration.exists())
+
     def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"

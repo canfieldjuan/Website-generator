@@ -30,7 +30,10 @@ same bounded regular file that it opened without following a final symlink.
 5. Keep cleanup acquisition nonblocking, while provider startup waits briefly
    for an in-flight cleanup and still fails when another live provider retains
    ownership.
-6. Add boundary tests for valid owned registration, symlink, FIFO/non-regular,
+6. Admit POSIX ownership locks through a no-follow descriptor, require a stable
+   single-link regular inode, and chmod only that descriptor; unsafe lock entries
+   are unavailable rather than cleanup-fatal.
+7. Add boundary tests for valid owned registration, symlink, FIFO/non-regular,
    oversized file, and replacement during validation, including the Windows
    pre-unlink and live-provider ownership boundaries.
 
@@ -66,6 +69,13 @@ uses a bounded two-second retry window within the desktop's existing startup
 budget, so short cleanup ownership does not become a user-visible failed start;
 continued contention still reports the existing single-owner failure.
 
+POSIX `ProviderLock` opens the final lock entry with `O_NOFOLLOW` and
+`O_NONBLOCK`, compares descriptor and visible identity, requires a regular inode
+with one link, and applies permissions through `fchmod`. Symlink, FIFO,
+directory, socket, disappeared/replaced, and hard-link entries therefore cannot
+redirect permission changes or block cleanup; the cleanup try-lock treats those
+unsafe entries as unavailable.
+
 ## Intentional
 
 - Unsafe filesystem objects are not errors and are never removed; cleanup
@@ -89,7 +99,7 @@ continued contention still reports the existing single-owner failure.
   and removed a final symlink, removed an oversized registration, and blocked
   while opening a FIFO.
 - `python -m unittest -v tests.test_connect_provider.RegistrationTests` passed
-  21 tests, including exact-size/max-plus-one, mixed valid/unsafe candidates,
+  22 tests, including exact-size/max-plus-one, mixed valid/unsafe candidates,
   stable I/O failure propagation, replacement-before-unlink boundaries, and
   both cleanup paths through a symlinked runtime-directory override. A
   platform-neutral Windows-path probe proves changed registration bytes prevent
@@ -99,6 +109,9 @@ continued contention still reports the existing single-owner failure.
   bounded provider acquisition succeeds after cleanup releases, and invalid
   retry budgets fail closed. The exact provider publication-order test also
   passes with the configured startup wait.
+- The POSIX lock-entry probe proves symlink, FIFO, directory, Unix socket, and
+  hard-link entries are skipped, a symlink/hard link cannot change the victim's
+  mode, the cleanup scan does not abort, and valid cleanup resumes afterward.
 - `tests/test_connect_windows.py` extends the native Windows package gate to
   prove a held provider lock blocks cleanup, release permits cleanup, and the
   cleanup lock is itself released for the next provider. That exact platform
@@ -128,7 +141,7 @@ continued contention still reports the existing single-owner failure.
 
 ## Estimated diff size
 
-The current diff contains 700 added lines and 75 removed lines across the reader,
+The current diff contains 820 added lines and 77 removed lines across the reader,
 ownership coordination, their boundary matrix, and this plan. This exceeds the
 400-line soft target because the guard and its pass/fail, mixed-object,
 numeric-boundary, blocking, and race

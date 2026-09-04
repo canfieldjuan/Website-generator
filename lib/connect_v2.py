@@ -157,15 +157,56 @@ class ProviderLock:
             return
         if fcntl is None:
             raise RuntimeError("Provider file locking is unavailable.")
-        self._handle = self.path.open("a+")
-        os.chmod(self.path, 0o600)
+        required_flags = ("O_CLOEXEC", "O_NOFOLLOW", "O_NONBLOCK")
+        if any(not hasattr(os, flag) for flag in required_flags):
+            raise RuntimeError("Safe provider file locking is unavailable.")
+        descriptor: int | None = None
         try:
+            try:
+                descriptor = os.open(
+                    self.path,
+                    os.O_RDWR
+                    | os.O_CREAT
+                    | os.O_CLOEXEC
+                    | os.O_NOFOLLOW
+                    | os.O_NONBLOCK,
+                    0o600,
+                )
+            except OSError as exc:
+                if exc.errno in {errno.ELOOP, errno.EISDIR, errno.ENXIO, errno.ENODEV}:
+                    raise RuntimeError("Provider lock path is unsafe.") from exc
+                raise
+            opened = os.fstat(descriptor)
+            try:
+                visible = self.path.lstat()
+            except FileNotFoundError as exc:
+                raise RuntimeError("Provider lock path is unsafe.") from exc
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or not stat.S_ISREG(visible.st_mode)
+                or (opened.st_dev, opened.st_ino) != (visible.st_dev, visible.st_ino)
+                or opened.st_nlink != 1
+                or visible.st_nlink != 1
+            ):
+                raise RuntimeError("Provider lock path is unsafe.")
+            os.fchmod(descriptor, 0o600)
+            self._handle = os.fdopen(descriptor, "r+")
+            descriptor = None
             fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             self._handle.close()
+            self._handle = None
             raise RuntimeError(
                 "Another Website Redesign Connect provider already owns this state."
             ) from exc
+        except OSError:
+            if self._handle is not None:
+                self._handle.close()
+                self._handle = None
+            raise
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
 
     def close(self) -> None:
         if self._windows_lock is not None:
