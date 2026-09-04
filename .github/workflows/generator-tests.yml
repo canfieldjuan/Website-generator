@@ -121,7 +121,7 @@ jobs:
           if ($install.ExitCode -ne 0) { throw "NSIS installer failed with exit code $($install.ExitCode)" }
 
           $installRoot = Join-Path $env:LOCALAPPDATA "Website Generator"
-          $application = Join-Path $installRoot "Website Generator.exe"
+          $application = Join-Path $installRoot "website-generator-desktop.exe"
           $engine = Join-Path $installRoot "resources\website-redesign-connect.exe"
           if (-not (Test-Path -LiteralPath $application -PathType Leaf)) {
             throw "Installed Website Generator executable is missing"
