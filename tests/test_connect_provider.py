@@ -1632,6 +1632,32 @@ class RegistrationTests(unittest.TestCase):
             self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
             self.assertFalse(scanned_path.exists())
 
+    def test_windows_cleanup_revalidates_registration_before_unlink(self):
+        path = Path("registration.json")
+        initial = json.dumps(
+            {"auth": {"token": TOKEN}, "started_at": "2026-09-04T12:00:00Z"}
+        ).encode("utf-8")
+        replacement = json.dumps(
+            {
+                "auth": {"token": "B" * 64},
+                "started_at": "2026-09-04T12:01:00Z",
+            }
+        ).encode("utf-8")
+
+        with (
+            patch.object(connect_v2.os, "name", "nt"),
+            patch.object(
+                connect_v2,
+                "_read_registration_bytes",
+                side_effect=[(initial, None), (replacement, None)],
+            ) as read_registration,
+            patch.object(connect_v2, "unlink_regular_file") as unlink_registration,
+        ):
+            self.assertFalse(remove_registration_if_owned(path, TOKEN))
+
+        self.assertEqual(read_registration.call_count, 2)
+        unlink_registration.assert_not_called()
+
     def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"

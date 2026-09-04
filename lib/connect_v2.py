@@ -1039,6 +1039,13 @@ def _remove_registration_if_owned(
             return False
         try:
             if os.name == "nt":
+                revalidated = _read_registration_bytes(registration_path)
+                if revalidated is None:
+                    return False
+                current_content, current_snapshot = revalidated
+                assert current_snapshot is None
+                if not hmac.compare_digest(content, current_content):
+                    return False
                 unlink_regular_file(registration_path)
                 return True
             assert snapshot is not None

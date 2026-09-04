@@ -25,7 +25,8 @@ same bounded regular file that it opened without following a final symlink.
    unowned while retaining existing optional propagation for genuine I/O
    failures on a canonical regular registration.
 4. Add boundary tests for valid owned registration, symlink, FIFO/non-regular,
-   oversized file, and replacement during validation.
+   oversized file, and replacement during validation, including the Windows
+   pre-unlink boundary.
 
 ### Files touched
 
@@ -43,7 +44,8 @@ opened descriptor before/after the read and against the still-visible pathname.
 The parent-directory open preserves supported symlinked runtime-directory
 overrides; only the final registration entry is no-follow. Only admitted bytes
 reach JSON and token validation. Windows keeps its existing ACL-aware bounded
-reader.
+reader and repeats that bounded read immediately before unlink, requiring the
+same registration bytes so stale cleanup cannot remove a replacement.
 
 ## Intentional
 
@@ -68,9 +70,11 @@ reader.
   and removed a final symlink, removed an oversized registration, and blocked
   while opening a FIFO.
 - `python -m unittest -v tests.test_connect_provider.RegistrationTests` passed
-  17 tests, including exact-size/max-plus-one, mixed valid/unsafe candidates,
+  18 tests, including exact-size/max-plus-one, mixed valid/unsafe candidates,
   stable I/O failure propagation, replacement-before-unlink boundaries, and
-  both cleanup paths through a symlinked runtime-directory override.
+  both cleanup paths through a symlinked runtime-directory override. A
+  platform-neutral Windows-path probe also proves that changed registration
+  bytes prevent unlink.
 - With `CONNECT_CONTRACTS_DIR=/home/juan-canfield/Desktop/connect-contracts`,
   `python -m unittest -v tests.test_connect_provider` passed 72 tests.
 - With the same contract directory, `python -m unittest discover -s tests`
@@ -92,7 +96,7 @@ reader.
 
 ## Estimated diff size
 
-The current diff contains 493 added lines and 67 removed lines across one reader, its full
+The current diff contains 529 added lines and 67 removed lines across one reader, its full
 boundary matrix, and this plan. This exceeds the 400-line soft target because
 the guard and its pass/fail, mixed-object, numeric-boundary, blocking, and race
 probes are one indivisible safety change; splitting the tests would publish an
