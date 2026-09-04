@@ -81,27 +81,33 @@ export function mergeProspectFields(
   fields: ProspectFields,
 ): ProspectDocument {
   const merged = structuredClone(source);
+  const originalFields = fieldsFromProspect(source);
   for (const [documentKey, fieldKey] of Object.entries(STRING_FIELD_MAP)) {
+    if (fields[fieldKey] === originalFields[fieldKey]) continue;
     const value = fields[fieldKey].trim();
     if (value) {
       merged[documentKey] = value;
-    } else if (source[documentKey] !== null) {
+    } else {
       delete merged[documentKey];
     }
   }
-  if (fields.trade) {
-    merged.trade = fields.trade;
-  } else if (source.trade !== null) {
-    delete merged.trade;
+  if (fields.trade !== originalFields.trade) {
+    if (fields.trade) {
+      merged.trade = fields.trade;
+    } else {
+      delete merged.trade;
+    }
   }
-  const services = fields.servicesText
-    .split(/\r?\n/)
-    .map((service) => service.trim())
-    .filter(Boolean);
-  if (services.length) {
-    merged.services = services;
-  } else if (source.services !== null) {
-    delete merged.services;
+  if (fields.servicesText !== originalFields.servicesText) {
+    const services = fields.servicesText
+      .split(/\r?\n/)
+      .map((service) => service.trim())
+      .filter(Boolean);
+    if (services.length) {
+      merged.services = services;
+    } else {
+      delete merged.services;
+    }
   }
   return merged;
 }

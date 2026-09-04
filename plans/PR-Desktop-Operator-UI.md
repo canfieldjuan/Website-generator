@@ -126,12 +126,13 @@ closing a preview revokes its prior Blob URL.
 
 - `npm test` from `desktop/`: 1 test file passed, 10 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
-- `cargo test` from `desktop/src-tauri/`: 8 tests passed. The boundary tests
+- `cargo test` from `desktop/src-tauri/`: 9 tests passed. The boundary tests
   include cancellation before child registration and reject nested numeric
   tokens that cannot survive the JavaScript round trip exactly during import,
-  plus duplicate keys at the root or nested inside arrays/objects. The Windows
-  run adds a ninth process-tree regression proving cancellation also terminates
-  a spawned descendant.
+  duplicate keys at the root or nested inside arrays/objects, and imports whose
+  canonical export would exceed the admitted size. The Windows run adds a tenth
+  process-tree regression proving cancellation also terminates a spawned
+  descendant.
 - `cargo clippy --all-targets --all-features -- -D warnings` from
   `desktop/src-tauri/`: passed with no warnings.
 - `cargo build` from `desktop/src-tauri/`: native debug build passed.

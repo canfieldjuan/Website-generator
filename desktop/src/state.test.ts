@@ -72,13 +72,14 @@ describe("prospect projection", () => {
     expect(merged).not.toHaveProperty("services");
   });
 
-  it("preserves explicit nulls during an untouched import and export round trip", () => {
+  it("preserves exact empty representations during an untouched round trip", () => {
     const imported = {
       business_name: "Example Plumbing",
       trade: null,
       address: null,
-      owner_email: null,
-      services: null,
+      owner_email: "",
+      formspree_endpoint: "",
+      services: [] as string[],
     };
 
     const merged = mergeProspectFields(imported, fieldsFromProspect(imported));

@@ -669,6 +669,19 @@ fn cancel_generation(state: State<'_, Arc<DesktopState>>) -> Result<bool, String
     request_engine_cancellation(&state)
 }
 
+fn encode_prospect(prospect: &Value) -> Result<Vec<u8>, String> {
+    if !prospect.is_object() {
+        return Err("Prospect data must be a JSON object.".to_owned());
+    }
+    let mut bytes = serde_json::to_vec_pretty(prospect)
+        .map_err(|_| "Prospect JSON could not be encoded.".to_owned())?;
+    bytes.push(b'\n');
+    if bytes.len() > MAX_PROSPECT_BYTES {
+        return Err("The prospect document is too large to export.".to_owned());
+    }
+    Ok(bytes)
+}
+
 #[tauri::command]
 fn import_prospect() -> Result<Option<ImportedProspect>, String> {
     let Some(path) = rfd::FileDialog::new()
@@ -691,6 +704,7 @@ fn import_prospect() -> Result<Option<ImportedProspect>, String> {
         return Err("The selected prospect JSON must contain one object.".to_owned());
     }
     require_js_roundtrip_number_tokens(&bytes)?;
+    encode_prospect(&document)?;
     let file_name = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -704,15 +718,7 @@ fn import_prospect() -> Result<Option<ImportedProspect>, String> {
 
 #[tauri::command]
 fn export_prospect(prospect: Value) -> Result<Option<String>, String> {
-    if !prospect.is_object() {
-        return Err("Prospect data must be a JSON object.".to_owned());
-    }
-    let mut bytes = serde_json::to_vec_pretty(&prospect)
-        .map_err(|_| "Prospect JSON could not be encoded.".to_owned())?;
-    bytes.push(b'\n');
-    if bytes.len() > MAX_PROSPECT_BYTES {
-        return Err("The prospect document is too large to export.".to_owned());
-    }
+    let bytes = encode_prospect(&prospect)?;
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Prospect JSON", &["json"])
         .set_file_name("prospect.json")
@@ -881,6 +887,16 @@ mod tests {
             decode_unique_json(br#"{"name":"one","nested":{"value":1}}"#).unwrap(),
             json!({"name": "one", "nested": {"value": 1}})
         );
+    }
+
+    #[test]
+    fn imported_prospect_must_fit_its_canonical_export_boundary() {
+        let source = format!(r#"{{"a":"{}"}}"#, "x".repeat(MAX_PROSPECT_BYTES - 8));
+        assert_eq!(source.len(), MAX_PROSPECT_BYTES);
+        let document = decode_unique_json(source.as_bytes()).unwrap();
+
+        assert!(encode_prospect(&document).is_err());
+        assert!(encode_prospect(&json!({"a": "short"})).is_ok());
     }
 
     #[cfg(windows)]
