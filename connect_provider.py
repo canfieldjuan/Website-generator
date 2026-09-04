@@ -31,6 +31,7 @@ from lib.connect_v2 import (
     default_state_dir,
     new_bearer_token,
     registration_document,
+    remove_registration_for_pid,
     remove_registration_if_owned,
     resolve_connect_generation_config,
     write_registration,
@@ -40,6 +41,8 @@ from lib.generation import (
     GenerationProviderUnavailable,
     preflight_generation_provider,
 )
+
+DESKTOP_REGISTRATION_TOKEN_ENV = "WEBSITE_GENERATOR_DESKTOP_REGISTRATION_TOKEN"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -89,6 +92,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    cleanup = commands.add_parser("cleanup-registration", help=argparse.SUPPRESS)
+    cleanup.add_argument("--pid", type=int, required=True, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -158,6 +163,9 @@ def emit_desktop_readiness(output: TextIO) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    desktop_registration_token = os.environ.pop(
+        DESKTOP_REGISTRATION_TOKEN_ENV, None
+    )
     if getattr(args, "command", None) == "entitlement":
         return _run_entitlement_command(args)
     if getattr(args, "command", None) == "desktop":
@@ -178,6 +186,19 @@ def main(argv: list[str] | None = None) -> int:
         state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         state_dir.chmod(0o700)
 
+    if getattr(args, "command", None) == "cleanup-registration":
+        try:
+            if desktop_registration_token is None:
+                raise ValueError("Desktop registration ownership is unavailable.")
+            removed = remove_registration_for_pid(
+                runtime_dir, args.pid, desktop_registration_token
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"Connect registration cleanup failed: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps({"removed": removed}, separators=(",", ":")))
+        return 0
+
     try:
         generation_config = resolve_connect_generation_config()
         preflight_generation_provider(generation_config)
@@ -192,10 +213,18 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    desktop_managed = getattr(args, "desktop_managed", False)
+    if desktop_managed and desktop_registration_token is None:
+        print(
+            "Connect provider configuration failed: desktop registration ownership is unavailable.",
+            file=sys.stderr,
+        )
+        return 2
+
     runtime: ProviderRuntime | None = None
     registration_path: Path | None = None
     registration_ownership: ProviderLock | None = None
-    token = new_bearer_token()
+    token = desktop_registration_token if desktop_managed else new_bearer_token()
     listener: socket.socket | None = None
     try:
         store = ConnectStore(state_dir / "connect-v2.sqlite3")
@@ -223,7 +252,6 @@ def main(argv: list[str] | None = None) -> int:
             token=token,
         )
         registration_path = write_registration(runtime_dir, registration)
-        desktop_managed = getattr(args, "desktop_managed", False)
         if desktop_managed:
             input_stream = getattr(sys.stdin, "buffer", sys.stdin)
             start_desktop_shutdown_watcher(server, input_stream)

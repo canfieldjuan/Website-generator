@@ -12,6 +12,7 @@ import os
 import queue
 import re
 import secrets
+import stat
 import tempfile
 import threading
 import time
@@ -819,7 +820,7 @@ def write_registration(directory: str | Path, document: dict[str, Any]) -> Path:
                 pass
 
 
-def remove_registration_if_owned(path: str | Path, token: str) -> None:
+def remove_registration_if_owned(path: str | Path, token: str) -> bool:
     registration_path = Path(path)
     try:
         if os.name == "nt":
@@ -836,12 +837,12 @@ def remove_registration_if_owned(path: str | Path, token: str) -> None:
         json.JSONDecodeError,
         RecursionError,
     ):
-        return
+        return False
     if not isinstance(current, dict):
-        return
+        return False
     current_auth = current.get("auth")
     if not isinstance(current_auth, dict):
-        return
+        return False
     current_token = current_auth.get("token")
     if (
         isinstance(current_token, str)
@@ -855,7 +856,67 @@ def remove_registration_if_owned(path: str | Path, token: str) -> None:
             else:
                 registration_path.unlink()
         except (FileNotFoundError, OSError):
-            pass
+            return False
+        return True
+    return False
+
+
+def remove_registration_for_pid(directory: str | Path, pid: int, token: str) -> int:
+    """Remove this app's registrations for one terminated provider process."""
+    if type(pid) is not int or pid < 1:
+        raise ValueError("Registration cleanup PID must be a positive integer.")
+    if not isinstance(token, str) or not re.fullmatch(
+        r"[A-Za-z0-9_-]{43,128}", token
+    ):
+        raise ValueError("Registration cleanup token is invalid.")
+    provider_dir = Path(directory)
+    try:
+        candidates = list(provider_dir.iterdir())
+    except FileNotFoundError:
+        return 0
+
+    removed = 0
+    for candidate in candidates:
+        try:
+            if os.name == "nt":
+                content = read_bounded_regular_file(candidate, MAX_REGISTRATION_BYTES)
+            else:
+                metadata = candidate.lstat()
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_REGISTRATION_BYTES:
+                    continue
+                content = candidate.read_bytes()
+            current = json.loads(content)
+        except (
+            FileNotFoundError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            RecursionError,
+        ):
+            continue
+        if not isinstance(current, dict) or current.get("app_id") != APP_ID:
+            continue
+        if current.get("pid") != pid:
+            continue
+        instance_id = current.get("instance_id")
+        auth = current.get("auth")
+        if not is_uuid4(instance_id) or not isinstance(auth, dict):
+            continue
+        current_token = auth.get("token")
+        if not isinstance(current_token, str) or not hmac.compare_digest(
+            current_token, token
+        ):
+            continue
+        expected = (
+            windows_v2_registration_path(provider_dir, instance_id)
+            if os.name == "nt"
+            else provider_dir / f"{APP_ID}-{instance_id}.json"
+        )
+        if candidate != expected:
+            continue
+        if remove_registration_if_owned(candidate, token):
+            removed += 1
+    return removed
 
 
 def sanitize_display_name(value: str) -> str:

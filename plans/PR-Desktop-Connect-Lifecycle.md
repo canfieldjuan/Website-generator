@@ -51,6 +51,9 @@ no packaged implementation, or packaging with no operator-visible proof.
 - `.github/workflows/generator-tests.yml`
 - `README.md`
 - `connect_provider.py`
+- `lib/connect_v2.py`
+- `desktop/src-tauri/Cargo.toml`
+- `desktop/src-tauri/Cargo.lock`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src/engine.ts`
 - `desktop/src/main.ts`
@@ -85,7 +88,11 @@ no packaged implementation, or packaging with no operator-visible proof.
   startup cleanup is attempt-scoped and cannot stop a newer provider.
 - Stop and normal window close kill and wait for only the child held by this
   application instance. The desktop does not discover or terminate a
-  separately launched provider.
+  separately launched provider. If graceful shutdown times out, the desktop
+  force-reaps its child and asks the packaged engine to remove only this app's
+  registration carrying that exact terminated process ID and its private
+  desktop-issued bearer; a replacement or a different provider registration
+  is preserved.
 - Entitlement-status failure is reported independently from managed-process
   state, so it cannot hide a running child or remove the operator's Stop path.
 - Standalone generation may disable activation and provider startup while it
@@ -133,13 +140,13 @@ no packaged implementation, or packaging with no operator-visible proof.
 - `npm test` from `desktop/`: 1 test file passed, 14 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
 - `cargo fmt --check` from `desktop/src-tauri/`: passed.
-- `cargo test` from `desktop/src-tauri/`: 23 tests passed. The lifecycle cases
+- `cargo test` from `desktop/src-tauri/`: 24 tests passed. The lifecycle cases
   cover exact/bounded readiness without EOF, inactive entitlement, duplicate
   start, timeout and early-exit cleanup, cancellation before spawn and during
   the readiness wait, attempt-scoped cleanup that preserves a newer provider,
-  graceful stop/reap, and reconciled state after a forced fallback, plus
-  independent provider state when entitlement status is unavailable. The
-  Windows run adds the process-tree cancellation regression.
+  graceful stop/reap, an ownership-matched registration cleanup after a forced
+  fallback, and independent provider state when entitlement status is
+  unavailable. The Windows run adds the process-tree cancellation regression.
 - `cargo clippy --all-targets --all-features -- -D warnings` from
   `desktop/src-tauri/`: passed.
 - `python connect_provider.py entitlement status`: returned the expected
@@ -158,7 +165,7 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 ## Estimated diff size
 
-The final patch contains 1,436 additions and 19 deletions across 9 files for
+The final patch contains 1,720 additions and 25 deletions across 12 files for
 the provider readiness adapter, native lifecycle controller, compact UI
 surface, tests, and Windows smoke step. The provider HTTP contract and
 generation stack are not part of this diff.

@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
+use uuid::Uuid;
 
 const MAX_ENGINE_REQUEST_BYTES: usize = 216_384;
 const MAX_ENGINE_RESPONSE_BYTES: usize = 2_900_000;
@@ -32,6 +33,7 @@ const MAX_LIFECYCLE_OUTPUT_BYTES: usize = 16 * 1024;
 const CONNECT_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const DESKTOP_REGISTRATION_TOKEN_ENV: &str = "WEBSITE_GENERATOR_DESKTOP_REGISTRATION_TOKEN";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct EngineArtifact {
@@ -52,6 +54,7 @@ struct ManagedProvider {
     attempt: u64,
     child: Child,
     stdin: Option<ChildStdin>,
+    registration_cleanup: Option<Command>,
     ready: bool,
 }
 
@@ -456,6 +459,34 @@ fn wait_for_connect_command(
     }
 }
 
+fn cleanup_provider_registration(command: &mut Command, pid: u32) -> Result<(), String> {
+    command
+        .args(["cleanup-registration", "--pid", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console_window(command);
+    let mut child = command
+        .spawn()
+        .map_err(|_| "The Local Connect registration could not be reconciled.".to_owned())?;
+    let status = wait_for_connect_command(&mut child, CONNECT_COMMAND_TIMEOUT)?;
+    if !status.success() {
+        return Err("The Local Connect registration could not be reconciled.".to_owned());
+    }
+    Ok(())
+}
+
+fn new_desktop_registration_token() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+fn reconcile_terminated_provider(provider: &mut ManagedProvider) -> Result<(), String> {
+    let Some(mut cleanup) = provider.registration_cleanup.take() else {
+        return Ok(());
+    };
+    cleanup_provider_registration(&mut cleanup, provider.child.id())
+}
+
 fn run_cli_json(app: &AppHandle, arguments: &[OsString]) -> Result<Value, String> {
     let mut command = base_engine_command(app)?;
     command
@@ -557,7 +588,8 @@ fn provider_is_running(state: &DesktopState) -> Result<bool, String> {
         .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
         .is_some()
     {
-        slot.managed.take();
+        let mut provider = slot.managed.take().expect("managed provider was present");
+        reconcile_terminated_provider(&mut provider)?;
         return Ok(false);
     }
     Ok(provider.ready)
@@ -623,6 +655,7 @@ fn require_current_provider_start(state: &DesktopState, attempt: u64) -> Result<
 
 fn launch_managed_provider(
     mut command: Command,
+    registration_cleanup: Option<Command>,
     state: &DesktopState,
     startup_timeout: Duration,
     attempt: u64,
@@ -644,7 +677,8 @@ fn launch_managed_provider(
                 Err("The Local Connect provider is already starting.".to_owned())
             };
         }
-        slot.managed.take();
+        let mut provider = slot.managed.take().expect("managed provider was present");
+        reconcile_terminated_provider(&mut provider)?;
     }
 
     command
@@ -671,6 +705,7 @@ fn launch_managed_provider(
         attempt,
         child,
         stdin: Some(stdin),
+        registration_cleanup,
         ready: false,
     });
     drop(slot);
@@ -708,7 +743,8 @@ fn launch_managed_provider(
     }
     match provider.child.try_wait() {
         Ok(Some(_)) => {
-            slot.managed.take();
+            let mut provider = slot.managed.take().expect("managed provider was present");
+            reconcile_terminated_provider(&mut provider)?;
             return Err("The Local Connect provider stopped during startup.".to_owned());
         }
         Ok(None) => provider.ready = true,
@@ -716,7 +752,8 @@ fn launch_managed_provider(
             force_reap(&mut provider.child).map_err(|_| {
                 "The Local Connect provider could not be stopped after a status failure.".to_owned()
             })?;
-            slot.managed.take();
+            let mut provider = slot.managed.take().expect("managed provider was present");
+            reconcile_terminated_provider(&mut provider)?;
             return Err("The Local Connect provider status is unavailable.".to_owned());
         }
     }
@@ -733,8 +770,18 @@ fn start_connect_provider(
         require_active_entitlement(&entitlement)?;
         require_current_provider_start(state, attempt)?;
         let mut command = base_engine_command(app)?;
+        let mut cleanup = base_engine_command(app)?;
+        let registration_token = new_desktop_registration_token();
+        command.env(DESKTOP_REGISTRATION_TOKEN_ENV, &registration_token);
+        cleanup.env(DESKTOP_REGISTRATION_TOKEN_ENV, registration_token);
         command.args(["serve", "--desktop-managed"]);
-        launch_managed_provider(command, state, CONNECT_STARTUP_TIMEOUT, attempt)?;
+        launch_managed_provider(
+            command,
+            Some(cleanup),
+            state,
+            CONNECT_STARTUP_TIMEOUT,
+            attempt,
+        )?;
         Ok(ConnectStatus {
             entitlement_state: entitlement.state,
             entitlement_active: true,
@@ -759,7 +806,8 @@ fn stop_managed_provider_locked(
         .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
         .is_some()
     {
-        slot.managed.take();
+        let mut provider = slot.managed.take().expect("managed provider was present");
+        reconcile_terminated_provider(&mut provider)?;
         return Ok(false);
     }
     if let Some(mut stdin) = provider.stdin.take() {
@@ -774,13 +822,15 @@ fn stop_managed_provider_locked(
             .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
             .is_some()
         {
-            slot.managed.take();
+            let mut provider = slot.managed.take().expect("managed provider was present");
+            reconcile_terminated_provider(&mut provider)?;
             return Ok(true);
         }
         if Instant::now() >= deadline {
             force_reap(&mut provider.child)
                 .map_err(|_| "The Local Connect provider could not be stopped.".to_owned())?;
-            slot.managed.take();
+            let mut provider = slot.managed.take().expect("managed provider was present");
+            reconcile_terminated_provider(&mut provider)?;
             return Ok(true);
         }
         thread::sleep(Duration::from_millis(50));
@@ -1592,6 +1642,16 @@ mod tests {
     }
 
     #[test]
+    fn desktop_registration_tokens_are_valid_and_rotate() {
+        let first = new_desktop_registration_token();
+        let second = new_desktop_registration_token();
+
+        assert_eq!(first.len(), 64);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first, second);
+    }
+
+    #[test]
     fn provider_readiness_reader_enforces_its_line_boundary() {
         struct ReadyWithoutEof(bool);
 
@@ -1669,7 +1729,8 @@ mod tests {
         );
         let attempt = begin_provider_start(&state).unwrap();
         assert!(
-            launch_managed_provider(provider, &state, Duration::from_secs(2), attempt).unwrap()
+            launch_managed_provider(provider, None, &state, Duration::from_secs(2), attempt)
+                .unwrap()
         );
         finish_provider_start(&state, attempt).unwrap();
         assert!(provider_is_running(&state).unwrap());
@@ -1679,6 +1740,7 @@ mod tests {
         assert!(
             !launch_managed_provider(
                 duplicate,
+                None,
                 &state,
                 Duration::from_millis(1),
                 duplicate_attempt,
@@ -1697,8 +1759,9 @@ mod tests {
         let state = DesktopState::default();
         let timeout = fixture_provider("import time; time.sleep(2)");
         let attempt = begin_provider_start(&state).unwrap();
-        let error = launch_managed_provider(timeout, &state, Duration::from_millis(20), attempt)
-            .unwrap_err();
+        let error =
+            launch_managed_provider(timeout, None, &state, Duration::from_millis(20), attempt)
+                .unwrap_err();
         finish_provider_start(&state, attempt).unwrap();
         assert!(error.contains("ready in time"));
         assert!(!provider_is_running(&state).unwrap());
@@ -1706,7 +1769,8 @@ mod tests {
         let early_exit = fixture_provider("pass");
         let attempt = begin_provider_start(&state).unwrap();
         assert!(
-            launch_managed_provider(early_exit, &state, Duration::from_secs(2), attempt).is_err()
+            launch_managed_provider(early_exit, None, &state, Duration::from_secs(2), attempt,)
+                .is_err()
         );
         finish_provider_start(&state, attempt).unwrap();
         assert!(!provider_is_running(&state).unwrap());
@@ -1721,7 +1785,13 @@ mod tests {
         let worker = thread::spawn(move || {
             wait.recv().unwrap();
             let command = Command::new("executable-that-must-not-be-started");
-            launch_managed_provider(command, &worker_state, Duration::from_secs(2), attempt)
+            launch_managed_provider(
+                command,
+                None,
+                &worker_state,
+                Duration::from_secs(2),
+                attempt,
+            )
         });
 
         assert!(!stop_connect_provider_with_timeout(&state, Duration::ZERO).unwrap());
@@ -1739,7 +1809,13 @@ mod tests {
         let attempt = begin_provider_start(&state).unwrap();
         let start = thread::spawn(move || {
             let provider = fixture_provider("import time; time.sleep(2)");
-            launch_managed_provider(provider, &start_state, Duration::from_secs(2), attempt)
+            launch_managed_provider(
+                provider,
+                None,
+                &start_state,
+                Duration::from_secs(2),
+                attempt,
+            )
         });
 
         let registration_deadline = Instant::now() + Duration::from_secs(1);
@@ -1768,8 +1844,14 @@ mod tests {
             "import sys; print('{\"ready\":true}', flush=True); sys.stdin.readline()",
         );
         assert!(
-            launch_managed_provider(provider, &state, Duration::from_secs(2), current_attempt,)
-                .unwrap()
+            launch_managed_provider(
+                provider,
+                None,
+                &state,
+                Duration::from_secs(2),
+                current_attempt,
+            )
+            .unwrap()
         );
         finish_provider_start(&state, current_attempt).unwrap();
 
@@ -1783,16 +1865,42 @@ mod tests {
     #[test]
     fn managed_provider_forced_stop_reports_the_reconciled_state() {
         let state = DesktopState::default();
+        let directory = tempfile::tempdir().unwrap();
+        let cleanup_path = directory.path().join("cleaned-pid");
         let provider =
             fixture_provider("import time; print('{\"ready\":true}', flush=True); time.sleep(2)");
+        let mut cleanup = fixture_provider(
+            "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[-1])",
+        );
+        cleanup.arg(&cleanup_path);
         let attempt = begin_provider_start(&state).unwrap();
         assert!(
-            launch_managed_provider(provider, &state, Duration::from_secs(2), attempt).unwrap()
+            launch_managed_provider(
+                provider,
+                Some(cleanup),
+                &state,
+                Duration::from_secs(2),
+                attempt,
+            )
+            .unwrap()
         );
         finish_provider_start(&state, attempt).unwrap();
+        let provider_pid = state
+            .provider
+            .lock()
+            .unwrap()
+            .managed
+            .as_ref()
+            .unwrap()
+            .child
+            .id();
 
         assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).unwrap());
         assert!(!provider_is_running(&state).unwrap());
+        assert_eq!(
+            fs::read_to_string(cleanup_path).unwrap(),
+            provider_pid.to_string()
+        );
     }
 
     #[test]

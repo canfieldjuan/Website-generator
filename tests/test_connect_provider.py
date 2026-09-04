@@ -47,6 +47,7 @@ from lib.connect_v2 import (
     manifest,
     new_bearer_token,
     registration_document,
+    remove_registration_for_pid,
     remove_registration_if_owned,
     resolve_connect_generation_config,
     sanitize_display_name,
@@ -1108,7 +1109,11 @@ class GenerationSeamTests(unittest.TestCase):
                 state_dir=Path(directory) / "state",
             )
             output = ReadinessOutput()
-            with patch.object(
+            with patch.dict(
+                os.environ,
+                {connect_provider.DESKTOP_REGISTRATION_TOKEN_ENV: TOKEN},
+                clear=False,
+            ), patch.object(
                 connect_provider,
                 "parse_args",
                 return_value=args,
@@ -1144,6 +1149,42 @@ class GenerationSeamTests(unittest.TestCase):
         server = SimpleNamespace(should_exit=False)
         connect_provider.watch_desktop_shutdown(server, io.BytesIO(b"continue\n"))
         self.assertFalse(server.should_exit)
+
+    def test_cleanup_command_bypasses_generation_preflight(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(
+                command="cleanup-registration",
+                pid=4242,
+                runtime_dir=Path(directory) / "runtime",
+                state_dir=Path(directory) / "state",
+            )
+            with patch.dict(
+                os.environ,
+                {connect_provider.DESKTOP_REGISTRATION_TOKEN_ENV: TOKEN},
+                clear=False,
+            ), patch.object(
+                connect_provider, "parse_args", return_value=args
+            ), patch.object(
+                connect_provider, "remove_registration_for_pid", return_value=1
+            ) as cleanup, patch.object(
+                connect_provider, "preflight_generation_provider"
+            ) as preflight:
+                self.assertEqual(connect_provider.main(), 0)
+
+            cleanup.assert_called_once_with(args.runtime_dir, 4242, TOKEN)
+            preflight.assert_not_called()
+
+            with patch.dict(os.environ, {}, clear=True), patch.object(
+                connect_provider, "parse_args", return_value=args
+            ), patch.object(
+                connect_provider, "remove_registration_for_pid"
+            ) as unowned_cleanup, patch.object(
+                connect_provider, "preflight_generation_provider"
+            ) as unowned_preflight:
+                self.assertEqual(connect_provider.main(), 2)
+
+            unowned_cleanup.assert_not_called()
+            unowned_preflight.assert_not_called()
 
     def test_no_command_preserves_standalone_serve_mode(self):
         standalone = connect_provider.parse_args([])
@@ -1462,6 +1503,37 @@ class RegistrationTests(unittest.TestCase):
             self.assertTrue(path.exists())
             remove_registration_if_owned(path, first_token)
             self.assertFalse(path.exists())
+
+    def test_pid_cleanup_removes_only_the_terminated_provider_registration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            terminated = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            replacement = registration_document(
+                instance_id=str(uuid.uuid4()), port=43128, token="B" * 64, pid=4243
+            )
+            terminated_path = write_registration(runtime, terminated)
+            replacement_path = write_registration(runtime, replacement)
+
+            same_pid_replacement = registration_document(
+                instance_id=str(uuid.uuid4()), port=43129, token="C" * 64, pid=4242
+            )
+            same_pid_replacement_path = write_registration(
+                runtime, same_pid_replacement
+            )
+
+            self.assertEqual(remove_registration_for_pid(runtime, 4242, TOKEN), 1)
+            self.assertFalse(terminated_path.exists())
+            self.assertTrue(replacement_path.exists())
+            self.assertTrue(same_pid_replacement_path.exists())
+            self.assertEqual(remove_registration_for_pid(runtime, 4242, TOKEN), 0)
+            for invalid in (False, 0, -1):
+                with self.subTest(pid=invalid), self.assertRaises(ValueError):
+                    remove_registration_for_pid(runtime, invalid, TOKEN)
+            for invalid in (None, False, "", "short", "!" * 64):
+                with self.subTest(token=invalid), self.assertRaises(ValueError):
+                    remove_registration_for_pid(runtime, 4242, invalid)
 
     def test_malformed_registration_never_removes_or_aborts_cleanup(self):
         malformed_contents = {
