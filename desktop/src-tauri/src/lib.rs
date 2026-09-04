@@ -1413,16 +1413,38 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    #[ignore = "launched explicitly by the Windows process-tree test"]
+    fn windows_descendant_fixture() {
+        let pid_path = std::env::var_os("WEBSITE_GENERATOR_DESCENDANT_PID_PATH")
+            .expect("the descendant fixture requires a PID path");
+        let mut command = Command::new("cmd.exe");
+        command
+            .args(["/D", "/S", "/C", "ping -n 30 127.0.0.1 >NUL"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        hide_console_window(&mut command);
+        let mut descendant = command.spawn().unwrap();
+        fs::write(pid_path, descendant.id().to_string()).unwrap();
+        let status = descendant.wait().unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn windows_cancellation_terminates_descendants() {
         let directory = tempfile::tempdir().unwrap();
         let pid_path = directory.path().join("descendant.pid");
-        let escaped_path = pid_path.to_string_lossy().replace('\'', "''");
-        let script = format!(
-            "$child = Start-Process -FilePath 'cmd.exe' -ArgumentList '/C','ping -n 30 127.0.0.1 >NUL' -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '{escaped_path}' -Value $child.Id; Start-Sleep -Seconds 30"
-        );
-        let mut command = Command::new("powershell.exe");
+        let test_binary = std::env::current_exe().unwrap();
+        let mut command = Command::new(test_binary);
         command
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .args([
+                "--ignored",
+                "--exact",
+                "tests::windows_descendant_fixture",
+                "--nocapture",
+            ])
+            .env("WEBSITE_GENERATOR_DESCENDANT_PID_PATH", &pid_path)
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         hide_console_window(&mut command);
