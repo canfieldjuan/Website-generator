@@ -909,16 +909,37 @@ mod tests {
             "$child = Start-Process -FilePath 'cmd.exe' -ArgumentList '/C','ping -n 30 127.0.0.1 >NUL' -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '{escaped_path}' -Value $child.Id; Start-Sleep -Seconds 30"
         );
         let mut command = Command::new("powershell.exe");
-        command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+        command
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
         hide_console_window(&mut command);
         let mut parent = command.spawn().unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
         while !pid_path.is_file() && std::time::Instant::now() < deadline {
+            if parent.try_wait().unwrap().is_some() {
+                let mut stderr = Vec::new();
+                if let Some(mut stream) = parent.stderr.take() {
+                    let _ = stream.read_to_end(&mut stderr);
+                }
+                panic!(
+                    "the descendant fixture exited before publishing its PID: {}",
+                    String::from_utf8_lossy(&stderr)
+                );
+            }
             thread::sleep(Duration::from_millis(25));
         }
         if !pid_path.is_file() {
             let _ = terminate_process_tree(&mut parent);
-            panic!("the descendant PID was not published");
+            let mut stderr = Vec::new();
+            if let Some(mut stream) = parent.stderr.take() {
+                let _ = stream.read_to_end(&mut stderr);
+            }
+            let _ = parent.wait();
+            panic!(
+                "the descendant PID was not published within the cold-start boundary: {}",
+                String::from_utf8_lossy(&stderr)
+            );
         }
         let descendant_pid = fs::read_to_string(&pid_path).unwrap().trim().to_owned();
 
