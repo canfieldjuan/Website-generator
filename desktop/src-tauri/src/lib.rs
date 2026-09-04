@@ -1,12 +1,12 @@
 use std::{
     ffi::OsString,
     fs,
-    io::{self, BufReader, Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicU8, Ordering},
         mpsc,
     },
     thread,
@@ -49,9 +49,17 @@ struct CachedArtifact {
 }
 
 struct ManagedProvider {
+    attempt: u64,
     child: Child,
     stdin: Option<ChildStdin>,
     ready: bool,
+}
+
+#[derive(Default)]
+struct ProviderLifecycle {
+    managed: Option<ManagedProvider>,
+    active_start: Option<u64>,
+    next_attempt: u64,
 }
 
 #[derive(Default)]
@@ -59,8 +67,7 @@ struct DesktopState {
     running: Mutex<Option<Child>>,
     engine_phase: AtomicU8,
     artifact: Mutex<Option<CachedArtifact>>,
-    provider: Mutex<Option<ManagedProvider>>,
-    provider_attempt: AtomicU64,
+    provider: Mutex<ProviderLifecycle>,
 }
 
 #[derive(Serialize)]
@@ -339,7 +346,7 @@ fn base_engine_command(_app: &AppHandle) -> Result<Command, String> {
         if !executable.is_file() {
             return Err("The packaged Website Generator engine is unavailable.".to_owned());
         }
-        let mut command = Command::new(executable);
+        let command = Command::new(executable);
         Ok(command)
     }
 }
@@ -526,8 +533,11 @@ fn parse_provider_readiness(line: &[u8]) -> Result<(), String> {
 }
 
 fn read_provider_readiness(reader: impl Read) -> io::Result<Vec<u8>> {
-    let output = read_bounded(BufReader::new(reader), MAX_LIFECYCLE_OUTPUT_BYTES)?;
-    if !output.ends_with(b"\n") {
+    let mut output = Vec::new();
+    BufReader::new(reader)
+        .take((MAX_LIFECYCLE_OUTPUT_BYTES + 1) as u64)
+        .read_until(b'\n', &mut output)?;
+    if output.len() > MAX_LIFECYCLE_OUTPUT_BYTES || !output.ends_with(b"\n") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "provider readiness exceeded its boundary",
@@ -538,7 +548,7 @@ fn read_provider_readiness(reader: impl Read) -> io::Result<Vec<u8>> {
 
 fn provider_is_running(state: &DesktopState) -> Result<bool, String> {
     let mut slot = state.provider.lock().map_err(|_| lock_error())?;
-    let Some(provider) = slot.as_mut() else {
+    let Some(provider) = slot.managed.as_mut() else {
         return Ok(false);
     };
     if provider
@@ -547,7 +557,7 @@ fn provider_is_running(state: &DesktopState) -> Result<bool, String> {
         .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
         .is_some()
     {
-        slot.take();
+        slot.managed.take();
         return Ok(false);
     }
     Ok(provider.ready)
@@ -581,19 +591,31 @@ fn require_active_entitlement(entitlement: &EntitlementStatus) -> Result<(), Str
     Ok(())
 }
 
-fn begin_provider_start(state: &DesktopState) -> u64 {
-    state
-        .provider_attempt
-        .fetch_add(1, Ordering::SeqCst)
-        .wrapping_add(1)
+fn begin_provider_start(state: &DesktopState) -> Result<u64, String> {
+    let mut lifecycle = state.provider.lock().map_err(|_| lock_error())?;
+    if lifecycle.active_start.is_some() {
+        return Err("The Local Connect provider is already starting.".to_owned());
+    }
+    lifecycle.next_attempt = lifecycle.next_attempt.wrapping_add(1);
+    if lifecycle.next_attempt == 0 {
+        lifecycle.next_attempt = 1;
+    }
+    let attempt = lifecycle.next_attempt;
+    lifecycle.active_start = Some(attempt);
+    Ok(attempt)
 }
 
-fn cancel_provider_start(state: &DesktopState) {
-    state.provider_attempt.fetch_add(1, Ordering::SeqCst);
+fn finish_provider_start(state: &DesktopState, attempt: u64) -> Result<(), String> {
+    let mut lifecycle = state.provider.lock().map_err(|_| lock_error())?;
+    if lifecycle.active_start == Some(attempt) {
+        lifecycle.active_start = None;
+    }
+    Ok(())
 }
 
 fn require_current_provider_start(state: &DesktopState, attempt: u64) -> Result<(), String> {
-    if state.provider_attempt.load(Ordering::SeqCst) != attempt {
+    let lifecycle = state.provider.lock().map_err(|_| lock_error())?;
+    if lifecycle.active_start != Some(attempt) {
         return Err("The Local Connect provider start was cancelled.".to_owned());
     }
     Ok(())
@@ -606,17 +628,23 @@ fn launch_managed_provider(
     attempt: u64,
 ) -> Result<bool, String> {
     let mut slot = state.provider.lock().map_err(|_| lock_error())?;
-    require_current_provider_start(state, attempt)?;
-    if let Some(provider) = slot.as_mut() {
+    if slot.active_start != Some(attempt) {
+        return Err("The Local Connect provider start was cancelled.".to_owned());
+    }
+    if let Some(provider) = slot.managed.as_mut() {
         if provider
             .child
             .try_wait()
             .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
             .is_none()
         {
-            return Ok(false);
+            return if provider.ready {
+                Ok(false)
+            } else {
+                Err("The Local Connect provider is already starting.".to_owned())
+            };
         }
-        slot.take();
+        slot.managed.take();
     }
 
     command
@@ -639,7 +667,8 @@ fn launch_managed_provider(
     thread::spawn(move || {
         let _ = sender.send(read_provider_readiness(stdout));
     });
-    *slot = Some(ManagedProvider {
+    slot.managed = Some(ManagedProvider {
+        attempt,
         child,
         stdin: Some(stdin),
         ready: false,
@@ -657,19 +686,29 @@ fn launch_managed_provider(
         }
     };
     if let Err(error) = readiness {
-        stop_connect_provider_with_timeout(state, Duration::ZERO).map_err(|_| {
+        stop_provider_attempt_with_timeout(state, attempt, Duration::ZERO).map_err(|_| {
             "The Local Connect provider could not be stopped after failed startup.".to_owned()
         })?;
         return Err(error);
     }
     thread::sleep(Duration::from_millis(50));
     let mut slot = state.provider.lock().map_err(|_| lock_error())?;
-    let Some(provider) = slot.as_mut() else {
+    if slot.active_start != Some(attempt) {
+        drop(slot);
+        stop_provider_attempt_with_timeout(state, attempt, Duration::ZERO).map_err(|_| {
+            "The Local Connect provider could not be stopped after cancellation.".to_owned()
+        })?;
+        return Err("The Local Connect provider start was cancelled.".to_owned());
+    }
+    let Some(provider) = slot.managed.as_mut() else {
         return Err("The Local Connect provider stopped during startup.".to_owned());
     };
+    if provider.attempt != attempt {
+        return Err("The Local Connect provider start was superseded.".to_owned());
+    }
     match provider.child.try_wait() {
         Ok(Some(_)) => {
-            slot.take();
+            slot.managed.take();
             return Err("The Local Connect provider stopped during startup.".to_owned());
         }
         Ok(None) => provider.ready = true,
@@ -677,7 +716,7 @@ fn launch_managed_provider(
             force_reap(&mut provider.child).map_err(|_| {
                 "The Local Connect provider could not be stopped after a status failure.".to_owned()
             })?;
-            slot.take();
+            slot.managed.take();
             return Err("The Local Connect provider status is unavailable.".to_owned());
         }
     }
@@ -685,28 +724,30 @@ fn launch_managed_provider(
 }
 
 fn start_connect_provider(app: &AppHandle, state: &DesktopState) -> Result<ConnectStatus, String> {
-    let attempt = begin_provider_start(state);
-    let entitlement = read_entitlement_status(app)?;
-    require_active_entitlement(&entitlement)?;
-    require_current_provider_start(state, attempt)?;
-    let mut command = base_engine_command(app)?;
-    command.args(["serve", "--desktop-managed"]);
-    launch_managed_provider(command, state, CONNECT_STARTUP_TIMEOUT, attempt)?;
-    Ok(ConnectStatus {
-        entitlement_state: entitlement.state,
-        entitlement_active: true,
-        provider_running: true,
-        provider_managed: true,
-    })
+    let attempt = begin_provider_start(state)?;
+    let result = (|| {
+        let entitlement = read_entitlement_status(app)?;
+        require_active_entitlement(&entitlement)?;
+        require_current_provider_start(state, attempt)?;
+        let mut command = base_engine_command(app)?;
+        command.args(["serve", "--desktop-managed"]);
+        launch_managed_provider(command, state, CONNECT_STARTUP_TIMEOUT, attempt)?;
+        Ok(ConnectStatus {
+            entitlement_state: entitlement.state,
+            entitlement_active: true,
+            provider_running: true,
+            provider_managed: true,
+        })
+    })();
+    finish_provider_start(state, attempt)?;
+    result
 }
 
-fn stop_connect_provider_with_timeout(
-    state: &DesktopState,
+fn stop_managed_provider_locked(
+    slot: &mut ProviderLifecycle,
     shutdown_timeout: Duration,
 ) -> Result<bool, String> {
-    cancel_provider_start(state);
-    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
-    let Some(provider) = slot.as_mut() else {
+    let Some(provider) = slot.managed.as_mut() else {
         return Ok(false);
     };
     if provider
@@ -715,7 +756,7 @@ fn stop_connect_provider_with_timeout(
         .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
         .is_some()
     {
-        slot.take();
+        slot.managed.take();
         return Ok(false);
     }
     if let Some(mut stdin) = provider.stdin.take() {
@@ -730,17 +771,38 @@ fn stop_connect_provider_with_timeout(
             .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
             .is_some()
         {
-            slot.take();
+            slot.managed.take();
             return Ok(true);
         }
         if Instant::now() >= deadline {
             force_reap(&mut provider.child)
                 .map_err(|_| "The Local Connect provider could not be stopped.".to_owned())?;
-            slot.take();
+            slot.managed.take();
             return Ok(true);
         }
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn stop_provider_attempt_with_timeout(
+    state: &DesktopState,
+    attempt: u64,
+    shutdown_timeout: Duration,
+) -> Result<bool, String> {
+    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    if slot.managed.as_ref().map(|provider| provider.attempt) != Some(attempt) {
+        return Ok(false);
+    }
+    stop_managed_provider_locked(&mut slot, shutdown_timeout)
+}
+
+fn stop_connect_provider_with_timeout(
+    state: &DesktopState,
+    shutdown_timeout: Duration,
+) -> Result<bool, String> {
+    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    slot.active_start = None;
+    stop_managed_provider_locked(&mut slot, shutdown_timeout)
 }
 
 fn stop_connect_provider(state: &DesktopState) -> Result<bool, String> {
@@ -1518,6 +1580,24 @@ mod tests {
 
     #[test]
     fn provider_readiness_reader_enforces_its_line_boundary() {
+        struct ReadyWithoutEof(bool);
+
+        impl Read for ReadyWithoutEof {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                if self.0 {
+                    panic!("readiness must not wait for EOF after the first line");
+                }
+                self.0 = true;
+                let line = b"{\"ready\":true}\n";
+                buffer[..line.len()].copy_from_slice(line);
+                Ok(line.len())
+            }
+        }
+
+        assert_eq!(
+            read_provider_readiness(ReadyWithoutEof(false)).unwrap(),
+            b"{\"ready\":true}\n"
+        );
         let maximum_line = format!("{}\n", "x".repeat(MAX_LIFECYCLE_OUTPUT_BYTES - 1));
         assert_eq!(
             read_provider_readiness(maximum_line.as_bytes())
@@ -1572,16 +1652,17 @@ mod tests {
     fn managed_provider_start_is_idempotent_and_stop_reaps_the_child() {
         let state = DesktopState::default();
         let provider = fixture_provider(
-            "import os, sys; print('{\"ready\":true}', flush=True); os.close(sys.stdout.fileno()); sys.stdin.readline()",
+            "import sys; print('{\"ready\":true}', flush=True); sys.stdin.readline()",
         );
-        let attempt = begin_provider_start(&state);
+        let attempt = begin_provider_start(&state).unwrap();
         assert!(
             launch_managed_provider(provider, &state, Duration::from_secs(2), attempt).unwrap()
         );
+        finish_provider_start(&state, attempt).unwrap();
         assert!(provider_is_running(&state).unwrap());
 
         let duplicate = Command::new("executable-that-must-not-be-started");
-        let duplicate_attempt = begin_provider_start(&state);
+        let duplicate_attempt = begin_provider_start(&state).unwrap();
         assert!(
             !launch_managed_provider(
                 duplicate,
@@ -1591,6 +1672,7 @@ mod tests {
             )
             .unwrap()
         );
+        finish_provider_start(&state, duplicate_attempt).unwrap();
 
         assert!(stop_connect_provider(&state).unwrap());
         assert!(!provider_is_running(&state).unwrap());
@@ -1601,46 +1683,48 @@ mod tests {
     fn managed_provider_timeout_and_early_exit_leave_no_child() {
         let state = DesktopState::default();
         let timeout = fixture_provider("import time; time.sleep(2)");
-        let attempt = begin_provider_start(&state);
+        let attempt = begin_provider_start(&state).unwrap();
         let error = launch_managed_provider(timeout, &state, Duration::from_millis(20), attempt)
             .unwrap_err();
+        finish_provider_start(&state, attempt).unwrap();
         assert!(error.contains("ready in time"));
         assert!(!provider_is_running(&state).unwrap());
 
         let early_exit = fixture_provider("pass");
-        let attempt = begin_provider_start(&state);
+        let attempt = begin_provider_start(&state).unwrap();
         assert!(
             launch_managed_provider(early_exit, &state, Duration::from_secs(2), attempt).is_err()
         );
+        finish_provider_start(&state, attempt).unwrap();
         assert!(!provider_is_running(&state).unwrap());
     }
 
     #[test]
     fn cancelled_provider_attempt_cannot_spawn_a_child() {
         let state = DesktopState::default();
-        let attempt = begin_provider_start(&state);
-        cancel_provider_start(&state);
+        let attempt = begin_provider_start(&state).unwrap();
+        assert!(!stop_connect_provider_with_timeout(&state, Duration::ZERO).unwrap());
 
         let command = Command::new("executable-that-must-not-be-started");
         let error =
             launch_managed_provider(command, &state, Duration::from_secs(2), attempt).unwrap_err();
 
         assert!(error.contains("cancelled"));
-        assert!(state.provider.lock().unwrap().is_none());
+        assert!(state.provider.lock().unwrap().managed.is_none());
     }
 
     #[test]
     fn managed_provider_can_be_stopped_while_starting() {
         let state = Arc::new(DesktopState::default());
         let start_state = state.clone();
-        let attempt = begin_provider_start(&state);
+        let attempt = begin_provider_start(&state).unwrap();
         let start = thread::spawn(move || {
             let provider = fixture_provider("import time; time.sleep(2)");
             launch_managed_provider(provider, &start_state, Duration::from_secs(2), attempt)
         });
 
         let registration_deadline = Instant::now() + Duration::from_secs(1);
-        while state.provider.lock().unwrap().is_none() {
+        while state.provider.lock().unwrap().managed.is_none() {
             assert!(
                 Instant::now() < registration_deadline,
                 "starting provider was not registered"
@@ -1651,19 +1735,42 @@ mod tests {
 
         assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).unwrap());
         assert!(start.join().unwrap().is_err());
-        assert!(state.provider.lock().unwrap().is_none());
+        assert!(state.provider.lock().unwrap().managed.is_none());
+    }
+
+    #[test]
+    fn failed_attempt_cleanup_does_not_stop_a_newer_provider() {
+        let state = DesktopState::default();
+        let stale_attempt = begin_provider_start(&state).unwrap();
+        finish_provider_start(&state, stale_attempt).unwrap();
+
+        let current_attempt = begin_provider_start(&state).unwrap();
+        let provider = fixture_provider(
+            "import sys; print('{\"ready\":true}', flush=True); sys.stdin.readline()",
+        );
+        assert!(
+            launch_managed_provider(provider, &state, Duration::from_secs(2), current_attempt,)
+                .unwrap()
+        );
+        finish_provider_start(&state, current_attempt).unwrap();
+
+        assert!(
+            !stop_provider_attempt_with_timeout(&state, stale_attempt, Duration::ZERO).unwrap()
+        );
+        assert!(provider_is_running(&state).unwrap());
+        assert!(stop_connect_provider(&state).unwrap());
     }
 
     #[test]
     fn managed_provider_forced_stop_reports_the_reconciled_state() {
         let state = DesktopState::default();
-        let provider = fixture_provider(
-            "import os, sys, time; print('{\"ready\":true}', flush=True); os.close(sys.stdout.fileno()); time.sleep(2)",
-        );
-        let attempt = begin_provider_start(&state);
+        let provider =
+            fixture_provider("import time; print('{\"ready\":true}', flush=True); time.sleep(2)");
+        let attempt = begin_provider_start(&state).unwrap();
         assert!(
             launch_managed_provider(provider, &state, Duration::from_secs(2), attempt).unwrap()
         );
+        finish_provider_start(&state, attempt).unwrap();
 
         assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).unwrap());
         assert!(!provider_is_running(&state).unwrap());

@@ -416,7 +416,7 @@ function showError(error: unknown): void {
 function renderConnectControls(): void {
   const inactive = !connectSnapshot?.entitlement_active;
   const running = connectSnapshot?.provider_running === true;
-  connectActivate.disabled = busy || connectBusy || running;
+  connectActivate.disabled = busy || connectBusy;
   connectStart.disabled = busy || connectBusy || inactive || running;
   connectStop.disabled = connectBusy ? !connectStarting : !running;
 }
