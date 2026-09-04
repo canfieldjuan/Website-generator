@@ -180,9 +180,9 @@ fn terminate_process_tree(child: &mut Child) -> io::Result<()> {
         if status.success() || child.try_wait()?.is_some() {
             return Ok(());
         }
-        return Err(io::Error::other(
+        Err(io::Error::other(
             "Windows could not terminate the process tree",
-        ));
+        ))
     }
 
     #[cfg(not(windows))]
