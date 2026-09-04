@@ -85,8 +85,7 @@ ACL-aware bounded reader.
   fabricated-claim scans returned zero matches.
 - Ollama returned `done_reason=unload`; `/api/ps` then reported no loaded models
   and `nvidia-smi` reported no compute process.
-- `bash scripts/local_pr_review.sh` will run after the verified diff is committed,
-  because that check intentionally requires a clean worktree.
+- `bash scripts/local_pr_review.sh` passed on the committed diff.
 
 ## Estimated diff size
 
