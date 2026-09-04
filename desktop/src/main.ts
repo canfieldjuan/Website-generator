@@ -97,7 +97,7 @@ app.innerHTML = `
               </label>
               <label class="field field--state">
                 <span>State <em>Required</em></span>
-                <input id="state" autocomplete="address-level1" maxlength="2" required />
+                <input id="state" autocomplete="address-level1" minlength="2" maxlength="2" pattern="[A-Za-z]{2}" title="Enter a two-letter state abbreviation" required />
               </label>
               <label class="field field--wide">
                 <span>Street address <small>Optional</small></span>
