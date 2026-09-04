@@ -872,13 +872,13 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
 
 The CLI resolves a `GenerationConfig` from explicit arguments and environment
 configuration. Local is the default, accepts only localhost or literal loopback
-endpoints, ignores environment proxy settings, and preflights standalone vLLM
-`/health` and `/v1/models` responses; OpenRouter requires the operator to select
-it and provide a model. Local generation uses vLLM's OpenAI-compatible
-`/v1/chat/completions` contract, sends plain system/user messages, disables Qwen
-thinking through chat-template parameters, and rejects any returned reasoning
-or tool-call surface. OpenRouter keeps its existing request path and receives
-cache metadata only when it was requested by the caller.
+endpoints, ignores environment proxy settings, and preflights Ollama's
+`/api/version`, `/api/tags`, and `/api/show` responses; OpenRouter requires the
+operator to select it and provide a model. Local generation uses Ollama's
+`/api/chat` contract, sends plain system/user messages, disables Qwen thinking,
+and rejects any returned reasoning or tool-call surface. OpenRouter keeps its
+existing request path and receives cache metadata only when it was requested by
+the caller.
 
 Local generation uses a two-hour default request deadline because the exact Qwen
 fixture exceeds the former cloud-oriented ten-minute deadline on supported local
@@ -968,7 +968,7 @@ override before assembly.
 ## Intentional
 
 - Generation commands do not auto-start or silently fall back from
-  vLLM; a missing runtime/model exits with the documented standalone
+  Ollama; a missing runtime/model exits with the documented standalone
   startup instruction.
 - OpenRouter is never an automatic fallback because it changes cost and data
   locality.
@@ -992,6 +992,40 @@ override before assembly.
   hardening is separate from proving the current local-generation slice.
 
 ## Verification
+
+### Current Ollama completion proof
+
+- At repository head `f46ca15dbbcd2f498fd77f15b391762e76fbc72a`, Ollama
+  `0.24.0` listed `qwen3-30b-a3b:latest` locally and reported no loaded models
+  before the run. No model download or application-started runtime occurred.
+- `python build.py examples/prospect-plumber-template.json --skip-image-gen
+  --skip-email-draft --skip-deploy` completed through loopback Ollama. The first
+  candidate failed closed on the unsupported `Not a Franchise` claim; the one
+  bounded correction completed and passed the shared admission path.
+- During inference, Ollama reported the selected model at context length
+  `40960`, fully resident in VRAM, while `nvidia-smi` reported the Ollama compute
+  process using `21330 MiB`. This proves the controlled fixture used the GPU
+  rather than a CPU fallback.
+- The accepted artifact was
+  `outputs/builds/drees-plumbing-inc/index.html` (`71878` bytes, SHA-256
+  `65f5dbe48d6cc53c9139df1a77255b4c5b8c302815bd7bb1019516ba62c5b641`).
+  Current `validate_generated_html` re-admitted the exact bytes; the document
+  begins with the HTML doctype, contains exactly one contact form, contains no
+  `Not a Franchise` claim and no image element. Its only `{{` occurrence is the
+  identical code-owned injection-token documentation comment in
+  `references/03-base-template.html`, not model output.
+- The command output recorded all three no-effect gates: image generation,
+  pitch-email drafting, and Vercel deployment were skipped. The isolated output
+  tree contained only the admitted `index.html` artifact.
+- The matching Ollama chat unload returned `done_reason=unload`; the subsequent
+  `/api/ps` check reported no loaded models and `nvidia-smi` reported no GPU
+  compute process.
+- With `CONNECT_CONTRACTS_DIR=/home/juan-canfield/Desktop/connect-contracts`,
+  the full Python suite ran `287` tests successfully with `10` native-Windows
+  skips. Python bytecode compilation also passed. The exact-head GitHub
+  `Generator Tests` run `33915338213` passed both `unit` and
+  `windows-connect-package`, including the native Windows installer build and
+  installed desktop/bundled-engine smoke test.
 
 - `gh release list --repo vllm-project/vllm-gguf-plugin --limit 5` reported
   `v0.0.5` as the latest release. `gh pr view 120 --repo
