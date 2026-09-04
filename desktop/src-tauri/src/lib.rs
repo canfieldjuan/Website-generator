@@ -11,8 +11,9 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
 
@@ -54,6 +55,102 @@ struct DesktopState {
 struct ImportedProspect {
     file_name: String,
     document: Value,
+}
+
+struct UniqueJson(Value);
+
+impl<'de> Deserialize<'de> for UniqueJson {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct UniqueJsonVisitor;
+
+        impl<'de> Visitor<'de> for UniqueJsonVisitor {
+            type Value = UniqueJson;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a JSON value without duplicate object keys")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::Bool(value)))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::Number(value.into())))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::Number(value.into())))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                serde_json::Number::from_f64(value)
+                    .map(Value::Number)
+                    .map(UniqueJson)
+                    .ok_or_else(|| E::custom("JSON number is not finite"))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::String(value.to_owned())))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::String(value)))
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::Null))
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::Null))
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                UniqueJson::deserialize(deserializer)
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut values = Vec::new();
+                while let Some(UniqueJson(value)) = sequence.next_element()? {
+                    values.push(value);
+                }
+                Ok(UniqueJson(Value::Array(values)))
+            }
+
+            fn visit_map<A>(self, mut object: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut values = Map::new();
+                while let Some(key) = object.next_key::<String>()? {
+                    if values.contains_key(&key) {
+                        return Err(serde::de::Error::custom("duplicate JSON object key"));
+                    }
+                    let UniqueJson(value) = object.next_value()?;
+                    values.insert(key, value);
+                }
+                Ok(UniqueJson(Value::Object(values)))
+            }
+        }
+
+        deserializer.deserialize_any(UniqueJsonVisitor)
+    }
+}
+
+fn decode_unique_json(source: &[u8]) -> Result<Value, serde_json::Error> {
+    serde_json::from_slice::<UniqueJson>(source).map(|value| value.0)
 }
 
 fn lock_error() -> String {
@@ -587,8 +684,9 @@ fn import_prospect() -> Result<Option<ImportedProspect>, String> {
     }
     let bytes =
         fs::read(&path).map_err(|_| "The selected prospect file could not be read.".to_owned())?;
-    let document: Value = serde_json::from_slice(&bytes)
-        .map_err(|_| "The selected prospect file is not valid JSON.".to_owned())?;
+    let document = decode_unique_json(&bytes).map_err(|_| {
+        "The selected prospect file is not valid JSON or contains duplicate keys.".to_owned()
+    })?;
     if !document.is_object() {
         return Err("The selected prospect JSON must contain one object.".to_owned());
     }
@@ -660,7 +758,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let state = window.state::<Arc<DesktopState>>();
-                kill_running(&state);
+                let _ = request_engine_cancellation(&state);
             }
         })
         .run(tauri::generate_context!())
@@ -772,6 +870,17 @@ mod tests {
                 "unexpectedly admitted {source}"
             );
         }
+    }
+
+    #[test]
+    fn imported_json_rejects_duplicate_keys_at_every_depth() {
+        assert!(decode_unique_json(br#"{"name":"one","name":"two"}"#).is_err());
+        assert!(decode_unique_json(br#"{"nested":{"value":1,"value":2}}"#).is_err());
+        assert!(decode_unique_json(br#"{"items":[{"value":1,"value":2}]}"#).is_err());
+        assert_eq!(
+            decode_unique_json(br#"{"name":"one","nested":{"value":1}}"#).unwrap(),
+            json!({"name": "one", "nested": {"value": 1}})
+        );
     }
 
     #[cfg(windows)]

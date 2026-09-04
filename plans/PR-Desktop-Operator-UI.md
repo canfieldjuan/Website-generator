@@ -19,6 +19,15 @@ HTTP contract or entitlement behavior, deployment, image generation, pitch
 email generation, model installation/daemon management, billing, or generated
 website semantics.
 
+This vertical slice exceeds the repository's 400-line soft target because the
+native host, operator workflow, sandboxed preview, and installable Windows
+package must land together to prove one usable path. The measured review
+surface is approximately 9,500 added text lines across 76 paths, including two
+generated dependency lockfiles and 50 binary icon assets; excluding the
+lockfiles leaves approximately 3,000 added text lines. Splitting the native
+process boundary or installer from the UI would leave a visual mock rather than
+the end-to-end operator slice. The Local Connect lifecycle remains separate.
+
 ### Design contract
 
 Subject: a small-business operator's drafting desk. Audience: an operator who
@@ -117,11 +126,12 @@ closing a preview revokes its prior Blob URL.
 
 - `npm test` from `desktop/`: 1 test file passed, 9 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
-- `cargo test` from `desktop/src-tauri/`: 7 tests passed. The boundary tests
+- `cargo test` from `desktop/src-tauri/`: 8 tests passed. The boundary tests
   include cancellation before child registration and reject nested numeric
-  tokens that cannot survive the JavaScript round trip exactly during import.
-  The Windows run adds a process-tree regression proving cancellation also
-  terminates a spawned descendant.
+  tokens that cannot survive the JavaScript round trip exactly during import,
+  plus duplicate keys at the root or nested inside arrays/objects. The Windows
+  run adds a ninth process-tree regression proving cancellation also terminates
+  a spawned descendant.
 - `cargo clippy --all-targets --all-features -- -D warnings` from
   `desktop/src-tauri/`: passed with no warnings.
 - `cargo build` from `desktop/src-tauri/`: native debug build passed.
@@ -138,7 +148,7 @@ closing a preview revokes its prior Blob URL.
 
 ## Estimated diff size
 
-Approximately 1,200 added lines across the native host, operator UI, tests, and
-packaging configuration. This exceeds the soft 400-line target because a visual
-mock without process, preview, save, and Windows packaging proof would not be an
-end-to-end operator slice. The Connect lifecycle remains a separate PR.
+Approximately 9,500 added text lines across 76 paths, dominated by generated
+dependency lockfiles and binary application-icon assets. Excluding the two
+lockfiles leaves approximately 3,000 added text lines of configuration,
+documentation, native host, operator UI, and tests.
