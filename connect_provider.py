@@ -31,7 +31,7 @@ from lib.connect_v2 import (
     default_state_dir,
     new_bearer_token,
     registration_document,
-    remove_registration_for_pid,
+    remove_registration_for_token,
     remove_registration_if_owned,
     resolve_connect_generation_config,
     write_registration,
@@ -92,8 +92,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=argparse.SUPPRESS,
     )
-    cleanup = commands.add_parser("cleanup-registration", help=argparse.SUPPRESS)
-    cleanup.add_argument("--pid", type=int, required=True, help=argparse.SUPPRESS)
+    commands.add_parser("cleanup-registration", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -190,8 +189,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if desktop_registration_token is None:
                 raise ValueError("Desktop registration ownership is unavailable.")
-            removed = remove_registration_for_pid(
-                runtime_dir, args.pid, desktop_registration_token
+            removed = remove_registration_for_token(
+                runtime_dir, desktop_registration_token
             )
         except (OSError, TypeError, ValueError) as exc:
             print(f"Connect registration cleanup failed: {exc}", file=sys.stderr)

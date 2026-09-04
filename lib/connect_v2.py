@@ -861,10 +861,8 @@ def remove_registration_if_owned(path: str | Path, token: str) -> bool:
     return False
 
 
-def remove_registration_for_pid(directory: str | Path, pid: int, token: str) -> int:
-    """Remove this app's registrations for one terminated provider process."""
-    if type(pid) is not int or pid < 1:
-        raise ValueError("Registration cleanup PID must be a positive integer.")
+def remove_registration_for_token(directory: str | Path, token: str) -> int:
+    """Remove this app's registration carrying one desktop-owned bearer."""
     if not isinstance(token, str) or not re.fullmatch(
         r"[A-Za-z0-9_-]{43,128}", token
     ):
@@ -895,8 +893,6 @@ def remove_registration_for_pid(directory: str | Path, pid: int, token: str) -> 
         ):
             continue
         if not isinstance(current, dict) or current.get("app_id") != APP_ID:
-            continue
-        if current.get("pid") != pid:
             continue
         instance_id = current.get("instance_id")
         auth = current.get("auth")

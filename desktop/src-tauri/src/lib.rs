@@ -459,9 +459,9 @@ fn wait_for_connect_command(
     }
 }
 
-fn cleanup_provider_registration(command: &mut Command, pid: u32) -> Result<(), String> {
+fn cleanup_provider_registration(command: &mut Command) -> Result<(), String> {
     command
-        .args(["cleanup-registration", "--pid", &pid.to_string()])
+        .arg("cleanup-registration")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -484,7 +484,7 @@ fn reconcile_terminated_provider(provider: &mut ManagedProvider) -> Result<(), S
     let Some(mut cleanup) = provider.registration_cleanup.take() else {
         return Ok(());
     };
-    cleanup_provider_registration(&mut cleanup, provider.child.id())
+    cleanup_provider_registration(&mut cleanup)
 }
 
 fn run_cli_json(app: &AppHandle, arguments: &[OsString]) -> Result<Value, String> {
@@ -1866,13 +1866,18 @@ mod tests {
     fn managed_provider_forced_stop_reports_the_reconciled_state() {
         let state = DesktopState::default();
         let directory = tempfile::tempdir().unwrap();
-        let cleanup_path = directory.path().join("cleaned-pid");
+        let cleanup_path = directory.path().join("cleaned-token");
         let provider =
             fixture_provider("import time; print('{\"ready\":true}', flush=True); time.sleep(2)");
         let mut cleanup = fixture_provider(
-            "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[-1])",
+            "import os, pathlib, sys; pathlib.Path(sys.argv[1]).write_text(os.environ[sys.argv[2]])",
         );
-        cleanup.arg(&cleanup_path);
+        cleanup
+            .args([
+                cleanup_path.as_os_str(),
+                DESKTOP_REGISTRATION_TOKEN_ENV.as_ref(),
+            ])
+            .env(DESKTOP_REGISTRATION_TOKEN_ENV, "test-registration-token");
         let attempt = begin_provider_start(&state).unwrap();
         assert!(
             launch_managed_provider(
@@ -1885,21 +1890,11 @@ mod tests {
             .unwrap()
         );
         finish_provider_start(&state, attempt).unwrap();
-        let provider_pid = state
-            .provider
-            .lock()
-            .unwrap()
-            .managed
-            .as_ref()
-            .unwrap()
-            .child
-            .id();
-
         assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).unwrap());
         assert!(!provider_is_running(&state).unwrap());
         assert_eq!(
             fs::read_to_string(cleanup_path).unwrap(),
-            provider_pid.to_string()
+            "test-registration-token"
         );
     }
 

@@ -47,7 +47,7 @@ from lib.connect_v2 import (
     manifest,
     new_bearer_token,
     registration_document,
-    remove_registration_for_pid,
+    remove_registration_for_token,
     remove_registration_if_owned,
     resolve_connect_generation_config,
     sanitize_display_name,
@@ -1154,7 +1154,6 @@ class GenerationSeamTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             args = SimpleNamespace(
                 command="cleanup-registration",
-                pid=4242,
                 runtime_dir=Path(directory) / "runtime",
                 state_dir=Path(directory) / "state",
             )
@@ -1165,19 +1164,19 @@ class GenerationSeamTests(unittest.TestCase):
             ), patch.object(
                 connect_provider, "parse_args", return_value=args
             ), patch.object(
-                connect_provider, "remove_registration_for_pid", return_value=1
+                connect_provider, "remove_registration_for_token", return_value=1
             ) as cleanup, patch.object(
                 connect_provider, "preflight_generation_provider"
             ) as preflight:
                 self.assertEqual(connect_provider.main(), 0)
 
-            cleanup.assert_called_once_with(args.runtime_dir, 4242, TOKEN)
+            cleanup.assert_called_once_with(args.runtime_dir, TOKEN)
             preflight.assert_not_called()
 
             with patch.dict(os.environ, {}, clear=True), patch.object(
                 connect_provider, "parse_args", return_value=args
             ), patch.object(
-                connect_provider, "remove_registration_for_pid"
+                connect_provider, "remove_registration_for_token"
             ) as unowned_cleanup, patch.object(
                 connect_provider, "preflight_generation_provider"
             ) as unowned_preflight:
@@ -1504,7 +1503,7 @@ class RegistrationTests(unittest.TestCase):
             remove_registration_if_owned(path, first_token)
             self.assertFalse(path.exists())
 
-    def test_pid_cleanup_removes_only_the_terminated_provider_registration(self):
+    def test_token_cleanup_removes_only_the_owned_provider_registration(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"
             terminated = registration_document(
@@ -1523,17 +1522,14 @@ class RegistrationTests(unittest.TestCase):
                 runtime, same_pid_replacement
             )
 
-            self.assertEqual(remove_registration_for_pid(runtime, 4242, TOKEN), 1)
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
             self.assertFalse(terminated_path.exists())
             self.assertTrue(replacement_path.exists())
             self.assertTrue(same_pid_replacement_path.exists())
-            self.assertEqual(remove_registration_for_pid(runtime, 4242, TOKEN), 0)
-            for invalid in (False, 0, -1):
-                with self.subTest(pid=invalid), self.assertRaises(ValueError):
-                    remove_registration_for_pid(runtime, invalid, TOKEN)
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
             for invalid in (None, False, "", "short", "!" * 64):
                 with self.subTest(token=invalid), self.assertRaises(ValueError):
-                    remove_registration_for_pid(runtime, 4242, invalid)
+                    remove_registration_for_token(runtime, invalid)
 
     def test_malformed_registration_never_removes_or_aborts_cleanup(self):
         malformed_contents = {
