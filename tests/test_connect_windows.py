@@ -27,6 +27,7 @@ from lib.connect_v2 import (
     default_runtime_dir,
     default_state_dir,
     registration_document,
+    remove_registration_for_token,
     remove_registration_if_owned,
     windows_v2_ownership_lock_path,
     write_registration,
@@ -139,12 +140,22 @@ class WindowsConnectStorageTests(unittest.TestCase):
             assert first is not None
             self.assertEqual(first.path, ownership_lock)
             self.assertNotIn(ownership_lock, runtime.iterdir())
+            live_path = write_registration(runtime, restarted)
             try:
                 with self.assertRaises(RuntimeError):
                     acquire_registration_ownership(runtime, document["instance_id"])
+                self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+                self.assertTrue(live_path.exists())
             finally:
                 first.close()
                 first.close()
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(live_path.exists())
+            reacquired = acquire_registration_ownership(
+                runtime, document["instance_id"]
+            )
+            assert reacquired is not None
+            reacquired.close()
 
     def test_local_app_data_rejects_broad_read_acl(self):
         with tempfile.TemporaryDirectory(dir=self.actual_local_app_data) as directory:

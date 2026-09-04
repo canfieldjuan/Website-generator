@@ -7,6 +7,7 @@ import socket
 import stat
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from starlette.requests import Request
 
 import build
 import connect_provider
+import lib.connect_v2 as connect_v2
 from lib.connect_entitlement import EntitlementDecision, EntitlementGate
 from lib.connect_store import ConnectStore, JobConflict, ProviderBusy, canonical_json
 from lib.connect_windows import atomic_replace_bytes, validate_private_regular_file
@@ -32,11 +34,13 @@ from lib.connect_v2 import (
     CAPABILITY_VERSION,
     DEFAULT_LOCAL_MODEL,
     MAX_INPUT_BYTES,
+    MAX_REGISTRATION_BYTES,
     OUTPUT_MEDIA_TYPE,
     ProviderLock,
     ProviderRuntime,
     ProtocolError,
     _authenticate,
+    acquire_registration_ownership,
     create_app,
     decode_job_request,
     default_runtime_dir,
@@ -1231,7 +1235,11 @@ class GenerationSeamTests(unittest.TestCase):
                 def close(self):
                     ownership_events.append("ownership-released")
 
-            def acquire_ownership(runtime_dir, instance_id):
+            def acquire_ownership(runtime_dir, instance_id, *, wait_timeout):
+                self.assertEqual(
+                    wait_timeout,
+                    connect_provider.REGISTRATION_OWNERSHIP_STARTUP_WAIT_SECONDS,
+                )
                 ownership_events.append(
                     (
                         "ownership-acquired",
@@ -1560,6 +1568,227 @@ class RegistrationTests(unittest.TestCase):
                 with self.subTest(token=invalid), self.assertRaises(ValueError):
                     remove_registration_for_token(runtime, invalid)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_token_cleanup_skips_mixed_unsafe_candidates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            owned = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            owned_path = write_registration(runtime, owned)
+
+            symlink_id = str(uuid.uuid4())
+            symlink_target = root / "symlink-target.json"
+            symlink_target.write_text(
+                json.dumps(
+                    registration_document(
+                        instance_id=symlink_id, port=43128, token=TOKEN, pid=4243
+                    )
+                ),
+                encoding="utf-8",
+            )
+            symlink_path = runtime / f"{APP_ID}-{symlink_id}.json"
+            symlink_path.symlink_to(symlink_target)
+
+            fifo_id = str(uuid.uuid4())
+            fifo_path = runtime / f"{APP_ID}-{fifo_id}.json"
+            os.mkfifo(fifo_path)
+
+            oversized_id = str(uuid.uuid4())
+            oversized_path = runtime / f"{APP_ID}-{oversized_id}.json"
+            oversized_document = json.dumps(
+                registration_document(
+                    instance_id=oversized_id, port=43129, token=TOKEN, pid=4244
+                )
+            ).encode("utf-8")
+            oversized_path.write_bytes(
+                oversized_document
+                + b" " * (MAX_REGISTRATION_BYTES + 1 - len(oversized_document))
+            )
+
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(owned_path.exists())
+            self.assertTrue(symlink_path.is_symlink())
+            self.assertTrue(symlink_target.exists())
+            self.assertTrue(fifo_path.exists())
+            self.assertTrue(oversized_path.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_supports_symlinked_runtime_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_runtime = root / "real-runtime"
+            real_runtime.mkdir()
+            runtime = root / "runtime"
+            runtime.symlink_to(real_runtime, target_is_directory=True)
+
+            direct_document = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            direct_path = write_registration(runtime, direct_document)
+            self.assertTrue(remove_registration_if_owned(direct_path, TOKEN))
+            self.assertFalse(direct_path.exists())
+
+            scanned_document = registration_document(
+                instance_id=str(uuid.uuid4()), port=43128, token=TOKEN, pid=4243
+            )
+            scanned_path = write_registration(runtime, scanned_document)
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(scanned_path.exists())
+
+    def test_windows_cleanup_revalidates_registration_before_unlink(self):
+        path = Path("registration.json")
+        initial = json.dumps(
+            {"auth": {"token": TOKEN}, "started_at": "2026-09-04T12:00:00Z"}
+        ).encode("utf-8")
+        replacement = json.dumps(
+            {
+                "auth": {"token": "B" * 64},
+                "started_at": "2026-09-04T12:01:00Z",
+            }
+        ).encode("utf-8")
+
+        with (
+            patch.object(connect_v2.os, "name", "nt"),
+            patch.object(
+                connect_v2,
+                "_read_registration_bytes",
+                side_effect=[(initial, None), (replacement, None)],
+            ) as read_registration,
+            patch.object(connect_v2, "unlink_regular_file") as unlink_registration,
+        ):
+            self.assertFalse(remove_registration_if_owned(path, TOKEN))
+
+        self.assertEqual(read_registration.call_count, 2)
+        unlink_registration.assert_not_called()
+
+    def test_windows_token_cleanup_skips_busy_owned_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            instance_id = str(uuid.uuid4())
+            candidate = (
+                windows_v2_registration_path(runtime, instance_id)
+                if os.name == "nt"
+                else runtime / f"{APP_ID}-{instance_id}.json"
+            )
+            candidate.write_text("{}", encoding="utf-8")
+
+            with (
+                patch.object(
+                    connect_v2,
+                    "_try_acquire_registration_cleanup_ownership",
+                    return_value=(False, None),
+                ) as acquire_ownership,
+                patch.object(
+                    connect_v2, "_remove_registration_if_owned", return_value=True
+                ) as remove_registration,
+            ):
+                self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+
+            acquire_ownership.assert_called_once_with(runtime, instance_id)
+            remove_registration.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration ownership")
+    def test_posix_token_cleanup_waits_for_provider_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            document = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            ownership = acquire_registration_ownership(
+                runtime, document["instance_id"]
+            )
+            self.assertIsNotNone(ownership)
+            path = write_registration(runtime, document)
+            try:
+                self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+                self.assertTrue(path.exists())
+            finally:
+                if ownership is not None:
+                    ownership.close()
+
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(path.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration ownership")
+    def test_provider_ownership_waits_for_inflight_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            instance_id = str(uuid.uuid4())
+            cleanup_ownership = acquire_registration_ownership(runtime, instance_id)
+            self.assertIsNotNone(cleanup_ownership)
+            with self.assertRaises(RuntimeError):
+                acquire_registration_ownership(
+                    runtime, instance_id, wait_timeout=0.0
+                )
+
+            def release_cleanup():
+                time.sleep(0.05)
+                if cleanup_ownership is not None:
+                    cleanup_ownership.close()
+
+            release = threading.Thread(target=release_cleanup)
+            release.start()
+            provider_ownership = acquire_registration_ownership(
+                runtime, instance_id, wait_timeout=1.0
+            )
+            try:
+                self.assertFalse(release.is_alive())
+            finally:
+                provider_ownership.close()
+                release.join(timeout=1)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration ownership")
+    def test_posix_ownership_lock_rejects_unsafe_entries_without_following(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            instance_id = str(uuid.uuid4())
+            lock_path = runtime / f".{APP_ID}-{instance_id}.lock"
+            victim = root / "victim.txt"
+            victim.write_text("do not touch", encoding="utf-8")
+            os.chmod(victim, 0o640)
+            lock_path.symlink_to(victim)
+            document = registration_document(
+                instance_id=instance_id, port=43127, token=TOKEN, pid=4242
+            )
+            registration = write_registration(runtime, document)
+
+            with self.assertRaises(RuntimeError):
+                acquire_registration_ownership(runtime, instance_id)
+            self.assertEqual(stat.S_IMODE(victim.stat().st_mode), 0o640)
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+            self.assertTrue(registration.exists())
+
+            def assert_cleanup_lock_unavailable():
+                ownership_available, ownership = (
+                    connect_v2._try_acquire_registration_cleanup_ownership(
+                        runtime, instance_id
+                    )
+                )
+                self.assertFalse(ownership_available)
+                self.assertIsNone(ownership)
+
+            lock_path.unlink()
+            os.mkfifo(lock_path)
+            assert_cleanup_lock_unavailable()
+            lock_path.unlink()
+            lock_path.mkdir()
+            assert_cleanup_lock_unavailable()
+            lock_path.rmdir()
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unix_socket:
+                unix_socket.bind(str(lock_path))
+                assert_cleanup_lock_unavailable()
+            lock_path.unlink()
+            os.link(victim, lock_path)
+            assert_cleanup_lock_unavailable()
+            self.assertEqual(stat.S_IMODE(victim.stat().st_mode), 0o640)
+            lock_path.unlink()
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(registration.exists())
+
     def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"
@@ -1570,7 +1799,7 @@ class RegistrationTests(unittest.TestCase):
             unlink_target = (
                 "lib.connect_v2.unlink_regular_file"
                 if os.name == "nt"
-                else "pathlib.Path.unlink"
+                else "lib.connect_v2._PosixRegistrationSnapshot.unlink_if_same"
             )
 
             with patch(unlink_target, side_effect=PermissionError("temporarily locked")):
@@ -1592,11 +1821,7 @@ class RegistrationTests(unittest.TestCase):
             canonical.write_text("{}", encoding="utf-8")
             unrelated = runtime / "unrelated.json"
             unrelated.write_text("{}", encoding="utf-8")
-            read_target = (
-                "lib.connect_v2.read_bounded_regular_file"
-                if os.name == "nt"
-                else "pathlib.Path.read_bytes"
-            )
+            read_target = "lib.connect_v2._read_registration_bytes"
 
             with patch(read_target, side_effect=PermissionError("temporarily locked")):
                 with self.assertRaises(PermissionError):
@@ -1612,6 +1837,7 @@ class RegistrationTests(unittest.TestCase):
             "invalid auth shape": b'{"auth":"invalid"}',
             "invalid UTF-8": b"\xff",
             "excessive nesting": b"[" * 1_200 + b"0" + b"]" * 1_200,
+            "oversized integer": b'{"value":' + b"9" * 5_000 + b"}",
             "non-ASCII token": '{"auth":{"token":"caf\u00e9"}}'.encode("utf-8"),
         }
         for label, content in malformed_contents.items():
@@ -1622,6 +1848,110 @@ class RegistrationTests(unittest.TestCase):
                 remove_registration_if_owned(path, TOKEN)
 
                 self.assertTrue(path.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_rejects_final_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "owned.json"
+            target.write_text(
+                json.dumps({"auth": {"token": TOKEN}}), encoding="utf-8"
+            )
+            registration = root / "registration.json"
+            registration.symlink_to(target)
+
+            self.assertFalse(remove_registration_if_owned(registration, TOKEN))
+            self.assertTrue(registration.is_symlink())
+            self.assertTrue(target.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_rejects_oversized_regular_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registration = Path(directory) / "registration.json"
+            document = json.dumps({"auth": {"token": TOKEN}}).encode("utf-8")
+            registration.write_bytes(
+                document + b" " * (MAX_REGISTRATION_BYTES + 1 - len(document))
+            )
+            self.assertEqual(registration.stat().st_size, MAX_REGISTRATION_BYTES + 1)
+
+            self.assertFalse(remove_registration_if_owned(registration, TOKEN))
+            self.assertTrue(registration.exists())
+
+            registration.write_bytes(
+                document + b" " * (MAX_REGISTRATION_BYTES - len(document))
+            )
+            self.assertEqual(registration.stat().st_size, MAX_REGISTRATION_BYTES)
+            self.assertTrue(remove_registration_if_owned(registration, TOKEN))
+            self.assertFalse(registration.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_does_not_block_on_fifo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registration = Path(directory) / "registration.json"
+            os.mkfifo(registration)
+            outcome = []
+            errors = []
+
+            def cleanup():
+                try:
+                    outcome.append(remove_registration_if_owned(registration, TOKEN))
+                except Exception as exc:  # pragma: no cover - assertion reports detail
+                    errors.append(exc)
+
+            worker = threading.Thread(target=cleanup, daemon=True)
+            worker.start()
+            worker.join(timeout=0.25)
+            blocked = worker.is_alive()
+            if blocked:
+                writer = None
+                deadline = time.monotonic() + 1
+                while writer is None and time.monotonic() < deadline:
+                    try:
+                        writer = os.open(registration, os.O_WRONLY | os.O_NONBLOCK)
+                    except OSError as exc:
+                        if exc.errno != errno.ENXIO:
+                            raise
+                        time.sleep(0.01)
+                if writer is not None:
+                    os.close(writer)
+                worker.join(timeout=1)
+
+            self.assertFalse(blocked, "registration cleanup blocked while opening a FIFO")
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(outcome, [False])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_rejects_replacement_before_unlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registration = root / "registration.json"
+            registration.write_text(
+                json.dumps({"auth": {"token": TOKEN}, "marker": "original"}),
+                encoding="utf-8",
+            )
+            replacement = root / "replacement.json"
+            replacement.write_text(
+                json.dumps({"auth": {"token": TOKEN}, "marker": "replacement"}),
+                encoding="utf-8",
+            )
+            original_unlink = connect_v2._PosixRegistrationSnapshot.unlink_if_same
+
+            def replace_before_unlink(snapshot):
+                os.replace(replacement, registration)
+                return original_unlink(snapshot)
+
+            with patch.object(
+                connect_v2._PosixRegistrationSnapshot,
+                "unlink_if_same",
+                new=replace_before_unlink,
+            ):
+                self.assertFalse(remove_registration_if_owned(registration, TOKEN))
+
+            self.assertEqual(
+                json.loads(registration.read_text(encoding="utf-8"))["marker"],
+                "replacement",
+            )
 
     def test_registration_boundaries_and_exclusive_lock_fail_closed(self):
         instance_id = str(uuid.uuid4())
@@ -1634,6 +1964,11 @@ class RegistrationTests(unittest.TestCase):
             registration_document(
                 instance_id=instance_id, port=1, token=TOKEN, pid=False
             )
+        for invalid_wait in (-0.1, float("nan"), float("inf")):
+            with self.subTest(wait_timeout=invalid_wait), self.assertRaises(ValueError):
+                acquire_registration_ownership(
+                    Path("runtime"), instance_id, wait_timeout=invalid_wait
+                )
 
         with tempfile.TemporaryDirectory() as directory:
             lock_path = Path(directory) / "provider.lock"

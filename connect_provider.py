@@ -43,6 +43,7 @@ from lib.generation import (
 )
 
 DESKTOP_REGISTRATION_TOKEN_ENV = "WEBSITE_GENERATOR_DESKTOP_REGISTRATION_TOKEN"
+REGISTRATION_OWNERSHIP_STARTUP_WAIT_SECONDS = 2.0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -236,7 +237,9 @@ def main(argv: list[str] | None = None) -> int:
         store = ConnectStore(state_dir / "connect-v2.sqlite3")
         try:
             registration_ownership = acquire_registration_ownership(
-                runtime_dir, store.instance_id()
+                runtime_dir,
+                store.instance_id(),
+                wait_timeout=REGISTRATION_OWNERSHIP_STARTUP_WAIT_SECONDS,
             )
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
