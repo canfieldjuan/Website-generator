@@ -882,17 +882,17 @@ the caller.
 
 Local generation uses a two-hour default request deadline because the exact Qwen
 fixture exceeds the former cloud-oriented ten-minute deadline on supported local
-hardware. The OpenAI-compatible client disables automatic retries, so one CLI or
-Connect generation attempt produces exactly one model request instead of silently
-restarting an expensive completion after a read timeout. An explicit
+hardware. The direct Ollama request path does not retry transport failures, so one
+CLI or Connect generation attempt cannot silently restart an expensive completion
+after a read timeout. An explicit
 `GENERATION_TIMEOUT_SECONDS` value still overrides either provider default;
 OpenRouter keeps the existing ten-minute default.
 
-The local OpenAI-compatible adapter requires exactly one choice, a string
-finish reason, a text message, and an object usage record. Any reasoning, tool,
-malformed, or multi-choice output fails closed. The returned finish reason feeds
-the existing normal-completion gate, and the complete-document gate remains the
-final truncation check for HTML.
+The local Ollama adapter requires a completed non-streaming response, text content,
+valid token accounting, and no reasoning or tool-call surface. Malformed or
+incomplete output fails closed. The returned completion reason feeds the existing
+normal-completion gate, and the complete-document gate remains the final truncation
+check for HTML.
 
 ### Full-template timeout correction
 
