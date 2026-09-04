@@ -146,9 +146,13 @@ closing a preview revokes its prior Blob URL.
 - Direct `generation.status` desktop-protocol probe with the UI's local payload:
   returned available for provider `local`, model `qwen3-30b-a3b:latest`, and
   the loopback Ollama base URL.
-- Canonical plumber fixture build completed through local Ollama with
-  `qwen3-30b-a3b:latest`; the required unresolved-placeholder and fabricated-
-  claim scans each returned `0` matches.
+- `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python build.py examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft --skip-deploy`:
+  completed through local Ollama with `qwen3-30b-a3b:latest` after its one
+  bounded correction.
+- `grep -cE '\[TRUST_TRAILER\]|\[SERVICE_PROMISE\]|\[TRADE_DISPLAY\]|\[CITY\]|\[YEARS\]|\[SERVICE_AREA\]' outputs/builds/drees-plumbing-inc/index.html`:
+  printed `0` (no unresolved placeholder matches).
+- `grep -ciE 'Upfront Flat-Rate|Surprise Fees|Free Estimates|Owner Answers' outputs/builds/drees-plumbing-inc/index.html`:
+  printed `0` (no forbidden fabricated-claim matches).
 - Desktop and mobile viewport screenshots: inspected with no horizontal cutoff.
 - `bash scripts/local_pr_review.sh`: passed.
 - `.github/workflows/generator-tests.yml`: parsed as valid YAML. The
