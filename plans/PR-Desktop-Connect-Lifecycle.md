@@ -57,6 +57,8 @@ no packaged implementation, or packaging with no operator-visible proof.
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src/engine.ts`
 - `desktop/src/main.ts`
+- `desktop/src/state.ts`
+- `desktop/src/state.test.ts`
 - `desktop/src/styles.css`
 - `plans/PR-Desktop-Connect-Lifecycle.md`
 - `tests/test_connect_provider.py`
@@ -107,7 +109,9 @@ no packaged implementation, or packaging with no operator-visible proof.
 - Entitlement-status failure is reported independently from managed-process
   state, so it cannot hide a running child or remove the operator's Stop path.
   Start re-reads that authoritative status after readiness instead of returning
-  the preflight entitlement snapshot.
+  the preflight entitlement snapshot. Refresh, activation, and Start share one
+  tested entitlement/provider truth table for their operator message, so a
+  running provider without active access is never presented as available.
 - Standalone generation may disable activation and provider startup while it
   owns the model, but it cannot disable Stop for an already-running provider.
 - A running provider does not disable entitlement replacement, so an
@@ -179,7 +183,7 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 ## Estimated diff size
 
-The final patch contains 1,907 additions and 35 deletions across 12 files for
+The final patch contains 1,938 additions and 35 deletions across 14 files for
 the provider readiness adapter, native lifecycle controller, compact UI
 surface, tests, and Windows smoke step. The provider HTTP contract and
 generation stack are not part of this diff.

@@ -16,6 +16,7 @@ import {
 import {
   AttemptGate,
   clearCloudCredentialOnProviderChange,
+  connectAvailabilityMessage,
   decodeArtifact,
   documentForGeneration,
   emptyProspectFields,
@@ -445,11 +446,7 @@ async function refreshConnectStatus(): Promise<void> {
   try {
     const status = await getConnectStatus();
     applyConnectStatus(status);
-    connectFeedback.textContent = status.provider_running
-      ? "Website generation is available to authenticated local apps."
-      : status.entitlement_active
-        ? "Connect access is active. Start the provider when you want to share this capability."
-        : "Activate Connect with an issuer-signed entitlement file.";
+    connectFeedback.textContent = connectAvailabilityMessage(status);
   } catch (error) {
     connectSnapshot = null;
     connectEntitlement.textContent = "Unavailable";
@@ -546,9 +543,7 @@ connectActivate.addEventListener("click", async () => {
       return;
     }
     applyConnectStatus(status);
-    connectFeedback.textContent = status.entitlement_active
-      ? "Connect access is active. Start the provider when needed."
-      : "The selected entitlement is not active. Choose a current issuer-signed file.";
+    connectFeedback.textContent = connectAvailabilityMessage(status);
   } catch (error) {
     connectFeedback.textContent = connectErrorMessage(error);
   } finally {
@@ -564,7 +559,7 @@ connectStart.addEventListener("click", async () => {
     const status = await startConnect();
     if (!connectAttempts.isCurrent(attempt)) return;
     applyConnectStatus(status);
-    connectFeedback.textContent = "Website generation is available to authenticated local apps.";
+    connectFeedback.textContent = connectAvailabilityMessage(status);
   } catch (error) {
     if (!connectAttempts.isCurrent(attempt)) return;
     connectFeedback.textContent = connectErrorMessage(error);
