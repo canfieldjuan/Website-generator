@@ -136,6 +136,30 @@ python build.py examples/my-prospect.json --generation-provider openrouter --gen
 Output site: `outputs/builds/<slug>/index.html`
 Pitch email draft: `outputs/email_drafts/<slug>.md` (never published to Vercel)
 
+### Use the desktop operator app
+
+The Windows-oriented **Website Generator** app collects the supported prospect
+facts in a form, preserves unknown fields when importing and exporting JSON,
+and previews only the exact HTML artifact admitted by the canonical build
+path. Local generation uses Ollama by default. OpenRouter is an explicit
+per-session choice; its API key is held in memory and is not persisted.
+
+For source development, start Ollama with the configured model available, then
+run the Tauri host. Debug builds invoke `connect_provider.py desktop` directly:
+
+```bash
+cd desktop
+npm ci
+npm run tauri dev
+```
+
+An official Windows package first builds the signed-authority Connect engine,
+copies `website-redesign-connect.exe` into `desktop/src-tauri/resources/`, and
+runs `npm run tauri build`. The resulting current-user NSIS installer contains
+the same engine used by Local Connect; it does not install, start, or download
+Ollama or a model. The CI `windows-connect-package` job performs this assembly
+and publishes the installer together with the standalone engine.
+
 ### Expose local generation through Local Connect
 
 Local Connect exposes one capability: `website.generate.single-page` version

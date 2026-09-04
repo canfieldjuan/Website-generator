@@ -1,0 +1,133 @@
+# Desktop operator UI
+
+## Why this slice exists
+
+Issue #38 now has a bounded engine contract, but the Website Generator still
+requires an operator to understand JSON, terminals, and output paths. The root
+problem is not missing styling; it is the absence of a native workflow that
+collects known business facts, invokes the one canonical admitted-generation
+path, isolates untrusted generated HTML, and saves the exact admitted artifact.
+
+A correct fix must add a Windows-oriented Tauri 2 host, a human-first form with
+lossless JSON import/export, an explicit local-Ollama/OpenRouter session choice,
+child-process lifecycle control, a sandboxed preview, and native save dialogs.
+It must call the existing `desktop` protocol rather than import Python logic or
+create another generation implementation.
+
+This work must not change `build.py`, the HTML admission rules, Local Connect's
+HTTP contract or entitlement behavior, deployment, image generation, pitch
+email generation, model installation/daemon management, billing, or generated
+website semantics.
+
+### Design contract
+
+Subject: a small-business operator's drafting desk. Audience: an operator who
+knows the customer but should not need to know the schema. Single job: turn
+verified prospect facts into one reviewable, savable website.
+
+- Palette: blueprint ink `#102A33`, cool paper `#F4F7F8`, clean sheet
+  `#FCFEFE`, surveyor orange `#F26B38`, status teal `#167C80`, graphite
+  `#4C5B61`.
+- Type: Bahnschrift/Arial Narrow for compact display labels, Segoe UI Variable
+  for working text, and Consolas for machine-facing model or file details. All
+  are offline system stacks; the desktop must not fetch fonts.
+- Layout: a narrow build-progress rail, a fact sheet, and the generated page
+  preview. On narrow windows the fact sheet and preview become explicit tabs;
+  controls must never depend on horizontal scrolling.
+- Signature: a real four-stage build line -- Facts, Generate, Review, Save --
+  whose state reflects the artifact lifecycle rather than acting as decoration.
+- Motion: one restrained progress sweep during generation; respect reduced
+  motion and use no ambient animation.
+
+The common cream/serif landing-page aesthetic was rejected because this is an
+operator tool, not one of the sites it produces. The drafting-desk vocabulary,
+condensed labels, and restrained orange registration marks belong to the work
+being done without competing with the customer preview.
+
+## Scope (this PR)
+
+1. Scaffold a Tauri 2 application under `desktop/` using plain TypeScript and
+   CSS with no frontend framework.
+2. Capture required prospect facts and useful optional contact/services fields;
+   import and export the full prospect JSON without discarding unknown fields.
+3. Default to local Ollama while allowing an explicit OpenRouter model and API
+   key for the current in-memory session only.
+4. Invoke `website-redesign-connect desktop` through a Rust-owned child process,
+   enforce one active generation, bound stdin/stdout, support cancellation, and
+   surface stable engine errors.
+5. Decode the admitted HTML artifact, render it only in a sandboxed preview,
+   and save those exact bytes through a native dialog.
+6. Produce and exercise the native Windows installer using the existing Windows
+   packaging host and approved public entitlement keyring.
+
+### Files touched
+
+- `desktop/package.json`, TypeScript configuration, and Vite configuration
+- `desktop/src/*`
+- `desktop/src-tauri/*`
+- `.github/workflows/generator-tests.yml`
+- `README.md`
+- `plans/PR-Desktop-Operator-UI.md`
+
+## Mechanism
+
+The frontend maintains one in-memory prospect document. Known form fields are
+projected into that document immediately before validation, generation, or
+export, preserving every unknown imported key. Provider credentials live only
+in JavaScript memory, are sent inside the private Tauri IPC request, and are
+cleared when the provider changes or the window closes.
+
+Rust owns all filesystem and process effects. Import/export/save commands open
+native dialogs and enforce bounded UTF-8/HTML payloads. The generation command
+launches the packaged engine with the `desktop` subcommand, writes exactly one
+JSON request to stdin, closes stdin, reads bounded stdout/stderr, and accepts
+only the versioned response envelope. A shared application-state slot rejects a
+second generation and lets cancellation terminate the current child. Debug
+builds locate the source checkout and Python entry point; packaged builds use
+the bundled engine executable.
+
+The preview receives a Blob URL generated from admitted bytes and uses an iframe
+with an empty `sandbox` token set. Generated scripts therefore cannot execute,
+navigate the app, submit forms, or inherit the desktop origin. Replacing or
+closing a preview revokes its prior Blob URL.
+
+## Intentional
+
+- The form covers the fields an operator can reasonably enter by hand; JSON
+  remains the lossless handoff for richer or future schema fields.
+- Trade stays limited to the three values already supported by the build
+  contract. This UI does not pretend arbitrary trade schemas are accepted.
+- Local generation is the default. OpenRouter is an explicit per-session
+  choice, never a fallback, and its key is never stored.
+- Preview controls do not edit generated HTML. Regeneration is the only path to
+  a different artifact, preserving the admitted output as source of truth.
+- Installer code signing and an auto-updater are not prerequisites for a local
+  Windows acceptance build.
+
+## Deferred
+
+- Email/spec-sheet ingestion and Document Summarizer handoff.
+- Deployment, domain setup, image generation, pitch email, and website editing.
+- Persistent OpenRouter credentials, model download/daemon management, billing,
+  updater, installer signing, macOS/Linux distribution, and telemetry.
+- Built-in entitlement activation and managed Local Connect lifecycle; those are
+  issue #38 slice 3.
+
+## Verification
+
+- Frontend typecheck and production build.
+- Frontend state/protocol tests, including unknown-field preservation, provider
+  credential clearing, exact artifact decode, and stale-result rejection.
+- Rust format, unit tests, and Clippy with warnings denied.
+- Tauri development build against the source engine.
+- Existing Python suite and compile gate remain green.
+- Windows installer build and smoke launch on the available Windows VM, plus a
+  no-write local status check and one designated fixture generation.
+- `bash scripts/local_pr_review.sh` after commit.
+
+## Estimated diff size
+
+Approximately 1,200 added lines across the native host, operator UI, tests, and
+packaging configuration. This exceeds the soft 400-line target because a visual
+mock without process, preview, save, and Windows packaging proof would not be an
+end-to-end operator slice. The Connect lifecycle remains a separate PR.
