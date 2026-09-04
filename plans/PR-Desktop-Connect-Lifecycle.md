@@ -75,6 +75,9 @@ no packaged implementation, or packaging with no operator-visible proof.
 - The child is recorded as starting before Rust waits for readiness and no
   provider mutex is held across that wait. Close/Stop can therefore signal or
   force-reap a slow preflight instead of waiting for the startup deadline.
+- A monotonic start attempt is created before entitlement preflight. Stop or
+  Close invalidates that attempt before checking for a child, so a cancelled
+  preflight cannot later spawn an untracked provider.
 - Stop and normal window close kill and wait for only the child held by this
   application instance. The desktop does not discover or terminate a
   separately launched provider.
@@ -82,6 +85,9 @@ no packaged implementation, or packaging with no operator-visible proof.
   state, so it cannot hide a running child or remove the operator's Stop path.
 - Standalone generation may disable activation and provider startup while it
   owns the model, but it cannot disable Stop for an already-running provider.
+- The UI exposes Stop while startup is pending. Stopping supersedes the
+  in-flight start response so late success or failure cannot overwrite the
+  authoritative stopped state.
 - Window focus refreshes the managed child status, so an unexpected provider
   exit is reconciled before the operator next relies on the displayed state.
 - The app never sends an OpenRouter setting or API key into Connect. Connect
@@ -119,12 +125,12 @@ no packaged implementation, or packaging with no operator-visible proof.
 - `npm test` from `desktop/`: 1 test file passed, 14 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
 - `cargo fmt --check` from `desktop/src-tauri/`: passed.
-- `cargo test` from `desktop/src-tauri/`: 21 tests passed. The lifecycle cases
+- `cargo test` from `desktop/src-tauri/`: 22 tests passed. The lifecycle cases
   cover exact/bounded readiness, inactive entitlement, duplicate start,
-  timeout and early-exit cleanup, cancellation during the readiness wait,
-  graceful stop/reap, and reconciled state after a forced fallback, plus
-  independent provider state when entitlement status is unavailable. The
-  Windows run adds the process-tree cancellation regression.
+  timeout and early-exit cleanup, cancellation before spawn and during the
+  readiness wait, graceful stop/reap, and reconciled state after a forced
+  fallback, plus independent provider state when entitlement status is
+  unavailable. The Windows run adds the process-tree cancellation regression.
 - `cargo clippy --all-targets --all-features -- -D warnings` from
   `desktop/src-tauri/`: passed.
 - `python connect_provider.py entitlement status`: returned the expected

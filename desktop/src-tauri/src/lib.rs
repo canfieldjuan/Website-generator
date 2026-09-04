@@ -6,7 +6,7 @@ use std::{
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -60,6 +60,7 @@ struct DesktopState {
     engine_phase: AtomicU8,
     artifact: Mutex<Option<CachedArtifact>>,
     provider: Mutex<Option<ManagedProvider>>,
+    provider_attempt: AtomicU64,
 }
 
 #[derive(Serialize)]
@@ -580,12 +581,32 @@ fn require_active_entitlement(entitlement: &EntitlementStatus) -> Result<(), Str
     Ok(())
 }
 
+fn begin_provider_start(state: &DesktopState) -> u64 {
+    state
+        .provider_attempt
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1)
+}
+
+fn cancel_provider_start(state: &DesktopState) {
+    state.provider_attempt.fetch_add(1, Ordering::SeqCst);
+}
+
+fn require_current_provider_start(state: &DesktopState, attempt: u64) -> Result<(), String> {
+    if state.provider_attempt.load(Ordering::SeqCst) != attempt {
+        return Err("The Local Connect provider start was cancelled.".to_owned());
+    }
+    Ok(())
+}
+
 fn launch_managed_provider(
     mut command: Command,
     state: &DesktopState,
     startup_timeout: Duration,
+    attempt: u64,
 ) -> Result<bool, String> {
     let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    require_current_provider_start(state, attempt)?;
     if let Some(provider) = slot.as_mut() {
         if provider
             .child
@@ -664,11 +685,13 @@ fn launch_managed_provider(
 }
 
 fn start_connect_provider(app: &AppHandle, state: &DesktopState) -> Result<ConnectStatus, String> {
+    let attempt = begin_provider_start(state);
     let entitlement = read_entitlement_status(app)?;
     require_active_entitlement(&entitlement)?;
+    require_current_provider_start(state, attempt)?;
     let mut command = base_engine_command(app)?;
     command.args(["serve", "--desktop-managed"]);
-    launch_managed_provider(command, state, CONNECT_STARTUP_TIMEOUT)?;
+    launch_managed_provider(command, state, CONNECT_STARTUP_TIMEOUT, attempt)?;
     Ok(ConnectStatus {
         entitlement_state: entitlement.state,
         entitlement_active: true,
@@ -681,6 +704,7 @@ fn stop_connect_provider_with_timeout(
     state: &DesktopState,
     shutdown_timeout: Duration,
 ) -> Result<bool, String> {
+    cancel_provider_start(state);
     let mut slot = state.provider.lock().map_err(|_| lock_error())?;
     let Some(provider) = slot.as_mut() else {
         return Ok(false);
@@ -1528,11 +1552,23 @@ mod tests {
         let provider = fixture_provider(
             "import os, sys; print('{\"ready\":true}', flush=True); os.close(sys.stdout.fileno()); sys.stdin.readline()",
         );
-        assert!(launch_managed_provider(provider, &state, Duration::from_secs(2)).unwrap());
+        let attempt = begin_provider_start(&state);
+        assert!(
+            launch_managed_provider(provider, &state, Duration::from_secs(2), attempt).unwrap()
+        );
         assert!(provider_is_running(&state).unwrap());
 
         let duplicate = Command::new("executable-that-must-not-be-started");
-        assert!(!launch_managed_provider(duplicate, &state, Duration::from_millis(1)).unwrap());
+        let duplicate_attempt = begin_provider_start(&state);
+        assert!(
+            !launch_managed_provider(
+                duplicate,
+                &state,
+                Duration::from_millis(1),
+                duplicate_attempt,
+            )
+            .unwrap()
+        );
 
         assert!(stop_connect_provider(&state).unwrap());
         assert!(!provider_is_running(&state).unwrap());
@@ -1543,23 +1579,42 @@ mod tests {
     fn managed_provider_timeout_and_early_exit_leave_no_child() {
         let state = DesktopState::default();
         let timeout = fixture_provider("import time; time.sleep(2)");
-        let error =
-            launch_managed_provider(timeout, &state, Duration::from_millis(20)).unwrap_err();
+        let attempt = begin_provider_start(&state);
+        let error = launch_managed_provider(timeout, &state, Duration::from_millis(20), attempt)
+            .unwrap_err();
         assert!(error.contains("ready in time"));
         assert!(!provider_is_running(&state).unwrap());
 
         let early_exit = fixture_provider("pass");
-        assert!(launch_managed_provider(early_exit, &state, Duration::from_secs(2)).is_err());
+        let attempt = begin_provider_start(&state);
+        assert!(
+            launch_managed_provider(early_exit, &state, Duration::from_secs(2), attempt).is_err()
+        );
         assert!(!provider_is_running(&state).unwrap());
+    }
+
+    #[test]
+    fn cancelled_provider_attempt_cannot_spawn_a_child() {
+        let state = DesktopState::default();
+        let attempt = begin_provider_start(&state);
+        cancel_provider_start(&state);
+
+        let command = Command::new("executable-that-must-not-be-started");
+        let error =
+            launch_managed_provider(command, &state, Duration::from_secs(2), attempt).unwrap_err();
+
+        assert!(error.contains("cancelled"));
+        assert!(state.provider.lock().unwrap().is_none());
     }
 
     #[test]
     fn managed_provider_can_be_stopped_while_starting() {
         let state = Arc::new(DesktopState::default());
         let start_state = state.clone();
+        let attempt = begin_provider_start(&state);
         let start = thread::spawn(move || {
             let provider = fixture_provider("import time; time.sleep(2)");
-            launch_managed_provider(provider, &start_state, Duration::from_secs(2))
+            launch_managed_provider(provider, &start_state, Duration::from_secs(2), attempt)
         });
 
         let registration_deadline = Instant::now() + Duration::from_secs(1);
@@ -1583,7 +1638,10 @@ mod tests {
         let provider = fixture_provider(
             "import os, sys, time; print('{\"ready\":true}', flush=True); os.close(sys.stdout.fileno()); time.sleep(2)",
         );
-        assert!(launch_managed_provider(provider, &state, Duration::from_secs(2)).unwrap());
+        let attempt = begin_provider_start(&state);
+        assert!(
+            launch_managed_provider(provider, &state, Duration::from_secs(2), attempt).unwrap()
+        );
 
         assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).unwrap());
         assert!(!provider_is_running(&state).unwrap());

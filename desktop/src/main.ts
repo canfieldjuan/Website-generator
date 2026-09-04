@@ -268,8 +268,10 @@ let previewUrl: string | null = null;
 let busy = false;
 let activeGeneration: Promise<void> | null = null;
 let connectBusy = false;
+let connectStarting = false;
 let connectSnapshot: ConnectStatus | null = null;
 const attempts = new AttemptGate();
+const connectAttempts = new AttemptGate();
 const editedProspectFields = new Set<ProspectFieldKey>();
 
 preview.addEventListener("load", () => {
@@ -416,7 +418,7 @@ function renderConnectControls(): void {
   const running = connectSnapshot?.provider_running === true;
   connectActivate.disabled = busy || connectBusy || running;
   connectStart.disabled = busy || connectBusy || inactive || running;
-  connectStop.disabled = connectBusy || !running;
+  connectStop.disabled = connectBusy ? !connectStarting : !running;
 }
 
 function applyConnectStatus(status: ConnectStatus): void {
@@ -426,8 +428,9 @@ function applyConnectStatus(status: ConnectStatus): void {
   renderConnectControls();
 }
 
-function setConnectBusy(value: boolean): void {
+function setConnectBusy(value: boolean, starting = false): void {
   connectBusy = value;
+  connectStarting = value && starting;
   renderConnectControls();
 }
 
@@ -554,30 +557,36 @@ connectActivate.addEventListener("click", async () => {
 });
 
 connectStart.addEventListener("click", async () => {
-  setConnectBusy(true);
+  const attempt = connectAttempts.begin();
+  setConnectBusy(true, true);
   connectFeedback.textContent = "Starting the Local Connect provider…";
   try {
     const status = await startConnect();
+    if (!connectAttempts.isCurrent(attempt)) return;
     applyConnectStatus(status);
     connectFeedback.textContent = "Website generation is available to authenticated local apps.";
   } catch (error) {
+    if (!connectAttempts.isCurrent(attempt)) return;
     connectFeedback.textContent = connectErrorMessage(error);
   } finally {
-    setConnectBusy(false);
+    if (connectAttempts.isCurrent(attempt)) setConnectBusy(false);
   }
 });
 
 connectStop.addEventListener("click", async () => {
+  const attempt = connectAttempts.begin();
   setConnectBusy(true);
   connectFeedback.textContent = "Stopping the Local Connect provider…";
   try {
     const status = await stopConnect();
+    if (!connectAttempts.isCurrent(attempt)) return;
     applyConnectStatus(status);
     connectFeedback.textContent = "Local Connect stopped. Standalone generation is still available.";
   } catch (error) {
+    if (!connectAttempts.isCurrent(attempt)) return;
     connectFeedback.textContent = connectErrorMessage(error);
   } finally {
-    setConnectBusy(false);
+    if (connectAttempts.isCurrent(attempt)) setConnectBusy(false);
   }
 });
 
