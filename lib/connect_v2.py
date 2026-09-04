@@ -879,7 +879,7 @@ def _read_posix_registration(
 
     directory_fd = os.open(
         path.parent,
-        os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY,
     )
     descriptor: int | None = None
     try:

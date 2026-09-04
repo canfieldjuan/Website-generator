@@ -40,8 +40,10 @@ filename relative to that descriptor with `O_NOFOLLOW`, `O_NONBLOCK`, and
 `O_CLOEXEC`. It admits only a regular file no larger than the existing
 registration limit, reads at most that limit plus one byte, and compares the
 opened descriptor before/after the read and against the still-visible pathname.
-Only admitted bytes reach JSON and token validation. Windows keeps its existing
-ACL-aware bounded reader.
+The parent-directory open preserves supported symlinked runtime-directory
+overrides; only the final registration entry is no-follow. Only admitted bytes
+reach JSON and token validation. Windows keeps its existing ACL-aware bounded
+reader.
 
 ## Intentional
 
@@ -66,8 +68,9 @@ ACL-aware bounded reader.
   and removed a final symlink, removed an oversized registration, and blocked
   while opening a FIFO.
 - `python -m unittest -v tests.test_connect_provider.RegistrationTests` passed
-  16 tests, including exact-size/max-plus-one, mixed valid/unsafe candidates,
-  stable I/O failure propagation, and replacement-before-unlink boundaries.
+  17 tests, including exact-size/max-plus-one, mixed valid/unsafe candidates,
+  stable I/O failure propagation, replacement-before-unlink boundaries, and
+  both cleanup paths through a symlinked runtime-directory override.
 - With `CONNECT_CONTRACTS_DIR=/home/juan-canfield/Desktop/connect-contracts`,
   `python -m unittest -v tests.test_connect_provider` passed 72 tests.
 - With the same contract directory, `python -m unittest discover -s tests`
@@ -89,7 +92,7 @@ ACL-aware bounded reader.
 
 ## Estimated diff size
 
-The current diff contains 470 added lines and 67 removed lines across one reader, its full
+The current diff contains 493 added lines and 67 removed lines across one reader, its full
 boundary matrix, and this plan. This exceeds the 400-line soft target because
 the guard and its pass/fail, mixed-object, numeric-boundary, blocking, and race
 probes are one indivisible safety change; splitting the tests would publish an

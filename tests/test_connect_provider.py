@@ -1609,6 +1609,29 @@ class RegistrationTests(unittest.TestCase):
             self.assertTrue(fifo_path.exists())
             self.assertTrue(oversized_path.exists())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX registration boundary")
+    def test_registration_cleanup_supports_symlinked_runtime_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_runtime = root / "real-runtime"
+            real_runtime.mkdir()
+            runtime = root / "runtime"
+            runtime.symlink_to(real_runtime, target_is_directory=True)
+
+            direct_document = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            direct_path = write_registration(runtime, direct_document)
+            self.assertTrue(remove_registration_if_owned(direct_path, TOKEN))
+            self.assertFalse(direct_path.exists())
+
+            scanned_document = registration_document(
+                instance_id=str(uuid.uuid4()), port=43128, token=TOKEN, pid=4243
+            )
+            scanned_path = write_registration(runtime, scanned_document)
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(scanned_path.exists())
+
     def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"
