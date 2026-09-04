@@ -15,6 +15,7 @@ from lib.generation import (
     DEFAULT_DOCUMENT_ACCENT,
     DEFAULT_DOCUMENT_SECONDARY,
     DEFAULT_LOCAL_BASE_URL,
+    DEFAULT_LOCAL_CONTEXT_TOKENS,
     DEFAULT_LOCAL_MODEL,
     DEFAULT_LOCAL_TIMEOUT_SECONDS,
     DEFAULT_MAX_OUTPUT_TOKENS,
@@ -217,50 +218,45 @@ class FakeLocalClient:
         *,
         health_payload=_UNSET,
         models_payload=_UNSET,
+        show_payload=_UNSET,
         health_status_error=None,
         models_status_error=None,
+        show_status_error=None,
         chat_status_error=None,
         chat_json_error=None,
         health_status_code=200,
         models_status_code=200,
+        show_status_code=200,
         chat_status_code=200,
     ):
         self.calls = []
         self.health_response = FakeLocalResponse(
-            {"status": "ok"} if health_payload is _UNSET else health_payload,
+            {"version": "0.24.0"} if health_payload is _UNSET else health_payload,
             status_error=health_status_error,
             status_code=health_status_code,
         )
         self.models_response = FakeLocalResponse(
-            {
-                "object": "list",
-                "data": [{"id": DEFAULT_LOCAL_MODEL, "object": "model"}],
-            }
+            {"models": [{"name": DEFAULT_LOCAL_MODEL, "model": DEFAULT_LOCAL_MODEL}]}
             if models_payload is _UNSET
             else models_payload,
             status_error=models_status_error,
             status_code=models_status_code,
         )
+        self.show_response = FakeLocalResponse(
+            {"model_info": {"qwen3moe.context_length": 262144}}
+            if show_payload is _UNSET
+            else show_payload,
+            status_error=show_status_error,
+            status_code=show_status_code,
+        )
         self.chat_response = FakeLocalResponse(
             {
-                "id": "chatcmpl-test",
-                "object": "chat.completion",
                 "model": DEFAULT_LOCAL_MODEL,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": COMPLETE_HTML,
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 12,
-                    "completion_tokens": 8,
-                    "total_tokens": 20,
-                },
+                "message": {"role": "assistant", "content": COMPLETE_HTML},
+                "done": True,
+                "done_reason": "stop",
+                "prompt_eval_count": 12,
+                "eval_count": 8,
             }
             if chat_payload is _UNSET
             else chat_payload,
@@ -271,30 +267,28 @@ class FakeLocalClient:
 
     def get(self, url, **kwargs):
         self.calls.append(("GET", url, kwargs))
-        if url.endswith("/health"):
+        if url.endswith("/api/version"):
             return self.health_response
-        if url.endswith("/v1/models"):
+        if url.endswith("/api/tags"):
             return self.models_response
         raise AssertionError(f"unexpected local GET URL: {url}")
 
     def post(self, url, **kwargs):
         self.calls.append(("POST", url, kwargs))
+        if url.endswith("/api/show"):
+            return self.show_response
+        if not url.endswith("/api/chat"):
+            raise AssertionError(f"unexpected local POST URL: {url}")
         return self.chat_response
 
 
 def local_chat_payload(content=COMPLETE_HTML, finish_reason="stop", **message_fields):
     return {
-        "choices": [
-            {
-                "message": {"content": content, **message_fields},
-                "finish_reason": finish_reason,
-            }
-        ],
-        "usage": {
-            "prompt_tokens": 12,
-            "completion_tokens": 8,
-            "total_tokens": 20,
-        },
+        "message": {"content": content, **message_fields},
+        "done": True,
+        "done_reason": finish_reason,
+        "prompt_eval_count": 12,
+        "eval_count": 8,
     }
 
 
@@ -368,7 +362,7 @@ class GenerationConfigTests(unittest.TestCase):
 
         self.assertEqual(selected.model, "local/from-cli")
 
-    def test_vllm_endpoint_aliases_are_supported(self):
+    def test_vllm_endpoint_aliases_no_longer_select_the_local_runtime(self):
         with patch.dict(
             os.environ,
             {
@@ -379,8 +373,8 @@ class GenerationConfigTests(unittest.TestCase):
         ):
             selected = resolve_generation_config()
 
-        self.assertEqual(selected.base_url, "http://127.0.0.1:4321/v1")
-        self.assertEqual(selected.api_key, "local-key")
+        self.assertEqual(selected.base_url, DEFAULT_LOCAL_BASE_URL)
+        self.assertNotEqual(selected.api_key, "local-key")
 
     def test_legacy_runtime_aliases_no_longer_select_the_local_runtime(self):
         with patch.dict(
@@ -993,7 +987,7 @@ class ProviderBoundaryTests(unittest.TestCase):
     def test_local_preflight_accepts_exact_loaded_model(self):
         selected = config()
         client = FakeLocalClient(
-            models_payload={"data": [{"id": selected.model}]},
+            models_payload={"models": [{"name": selected.model}]},
         )
 
         preflight_generation_provider(selected, client=client)
@@ -1001,11 +995,12 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(
             [call[:2] for call in client.calls],
             [
-                ("GET", "http://127.0.0.1:8000/health"),
-                ("GET", "http://127.0.0.1:8000/v1/models"),
+                ("GET", "http://127.0.0.1:11434/api/version"),
+                ("GET", "http://127.0.0.1:11434/api/tags"),
+                ("POST", "http://127.0.0.1:11434/api/show"),
             ],
         )
-        self.assertEqual(client.health_response.json_calls, 0)
+        self.assertEqual(client.health_response.json_calls, 1)
         self.assertTrue(
             all(call[2]["allow_redirects"] is False for call in client.calls)
         )
@@ -1027,11 +1022,11 @@ class ProviderBoundaryTests(unittest.TestCase):
     def test_local_preflight_rejects_missing_model_with_start_instruction(self):
         selected = config()
         client = FakeLocalClient(
-            models_payload={"data": [{"id": "some/other-model"}]},
+            models_payload={"models": [{"name": "some/other-model"}]},
         )
 
         with self.assertRaisesRegex(
-            GenerationProviderUnavailable, "scripts/start_vllm_server.sh"
+            GenerationProviderUnavailable, "Ollama"
         ):
             preflight_generation_provider(selected, client=client)
 
@@ -1039,30 +1034,41 @@ class ProviderBoundaryTests(unittest.TestCase):
         selected = config()
         client = FakeLocalClient(health_status_error=ConnectionError("offline"))
 
-        with self.assertRaisesRegex(GenerationProviderUnavailable, "standalone vLLM"):
+        with self.assertRaisesRegex(GenerationProviderUnavailable, "Start Ollama"):
             preflight_generation_provider(selected, client=client)
 
-    def test_local_preflight_accepts_empty_vllm_health_body(self):
+    def test_local_preflight_accepts_ollama_version_and_exact_model(self):
         selected = config()
-        client = FakeLocalClient(health_payload=None)
+        client = FakeLocalClient(health_payload={"version": "0.24.0"})
 
         preflight_generation_provider(selected, client=client)
 
         self.assertEqual(
             [call[:2] for call in client.calls],
             [
-                ("GET", "http://127.0.0.1:8000/health"),
-                ("GET", "http://127.0.0.1:8000/v1/models"),
+                ("GET", "http://127.0.0.1:11434/api/version"),
+                ("GET", "http://127.0.0.1:11434/api/tags"),
+                ("POST", "http://127.0.0.1:11434/api/show"),
             ],
         )
-        self.assertEqual(client.health_response.json_calls, 0)
+        self.assertEqual(client.health_response.json_calls, 1)
+
+    def test_local_preflight_rejects_non_ollama_runtime_shape(self):
+        for payload in (None, {}, {"version": ""}, {"version": 24}):
+            with self.subTest(payload=payload):
+                client = FakeLocalClient(health_payload=payload)
+                with self.assertRaisesRegex(
+                    GenerationProviderUnavailable, "Start Ollama"
+                ):
+                    preflight_generation_provider(config(), client=client)
+                self.assertEqual(len(client.calls), 1)
 
     def test_local_preflight_rejects_redirect_without_following_it(self):
         client = FakeLocalClient(health_status_code=307)
 
         with self.assertRaisesRegex(
             GenerationProviderUnavailable,
-            "standalone vLLM",
+            "Start Ollama",
         ):
             preflight_generation_provider(config(), client=client)
 
@@ -1071,10 +1077,21 @@ class ProviderBoundaryTests(unittest.TestCase):
 
     def test_local_preflight_rejects_malformed_model_identity(self):
         selected = config()
-        client = FakeLocalClient(models_payload={"data": [{"id": None}]})
+        client = FakeLocalClient(models_payload={"models": [{"name": None}]})
 
-        with self.assertRaisesRegex(GenerationProviderUnavailable, "standalone vLLM"):
+        with self.assertRaisesRegex(GenerationProviderUnavailable, "Start Ollama"):
             preflight_generation_provider(selected, client=client)
+
+    def test_local_preflight_rejects_model_below_required_context(self):
+        client = FakeLocalClient(
+            show_payload={"model_info": {"small.context_length": 32768}}
+        )
+
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            str(DEFAULT_LOCAL_CONTEXT_TOKENS),
+        ):
+            preflight_generation_provider(config(), client=client)
 
     def test_local_request_uses_plain_content_without_cloud_cache_metadata(self):
         client = FakeLocalClient()
@@ -1093,7 +1110,7 @@ class ProviderBoundaryTests(unittest.TestCase):
 
         method, url, call = client.calls[0]
         self.assertEqual(method, "POST")
-        self.assertEqual(url, "http://127.0.0.1:8000/v1/chat/completions")
+        self.assertEqual(url, "http://127.0.0.1:11434/api/chat")
         self.assertEqual(
             call["json"]["messages"],
             [
@@ -1101,11 +1118,18 @@ class ProviderBoundaryTests(unittest.TestCase):
                 {"role": "user", "content": "static\n\nvariable"},
             ],
         )
-        self.assertEqual(
-            call["json"]["chat_template_kwargs"],
-            {"enable_thinking": False},
-        )
+        self.assertIs(call["json"]["think"], False)
+        self.assertNotIn("chat_template_kwargs", call["json"])
         self.assertNotIn("reasoning_format", call["json"])
+        self.assertEqual(
+            call["json"]["options"],
+            {
+                "temperature": 0.4,
+                "seed": 0,
+                "num_predict": config().max_output_tokens,
+                "num_ctx": DEFAULT_LOCAL_CONTEXT_TOKENS,
+            },
+        )
         self.assertIs(call["json"]["stream"], False)
         self.assertEqual(call["timeout"], config().timeout_seconds)
         self.assertIs(call["allow_redirects"], False)
@@ -1123,13 +1147,11 @@ class ProviderBoundaryTests(unittest.TestCase):
         )
         client = FakeLocalClient(
             {
-                "choices": [
-                    {
-                        "message": {"content": COMPLETE_HTML},
-                        "finish_reason": "length",
-                    }
-                ],
-                "usage": {"completion_tokens": 8},
+                "message": {"content": COMPLETE_HTML},
+                "done": True,
+                "done_reason": "length",
+                "prompt_eval_count": 12,
+                "eval_count": 8,
             }
         )
 
@@ -1163,7 +1185,7 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 1)
         self.assertIs(client.calls[0][2]["allow_redirects"], False)
 
-    def test_local_request_rejects_multiple_choices(self):
+    def test_local_request_rejects_openai_compatibility_response_shape(self):
         client = FakeLocalClient(
             {
                 "choices": [
@@ -1180,7 +1202,7 @@ class ProviderBoundaryTests(unittest.TestCase):
             }
         )
 
-        with self.assertRaisesRegex(GenerationResponseError, "exactly one choice"):
+        with self.assertRaisesRegex(GenerationResponseError, "incomplete"):
             generate_text(
                 config(),
                 system_prompt="system",
@@ -1193,7 +1215,7 @@ class ProviderBoundaryTests(unittest.TestCase):
         invalid_messages = {
             "reasoning": {
                 "content": COMPLETE_HTML,
-                "reasoning_content": "hidden work",
+                "thinking": "hidden work",
             },
             "tool call": {
                 "content": COMPLETE_HTML,
@@ -1204,10 +1226,11 @@ class ProviderBoundaryTests(unittest.TestCase):
             with self.subTest(label=label):
                 client = FakeLocalClient(
                     {
-                        "choices": [
-                            {"message": message, "finish_reason": "stop"}
-                        ],
-                        "usage": {"completion_tokens": 8},
+                        "message": message,
+                        "done": True,
+                        "done_reason": "stop",
+                        "prompt_eval_count": 12,
+                        "eval_count": 8,
                     }
                 )
                 with self.assertRaises(GenerationResponseError):
@@ -1219,19 +1242,16 @@ class ProviderBoundaryTests(unittest.TestCase):
                         client=client,
                     )
 
-    def test_local_request_rejects_missing_usage_object(self):
+    def test_local_request_rejects_missing_token_accounting(self):
         client = FakeLocalClient(
             {
-                "choices": [
-                    {
-                        "message": {"content": COMPLETE_HTML},
-                        "finish_reason": "stop",
-                    }
-                ]
+                "message": {"content": COMPLETE_HTML},
+                "done": True,
+                "done_reason": "stop",
             }
         )
 
-        with self.assertRaisesRegex(GenerationResponseError, "usage object"):
+        with self.assertRaisesRegex(GenerationResponseError, "token accounting"):
             generate_text(
                 config(),
                 system_prompt="system",
@@ -1240,7 +1260,7 @@ class ProviderBoundaryTests(unittest.TestCase):
                 client=client,
             )
 
-    def test_local_request_rejects_invalid_vllm_base_url_before_dispatch(self):
+    def test_local_request_rejects_invalid_ollama_base_url_before_dispatch(self):
         invalid_urls = {
             "wrong path": "http://127.0.0.1:8080/not-v1",
             "LM Studio native path": "http://127.0.0.1:8080/api/v1",
@@ -1278,15 +1298,15 @@ class ProviderBoundaryTests(unittest.TestCase):
         valid_urls = {
             "IPv4 root": (
                 "http://127.0.0.1:8080",
-                "http://127.0.0.1:8080/v1/chat/completions",
+                "http://127.0.0.1:8080/api/chat",
             ),
             "localhost versioned": (
                 "http://localhost:8080/v1/",
-                "http://localhost:8080/v1/chat/completions",
+                "http://localhost:8080/api/chat",
             ),
             "IPv6 versioned": (
                 "http://[::1]:8080/v1",
-                "http://[::1]:8080/v1/chat/completions",
+                "http://[::1]:8080/api/chat",
             ),
         }
         for label, (base_url, expected_endpoint) in valid_urls.items():
@@ -1355,7 +1375,11 @@ class ProviderBoundaryTests(unittest.TestCase):
         retry_parts = generator.call_args_list[1].kwargs["user_parts"]
         self.assertEqual(retry_parts[0], original_part)
         self.assertIn("misnested closing tag", retry_parts[-1].text)
-        self.assertIn("<body><div></body>", retry_parts[-1].text)
+        self.assertNotIn("<body><div></body>", retry_parts[-1].text)
+        self.assertIn(
+            "Do not reuse or extend the previously rejected markup",
+            retry_parts[-1].text,
+        )
         self.assertTrue(generator.call_args_list[1].kwargs["cache_system_prompt"])
 
     def test_second_local_admission_failure_is_terminal(self):
@@ -2394,6 +2418,32 @@ class HtmlAdmissionTests(unittest.TestCase):
 
 
 class PromptContractTests(unittest.TestCase):
+    def test_build_prompt_exposes_only_the_admitted_review_branch(self):
+        prompt = Path("references/06-build-prompt.md").read_text(encoding="utf-8")
+        cases = (
+            ("omit", "**Branch C", ("reviews-cta", "review-card")),
+            ("aggregate", "**Branch B", ("review-card", "reviews-summary-cta")),
+            ("cards", "**Branch A", ("reviews-aggregate", "reviews-cta")),
+        )
+        for mode, required, forbidden in cases:
+            with self.subTest(mode=mode):
+                filtered = build.filter_review_prompt_branches(prompt, mode)
+                self.assertIn(required, filtered)
+                for value in forbidden:
+                    self.assertNotIn(value, filtered)
+                self.assertNotIn("REVIEW_BRANCH_", filtered)
+
+    def test_review_prompt_filter_fails_closed_when_markers_drift(self):
+        prompt = Path("references/06-build-prompt.md").read_text(encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "one ordered marker"):
+            build.filter_review_prompt_branches(
+                prompt.replace("<!-- REVIEW_BRANCH_B_END -->", ""),
+                "omit",
+            )
+        with self.assertRaisesRegex(ValueError, "Unknown review"):
+            build.filter_review_prompt_branches(prompt, "surprise")
+
     def test_every_wired_html_prompt_requires_body_only_output(self):
         for prompt_path in (
             Path("references/02-redesign-gen-prompt.md"),
@@ -2573,7 +2623,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("[VERCEL_URL_PLACEHOLDER]", draft)
         request = next(call for call in client.calls if call[0] == "POST")
         self.assertEqual(
-            request[2]["json"]["max_tokens"],
+            request[2]["json"]["options"]["num_predict"],
             MAX_SHORT_TEXT_OUTPUT_TOKENS,
         )
 

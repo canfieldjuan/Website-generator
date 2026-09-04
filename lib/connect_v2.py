@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import hmac
 import ipaddress
@@ -20,7 +19,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import unquote_to_bytes, urlsplit
+from urllib.parse import urlsplit
 
 try:
     import fcntl
@@ -32,7 +31,6 @@ from fastapi.responses import JSONResponse
 from python_multipart import MultipartParser
 from python_multipart.multipart import parse_options_header
 
-import build
 from lib.connect_entitlement import EntitlementGate
 from lib.connect_windows import (
     WindowsFileLock,
@@ -62,6 +60,11 @@ from lib.generation import (
     GenerationResponseError,
     resolve_generation_config,
 )
+from lib.site_artifact import (
+    MAX_PROSPECT_BYTES as MAX_INPUT_BYTES,
+    generate_prepared_site_artifact,
+    prepare_site_prospect,
+)
 
 
 PROTOCOL_VERSION = 2
@@ -72,7 +75,6 @@ CAPABILITY_ID = "website.generate.single-page"
 CAPABILITY_VERSION = "1.0"
 INPUT_MEDIA_TYPE = "application/json"
 OUTPUT_MEDIA_TYPE = "text/html"
-MAX_INPUT_BYTES = 200_000
 MAX_REQUEST_BYTES = 65_536
 MAX_MULTIPART_BYTES = MAX_INPUT_BYTES + MAX_REQUEST_BYTES + 65_536
 TOKEN_BYTES = 48
@@ -238,9 +240,8 @@ class ProviderRuntime:
                     job_id,
                     code="MODEL_RUNTIME_UNAVAILABLE",
                     message=(
-                        "Local Qwen generation is unavailable; start standalone "
-                        f"vLLM for {DEFAULT_LOCAL_MODEL} with "
-                        "scripts/start_vllm_server.sh."
+                        "Local generation is unavailable; start Ollama and load "
+                        f"{DEFAULT_LOCAL_MODEL}."
                     ),
                     retryable=True,
                 )
@@ -672,93 +673,10 @@ def resolve_connect_generation_config() -> GenerationConfig:
     return replace(config, trust_env=False)
 
 
-def _has_usable_hero_photo(prospect: dict[str, Any]) -> bool:
-    photos = prospect.get("photos")
-    if not isinstance(photos, list):
-        return False
-    return any(
-        isinstance(photo, dict)
-        and photo.get("context") == "hero"
-        and _is_connect_accessible_image_url(photo.get("url"))
-        for photo in photos
-    )
-
-
-def _is_connect_accessible_image_url(value: Any) -> bool:
-    if not isinstance(value, str) or not value.strip():
-        return False
-    candidate = value.strip()
-    try:
-        parsed = urlsplit(candidate)
-    except ValueError:
-        return False
-    if parsed.scheme.lower() in {"http", "https"}:
-        try:
-            hostname = parsed.hostname
-            parsed.port
-        except ValueError:
-            return False
-        if not hostname or any(character.isspace() for character in hostname):
-            return False
-        try:
-            ascii_hostname = hostname.encode("idna").decode("ascii").rstrip(".")
-        except UnicodeError:
-            return False
-        if not ascii_hostname or len(ascii_hostname) > 253:
-            return False
-        try:
-            ipaddress.ip_address(ascii_hostname)
-        except ValueError:
-            labels = ascii_hostname.split(".")
-            if any(
-                not re.fullmatch(
-                    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?",
-                    label,
-                )
-                for label in labels
-            ):
-                return False
-        return True
-    if parsed.scheme.lower() == "data":
-        header, separator, payload = candidate.partition(",")
-        metadata = header[5:].split(";")
-        if (
-            not separator
-            or not metadata[0].lower().startswith("image/")
-            or len(metadata[0]) == len("image/")
-            or not payload
-            or re.search(r"%(?![0-9A-Fa-f]{2})", payload)
-        ):
-            return False
-        decoded_payload = unquote_to_bytes(payload)
-        if any(parameter.lower() == "base64" for parameter in metadata[1:]):
-            try:
-                decoded_payload = base64.b64decode(decoded_payload, validate=True)
-            except (binascii.Error, ValueError):
-                return False
-        return bool(decoded_payload)
-    return False
-
-
-def _select_connect_hero_shape(prospect: dict[str, Any]) -> None:
-    """Keep single-artifact output self-contained when no photo is supplied."""
-    if (
-        prospect.get("_computed_hero_shape") in {"fullbleed", "split"}
-        and not _has_usable_hero_photo(prospect)
-    ):
-        prospect["_computed_hero_shape"] = "gradient"
-
-
 def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
     try:
         prospect_document = _decode_strict_json(input_bytes)
-        prospect = build.prepare_prospect(prospect_document)
-        build.apply_design_selections(prospect, announce=False)
-        _select_connect_hero_shape(prospect)
-        build.resolve_build_document_colors(prospect)
-        if len(build.format_prospect_prompt_block(prospect)) > build.BUILD_USER_TRUNCATE:
-            raise ValueError("The prospect document exceeds the generation prompt limit.")
-        display_name = f"{build.slugify(prospect['business_name'])}-homepage.html"
+        prospect = prepare_site_prospect(prospect_document)
     except (
         UnicodeDecodeError,
         json.JSONDecodeError,
@@ -768,8 +686,8 @@ def generate_website_artifact(input_bytes: bytes) -> tuple[bytes, str]:
     ) as exc:
         raise ValueError("The input artifact is not a valid prospect document.") from exc
     config = resolve_connect_generation_config()
-    html = build.generate_build_html(prospect, config)
-    return html.encode("utf-8"), display_name
+    artifact = generate_prepared_site_artifact(prospect, config)
+    return artifact.html, artifact.display_name
 
 
 def default_runtime_dir() -> Path:

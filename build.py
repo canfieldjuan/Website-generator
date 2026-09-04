@@ -810,6 +810,28 @@ def filter_unverified_claim_examples(prompt_text, prospect):
     return filtered
 
 
+REVIEW_PROMPT_BRANCH_PATTERN = re.compile(
+    r"<!-- REVIEW_BRANCH_([ABC])_START -->\s*"
+    r"(.*?)"
+    r"\s*<!-- REVIEW_BRANCH_\1_END -->",
+    re.DOTALL,
+)
+
+
+def filter_review_prompt_branches(prompt_text, mode):
+    """Expose only the review branch admitted for this prospect."""
+    selected = {"cards": "A", "aggregate": "B", "omit": "C"}.get(mode)
+    if selected is None:
+        raise ValueError(f"Unknown review admission mode: {mode!r}")
+    matches = tuple(REVIEW_PROMPT_BRANCH_PATTERN.finditer(prompt_text))
+    if [match.group(1) for match in matches] != ["A", "B", "C"]:
+        raise ValueError("Build prompt must contain one ordered marker for each review branch.")
+    return REVIEW_PROMPT_BRANCH_PATTERN.sub(
+        lambda match: match.group(2) if match.group(1) == selected else "",
+        prompt_text,
+    )
+
+
 def _field_claim_is_verified(prospect, field, normalized_promises, *, claim=None):
     if field in BOOLEAN_CLAIM_FIELDS and prospect.get(field) is True:
         return True
@@ -1269,6 +1291,8 @@ def generate_build_html(prospect, generation_config=None, client=None):
         system_prompt = f.read()
     with open(INDUSTRY_DEFAULTS_PATH, "r") as f:
         industry_defaults = f.read()
+    review_contract = expected_review_contract(prospect)
+    system_prompt = filter_review_prompt_branches(system_prompt, review_contract.mode)
     system_prompt = filter_unverified_claim_examples(system_prompt, prospect)
     industry_defaults = filter_unverified_claim_examples(industry_defaults, prospect)
     with open(THEMES_CATALOG_PATH, "r") as f:
@@ -1365,7 +1389,6 @@ def generate_build_html(prospect, generation_config=None, client=None):
     tenure_contract = expected_tenure_contract(prospect)
     location_contract = expected_location_contract(prospect)
     image_contract = expected_image_contract(prospect, logo_url)
-    review_contract = expected_review_contract(prospect)
     action_url_contract = expected_build_action_url_contract(
         prospect,
         review_contract,
