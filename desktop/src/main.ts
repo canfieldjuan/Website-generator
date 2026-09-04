@@ -12,6 +12,7 @@ import {
   AttemptGate,
   clearCloudCredentialOnProviderChange,
   decodeArtifact,
+  documentForGeneration,
   emptyProspectFields,
   fieldsFromProspect,
   mergeProspectFields,
@@ -442,7 +443,10 @@ generateButton.addEventListener("click", async () => {
     try {
       sourceDocument = currentDocument();
       editedProspectFields.clear();
-      const artifact = await generateSite(sourceDocument, currentGeneration());
+      const artifact = await generateSite(
+        documentForGeneration(sourceDocument),
+        currentGeneration(),
+      );
       if (!attempts.isCurrent(attempt)) return;
       const bytes = decodeArtifact(artifact);
       const htmlBuffer = new ArrayBuffer(bytes.byteLength);

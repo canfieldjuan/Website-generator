@@ -115,6 +115,14 @@ export function mergeProspectFields(
   return merged;
 }
 
+export function documentForGeneration(document: ProspectDocument): ProspectDocument {
+  const normalized = structuredClone(document);
+  if (typeof normalized.state === "string") {
+    normalized.state = normalized.state.toUpperCase();
+  }
+  return normalized;
+}
+
 export function settingsForProvider(
   provider: "local" | "openrouter",
   values: {

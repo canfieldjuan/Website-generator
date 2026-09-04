@@ -4,6 +4,7 @@ import {
   AttemptGate,
   clearCloudCredentialOnProviderChange,
   decodeArtifact,
+  documentForGeneration,
   fieldsFromProspect,
   mergeProspectFields,
   settingsForProvider,
@@ -102,6 +103,22 @@ describe("prospect projection", () => {
     const edited = fieldsFromProspect(imported);
     edited.state = "wi";
     expect(mergeProspectFields(imported, edited, new Set(["state"])).state).toBe("WI");
+  });
+
+  it("normalizes state casing only in the generation projection", () => {
+    const imported = {
+      business_name: "Example Plumbing",
+      state: "iL",
+      custom_future_field: { retained: true },
+    };
+    const raw = mergeProspectFields(imported, fieldsFromProspect(imported), new Set());
+
+    const generated = documentForGeneration(raw);
+
+    expect(generated.state).toBe("IL");
+    expect(generated.custom_future_field).toEqual({ retained: true });
+    expect(raw.state).toBe("iL");
+    expect(imported.state).toBe("iL");
   });
 });
 

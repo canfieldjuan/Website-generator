@@ -88,6 +88,10 @@ normalize their displayed values. Provider credentials live only in JavaScript
 memory, are sent inside the private Tauri IPC request, and are cleared when the
 provider changes or the window closes.
 
+Export keeps that lossless source representation. Generation receives a cloned
+projection that normalizes the verified two-letter state to uppercase, so a
+mixed-case imported abbreviation cannot leak into customer-facing copy.
+
 Rust owns all filesystem and process effects. Import/export/save commands open
 native dialogs, cap reads on the opened file handle, and atomically replace
 saved UTF-8/HTML payloads only after a same-directory temporary file is synced.
@@ -128,7 +132,7 @@ closing a preview revokes its prior Blob URL.
 
 ## Verification
 
-- `npm test` from `desktop/`: 1 test file passed, 10 tests passed.
+- `npm test` from `desktop/`: 1 test file passed, 11 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
 - `cargo test` from `desktop/src-tauri/`: 11 tests passed. The boundary tests
   include cancellation before child registration and reject nested numeric
@@ -146,9 +150,12 @@ closing a preview revokes its prior Blob URL.
 - Direct `generation.status` desktop-protocol probe with the UI's local payload:
   returned available for provider `local`, model `qwen3-30b-a3b:latest`, and
   the loopback Ollama base URL.
-- `/home/juan-canfield/.cache/website-redesign-connect-provider-venv/bin/python build.py examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft --skip-deploy`:
-  completed through local Ollama with `qwen3-30b-a3b:latest` after its one
-  bounded correction.
+- `python -m venv venv` followed by
+  `./venv/bin/python -m pip install -r requirements.txt` prepares the
+  repository-local reproduction environment.
+- `./venv/bin/python build.py examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft --skip-deploy`:
+  completed in the equivalent dependency-resolved environment through local
+  Ollama with `qwen3-30b-a3b:latest` after its one bounded correction.
 - `grep -cE '\[TRUST_TRAILER\]|\[SERVICE_PROMISE\]|\[TRADE_DISPLAY\]|\[CITY\]|\[YEARS\]|\[SERVICE_AREA\]' outputs/builds/drees-plumbing-inc/index.html`:
   printed `0` (no unresolved placeholder matches).
 - `grep -ciE 'Upfront Flat-Rate|Surprise Fees|Free Estimates|Owner Answers' outputs/builds/drees-plumbing-inc/index.html`:
