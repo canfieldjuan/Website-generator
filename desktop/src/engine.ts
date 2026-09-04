@@ -18,6 +18,13 @@ export type ImportedProspect = {
   document: ProspectDocument;
 };
 
+export type ConnectStatus = {
+  entitlement_state: string;
+  entitlement_active: boolean;
+  provider_running: boolean;
+  provider_managed: boolean;
+};
+
 export async function importProspect(): Promise<ImportedProspect | null> {
   return invoke<ImportedProspect | null>("import_prospect");
 }
@@ -47,4 +54,20 @@ export async function cancelGeneration(): Promise<boolean> {
 
 export async function saveArtifact(): Promise<string | null> {
   return invoke<string | null>("save_artifact");
+}
+
+export async function getConnectStatus(): Promise<ConnectStatus> {
+  return invoke<ConnectStatus>("connect_status");
+}
+
+export async function installConnectEntitlement(): Promise<ConnectStatus | null> {
+  return invoke<ConnectStatus | null>("install_connect_entitlement");
+}
+
+export async function startConnect(): Promise<ConnectStatus> {
+  return invoke<ConnectStatus>("start_connect");
+}
+
+export async function stopConnect(): Promise<ConnectStatus> {
+  return invoke<ConnectStatus>("stop_connect");
 }

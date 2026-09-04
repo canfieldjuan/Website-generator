@@ -1,5 +1,6 @@
 import errno
 import hashlib
+import io
 import json
 import os
 import socket
@@ -9,6 +10,7 @@ import threading
 import unittest
 import uuid
 from datetime import datetime, timezone
+from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,6 +47,7 @@ from lib.connect_v2 import (
     manifest,
     new_bearer_token,
     registration_document,
+    remove_registration_for_token,
     remove_registration_if_owned,
     resolve_connect_generation_config,
     sanitize_display_name,
@@ -1091,6 +1094,123 @@ class GenerationSeamTests(unittest.TestCase):
                 self.assertEqual(connect_provider.main(), 2)
                 write.assert_not_called()
 
+    def test_desktop_managed_serve_emits_one_readiness_envelope(self):
+        class ReadinessOutput(io.StringIO):
+            closed_by_provider = False
+
+            def close(self):
+                self.closed_by_provider = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(
+                command="serve",
+                desktop_managed=True,
+                runtime_dir=Path(directory) / "runtime",
+                state_dir=Path(directory) / "state",
+            )
+            output = ReadinessOutput()
+            with patch.dict(
+                os.environ,
+                {connect_provider.DESKTOP_REGISTRATION_TOKEN_ENV: TOKEN},
+                clear=False,
+            ), patch.object(
+                connect_provider,
+                "parse_args",
+                return_value=args,
+            ), patch.object(
+                connect_provider,
+                "resolve_connect_generation_config",
+                return_value=SimpleNamespace(),
+            ), patch.object(
+                connect_provider,
+                "preflight_generation_provider",
+            ), patch.object(
+                connect_provider,
+                "start_desktop_shutdown_watcher",
+            ) as watcher, patch.object(
+                connect_provider.uvicorn.Server,
+                "run",
+                side_effect=lambda **_kwargs: print("post-handshake progress"),
+            ), redirect_stdout(output):
+                self.assertEqual(connect_provider.main(), 0)
+
+            self.assertEqual(output.getvalue(), '{"ready":true}\n')
+            self.assertFalse(output.closed_by_provider)
+            watcher.assert_called_once()
+
+    def test_desktop_shutdown_pipe_stops_the_managed_server(self):
+        for signal in (b"stop\n", b"stop\r\n", b""):
+            with self.subTest(signal=signal):
+                server = SimpleNamespace(should_exit=False)
+
+                connect_provider.watch_desktop_shutdown(server, io.BytesIO(signal))
+
+                self.assertTrue(server.should_exit)
+
+        server = SimpleNamespace(should_exit=False)
+        connect_provider.watch_desktop_shutdown(server, io.BytesIO(b"continue\n"))
+        self.assertFalse(server.should_exit)
+
+    def test_cleanup_command_bypasses_provider_state_and_generation_preflight(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(
+                command="cleanup-registration",
+                runtime_dir=Path(directory) / "runtime",
+                state_dir=Path("unavailable-relative-state"),
+            )
+            with patch.dict(
+                os.environ,
+                {connect_provider.DESKTOP_REGISTRATION_TOKEN_ENV: TOKEN},
+                clear=False,
+            ), patch.object(
+                connect_provider, "parse_args", return_value=args
+            ), patch.object(
+                connect_provider, "remove_registration_for_token", return_value=1
+            ) as cleanup, patch.object(
+                connect_provider, "preflight_generation_provider"
+            ) as preflight:
+                self.assertEqual(connect_provider.main(), 0)
+
+            cleanup.assert_called_once_with(args.runtime_dir, TOKEN)
+            preflight.assert_not_called()
+
+            with patch.dict(os.environ, {}, clear=True), patch.object(
+                connect_provider, "parse_args", return_value=args
+            ), patch.object(
+                connect_provider, "remove_registration_for_token"
+            ) as unowned_cleanup, patch.object(
+                connect_provider, "preflight_generation_provider"
+            ) as unowned_preflight:
+                self.assertEqual(connect_provider.main(), 2)
+
+            unowned_cleanup.assert_not_called()
+            unowned_preflight.assert_not_called()
+
+            with patch.dict(
+                os.environ,
+                {connect_provider.DESKTOP_REGISTRATION_TOKEN_ENV: TOKEN},
+                clear=False,
+            ), patch.object(
+                connect_provider, "parse_args", return_value=args
+            ), patch.object(
+                connect_provider,
+                "remove_registration_for_token",
+                side_effect=PermissionError("temporarily locked"),
+            ), patch.object(
+                connect_provider, "preflight_generation_provider"
+            ) as failed_preflight:
+                self.assertEqual(connect_provider.main(), 2)
+
+            failed_preflight.assert_not_called()
+
+    def test_no_command_preserves_standalone_serve_mode(self):
+        standalone = connect_provider.parse_args([])
+        managed = connect_provider.parse_args(["serve", "--desktop-managed"])
+
+        self.assertIsNone(standalone.command)
+        self.assertEqual(managed.command, "serve")
+        self.assertTrue(managed.desktop_managed)
+
     def test_registration_is_published_only_after_listener_accepts_connections(self):
         with tempfile.TemporaryDirectory() as directory:
             args = SimpleNamespace(
@@ -1400,6 +1520,91 @@ class RegistrationTests(unittest.TestCase):
             self.assertTrue(path.exists())
             remove_registration_if_owned(path, first_token)
             self.assertFalse(path.exists())
+
+    def test_token_cleanup_removes_only_the_owned_provider_registration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            terminated = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            replacement = registration_document(
+                instance_id=str(uuid.uuid4()), port=43128, token="B" * 64, pid=4243
+            )
+            terminated_path = write_registration(runtime, terminated)
+            replacement_path = write_registration(runtime, replacement)
+
+            same_pid_replacement = registration_document(
+                instance_id=str(uuid.uuid4()), port=43129, token="C" * 64, pid=4242
+            )
+            same_pid_replacement_path = write_registration(
+                runtime, same_pid_replacement
+            )
+            non_ascii = {
+                **registration_document(
+                    instance_id=str(uuid.uuid4()),
+                    port=43130,
+                    token="D" * 64,
+                    pid=4244,
+                ),
+                "auth": {"scheme": "bearer", "token": "café"},
+            }
+            non_ascii_path = write_registration(runtime, non_ascii)
+
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(terminated_path.exists())
+            self.assertTrue(replacement_path.exists())
+            self.assertTrue(same_pid_replacement_path.exists())
+            self.assertTrue(non_ascii_path.exists())
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+            for invalid in (None, False, "", "short", "!" * 64):
+                with self.subTest(token=invalid), self.assertRaises(ValueError):
+                    remove_registration_for_token(runtime, invalid)
+
+    def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            document = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            path = write_registration(runtime, document)
+            unlink_target = (
+                "lib.connect_v2.unlink_regular_file"
+                if os.name == "nt"
+                else "pathlib.Path.unlink"
+            )
+
+            with patch(unlink_target, side_effect=PermissionError("temporarily locked")):
+                with self.assertRaises(PermissionError):
+                    remove_registration_for_token(runtime, TOKEN)
+
+            self.assertTrue(path.exists())
+
+    def test_token_cleanup_retries_canonical_read_failure_and_ignores_other_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            runtime.mkdir()
+            instance_id = str(uuid.uuid4())
+            canonical = (
+                windows_v2_registration_path(runtime, instance_id)
+                if os.name == "nt"
+                else runtime / f"{APP_ID}-{instance_id}.json"
+            )
+            canonical.write_text("{}", encoding="utf-8")
+            unrelated = runtime / "unrelated.json"
+            unrelated.write_text("{}", encoding="utf-8")
+            read_target = (
+                "lib.connect_v2.read_bounded_regular_file"
+                if os.name == "nt"
+                else "pathlib.Path.read_bytes"
+            )
+
+            with patch(read_target, side_effect=PermissionError("temporarily locked")):
+                with self.assertRaises(PermissionError):
+                    remove_registration_for_token(runtime, TOKEN)
+
+            canonical.unlink()
+            with patch(read_target, side_effect=AssertionError("must not read")):
+                self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
 
     def test_malformed_registration_never_removes_or_aborts_cleanup(self):
         malformed_contents = {

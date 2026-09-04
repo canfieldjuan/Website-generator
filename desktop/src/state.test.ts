@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AttemptGate,
   clearCloudCredentialOnProviderChange,
+  connectAvailabilityMessage,
   decodeArtifact,
   documentForGeneration,
   fieldsFromProspect,
@@ -124,6 +125,21 @@ describe("prospect projection", () => {
 });
 
 describe("provider session state", () => {
+  it("describes availability from both entitlement and provider state", () => {
+    expect(
+      connectAvailabilityMessage({ entitlement_active: true, provider_running: true }),
+    ).toContain("is available");
+    expect(
+      connectAvailabilityMessage({ entitlement_active: false, provider_running: true }),
+    ).toContain("access is not active");
+    expect(
+      connectAvailabilityMessage({ entitlement_active: true, provider_running: false }),
+    ).toContain("Start the provider");
+    expect(
+      connectAvailabilityMessage({ entitlement_active: false, provider_running: false }),
+    ).toContain("Activate Connect");
+  });
+
   it("clears a cloud key whenever the provider changes", () => {
     expect(
       clearCloudCredentialOnProviderChange("openrouter", "local", "secret"),

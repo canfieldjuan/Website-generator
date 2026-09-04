@@ -160,6 +160,16 @@ the same engine used by Local Connect; it does not install, start, or download
 Ollama or a model. The CI `windows-connect-package` job performs this assembly
 and publishes the installer together with the standalone engine.
 
+The packaged app also owns the normal Local Connect lifecycle. Its Local
+Connect section reports the stable signed-entitlement state, installs an
+issuer-signed entitlement selected through the native file picker, and starts
+or stops one provider process owned by that app session. Start remains an
+explicit action and succeeds only after the existing Ollama preflight and
+owner-private provider registration complete. Closing the app requests a
+clean provider shutdown and reaps that child. These controls do not start or
+configure Ollama, and unavailable Connect access never blocks standalone
+website generation.
+
 ### Expose local generation through Local Connect
 
 Local Connect exposes one capability: `website.generate.single-page` version
@@ -176,6 +186,10 @@ ollama run qwen3-30b-a3b:latest
 # Second shell, after /api/version, /api/tags, and /api/show report ready:
 python connect_provider.py
 ```
+
+That command remains the standalone operator path. The desktop app uses the
+same provider with a private lifecycle handshake; it does not publish a second
+capability implementation.
 
 The provider fails before registration if Ollama is unhealthy or does not
 serve that exact model alias. While running, it publishes an owner-private v2 registration under

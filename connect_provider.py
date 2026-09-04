@@ -8,7 +8,9 @@ import json
 import os
 import socket
 import sys
+import threading
 from pathlib import Path
+from typing import BinaryIO, TextIO
 
 import uvicorn
 
@@ -29,6 +31,7 @@ from lib.connect_v2 import (
     default_state_dir,
     new_bearer_token,
     registration_document,
+    remove_registration_for_token,
     remove_registration_if_owned,
     resolve_connect_generation_config,
     write_registration,
@@ -38,6 +41,8 @@ from lib.generation import (
     GenerationProviderUnavailable,
     preflight_generation_provider,
 )
+
+DESKTOP_REGISTRATION_TOKEN_ENV = "WEBSITE_GENERATOR_DESKTOP_REGISTRATION_TOKEN"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -78,6 +83,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "desktop",
         help="Handle one private desktop JSON request on stdin.",
     )
+    serve = commands.add_parser(
+        "serve",
+        help="Run the Local Connect provider.",
+    )
+    serve.add_argument(
+        "--desktop-managed",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    commands.add_parser("cleanup-registration", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -115,12 +130,63 @@ def _run_entitlement_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def watch_desktop_shutdown(server: uvicorn.Server, source: BinaryIO) -> None:
+    """Ask a desktop-managed server to exit when its owner stops or disappears."""
+    try:
+        signal = source.readline()
+    except (OSError, ValueError):
+        signal = b""
+    if signal in (b"", b"stop\n", b"stop\r\n"):
+        server.should_exit = True
+
+
+def start_desktop_shutdown_watcher(
+    server: uvicorn.Server, source: BinaryIO
+) -> threading.Thread:
+    watcher = threading.Thread(
+        target=watch_desktop_shutdown,
+        args=(server, source),
+        name="desktop-connect-shutdown",
+        daemon=True,
+    )
+    watcher.start()
+    return watcher
+
+
+def emit_desktop_readiness(output: TextIO) -> None:
+    """Write and flush the one desktop handshake without closing stdout."""
+    output.write('{"ready":true}\n')
+    output.flush()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    desktop_registration_token = os.environ.pop(
+        DESKTOP_REGISTRATION_TOKEN_ENV, None
+    )
     if getattr(args, "command", None) == "entitlement":
         return _run_entitlement_command(args)
     if getattr(args, "command", None) == "desktop":
         return run_desktop_stdio()
+
+    if getattr(args, "command", None) == "cleanup-registration":
+        try:
+            runtime_dir = args.runtime_dir or default_runtime_dir()
+            if not runtime_dir.is_absolute():
+                raise RuntimeError("Connect runtime directory must be absolute.")
+            if os.name == "nt":
+                ensure_private_directory(runtime_dir, root=local_app_data_root())
+            if desktop_registration_token is None:
+                raise ValueError("Desktop registration ownership is unavailable.")
+            removed = remove_registration_for_token(
+                runtime_dir, desktop_registration_token
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            print(f"Connect registration cleanup failed: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps({"removed": removed}, separators=(",", ":")))
+        return 0
+
     try:
         runtime_dir = args.runtime_dir or default_runtime_dir()
         state_dir = args.state_dir or default_state_dir()
@@ -151,11 +217,21 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
+    desktop_managed = getattr(args, "desktop_managed", False)
+    if desktop_managed and desktop_registration_token is None:
+        print(
+            "Connect provider configuration failed: desktop registration ownership is unavailable.",
+            file=sys.stderr,
+        )
+        return 2
+
     runtime: ProviderRuntime | None = None
     registration_path: Path | None = None
     registration_ownership: ProviderLock | None = None
-    token = new_bearer_token()
+    token = desktop_registration_token if desktop_managed else new_bearer_token()
     listener: socket.socket | None = None
+    desktop_stdout: TextIO | None = None
+    desktop_output_sink: TextIO | None = None
     try:
         store = ConnectStore(state_dir / "connect-v2.sqlite3")
         try:
@@ -173,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
             access_log=False,
             server_header=False,
         )
+        server = uvicorn.Server(config)
         listener = bind_loopback_listener(config.backlog)
         port = int(listener.getsockname()[1])
         registration = registration_document(
@@ -181,11 +258,20 @@ def main(argv: list[str] | None = None) -> int:
             token=token,
         )
         registration_path = write_registration(runtime_dir, registration)
-        print(
-            f"Website Redesign Connect v2 is available at "
-            f"http://127.0.0.1:{port}/"
-        )
-        uvicorn.Server(config).run(sockets=[listener])
+        if desktop_managed:
+            input_stream = getattr(sys.stdin, "buffer", sys.stdin)
+            start_desktop_shutdown_watcher(server, input_stream)
+            desktop_stdout = sys.stdout
+            desktop_output_sink = open(os.devnull, "w", encoding="utf-8")
+            emit_desktop_readiness(desktop_stdout)
+            sys.stdout = desktop_output_sink
+        else:
+            print(
+                f"Website Redesign Connect v2 is available at "
+                f"http://127.0.0.1:{port}/",
+                flush=True,
+            )
+        server.run(sockets=[listener])
         return 0
     finally:
         if registration_path is not None:
@@ -197,6 +283,10 @@ def main(argv: list[str] | None = None) -> int:
         if registration_ownership is not None:
             registration_ownership.close()
         provider_lock.close()
+        if desktop_output_sink is not None:
+            if sys.stdout is desktop_output_sink and desktop_stdout is not None:
+                sys.stdout = desktop_stdout
+            desktop_output_sink.close()
 
 
 if __name__ == "__main__":

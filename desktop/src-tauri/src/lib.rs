@@ -1,14 +1,16 @@
 use std::{
+    ffi::OsString,
     fs,
-    io::{self, Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::Path,
-    process::{Child, Command, Stdio},
+    process::{Child, ChildStdin, Command, Stdio},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU8, Ordering},
+        mpsc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -17,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
+use uuid::Uuid;
 
 const MAX_ENGINE_REQUEST_BYTES: usize = 216_384;
 const MAX_ENGINE_RESPONSE_BYTES: usize = 2_900_000;
@@ -26,6 +29,11 @@ const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
 const ENGINE_IDLE: u8 = 0;
 const ENGINE_ACTIVE: u8 = 1;
 const ENGINE_CANCELLED: u8 = 2;
+const MAX_LIFECYCLE_OUTPUT_BYTES: usize = 16 * 1024;
+const CONNECT_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+const CONNECT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+const CONNECT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const DESKTOP_REGISTRATION_TOKEN_ENV: &str = "WEBSITE_GENERATOR_DESKTOP_REGISTRATION_TOKEN";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct EngineArtifact {
@@ -42,11 +50,28 @@ struct CachedArtifact {
     bytes: Vec<u8>,
 }
 
+struct ManagedProvider {
+    attempt: u64,
+    child: Child,
+    stdin: Option<ChildStdin>,
+    registration_cleanup: Option<Command>,
+    ready: bool,
+}
+
+#[derive(Default)]
+struct ProviderLifecycle {
+    managed: Option<ManagedProvider>,
+    pending_registration_cleanup: Option<Command>,
+    active_start: Option<u64>,
+    next_attempt: u64,
+}
+
 #[derive(Default)]
 struct DesktopState {
     running: Mutex<Option<Child>>,
     engine_phase: AtomicU8,
     artifact: Mutex<Option<CachedArtifact>>,
+    provider: Mutex<ProviderLifecycle>,
 }
 
 #[derive(Serialize)]
@@ -149,6 +174,20 @@ impl<'de> Deserialize<'de> for UniqueJson {
 
 fn decode_unique_json(source: &[u8]) -> Result<Value, serde_json::Error> {
     serde_json::from_slice::<UniqueJson>(source).map(|value| value.0)
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct EntitlementStatus {
+    state: String,
+    active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct ConnectStatus {
+    entitlement_state: String,
+    entitlement_active: bool,
+    provider_running: bool,
+    provider_managed: bool,
 }
 
 fn lock_error() -> String {
@@ -292,7 +331,7 @@ fn packaged_engine_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|_| "The packaged Website Generator engine is unavailable.".to_owned())
 }
 
-fn engine_command(_app: &AppHandle) -> Result<Command, String> {
+fn base_engine_command(_app: &AppHandle) -> Result<Command, String> {
     #[cfg(debug_assertions)]
     {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -301,7 +340,7 @@ fn engine_command(_app: &AppHandle) -> Result<Command, String> {
             return Err("The development Website Generator engine is unavailable.".to_owned());
         }
         let mut command = Command::new("python");
-        command.arg(script).arg("desktop").current_dir(repository);
+        command.arg(script).current_dir(repository);
         Ok(command)
     }
 
@@ -311,8 +350,7 @@ fn engine_command(_app: &AppHandle) -> Result<Command, String> {
         if !executable.is_file() {
             return Err("The packaged Website Generator engine is unavailable.".to_owned());
         }
-        let mut command = Command::new(executable);
-        command.arg("desktop");
+        let command = Command::new(executable);
         Ok(command)
     }
 }
@@ -359,6 +397,486 @@ fn parse_engine_success(output: &[u8], status_success: bool) -> Result<Value, St
     }
 }
 
+fn parse_single_json_object(output: &[u8]) -> Result<Value, String> {
+    let lines: Vec<&[u8]> = output
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.len() != 1 {
+        return Err("The Local Connect command returned an invalid response.".to_owned());
+    }
+    let value: Value = serde_json::from_slice(lines[0])
+        .map_err(|_| "The Local Connect command returned invalid JSON.".to_owned())?;
+    if !value.is_object() {
+        return Err("The Local Connect command returned an invalid response.".to_owned());
+    }
+    Ok(value)
+}
+
+fn parse_cli_error(stderr: &[u8]) -> String {
+    let Ok(value) = parse_single_json_object(stderr) else {
+        return "The Local Connect command failed.".to_owned();
+    };
+    value
+        .get("error")
+        .and_then(Value::as_object)
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .filter(|message| !message.is_empty() && message.len() <= 512)
+        .unwrap_or("The Local Connect command failed.")
+        .to_owned()
+}
+
+fn force_reap(child: &mut Child) -> io::Result<()> {
+    terminate_process_tree(child)?;
+    child.wait().map(|_| ())
+}
+
+fn wait_for_connect_command(
+    child: &mut Child,
+    timeout: Duration,
+) -> Result<std::process::ExitStatus, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(None) => {
+                force_reap(child).map_err(|_| {
+                    "The Local Connect command could not be stopped after timing out.".to_owned()
+                })?;
+                return Err("The Local Connect command did not finish in time.".to_owned());
+            }
+            Err(_) => {
+                force_reap(child).map_err(|_| {
+                    "The Local Connect command could not be stopped after a status failure."
+                        .to_owned()
+                })?;
+                return Err("The Local Connect command status is unavailable.".to_owned());
+            }
+        }
+    }
+}
+
+fn cleanup_provider_registration(command: &mut Command) -> Result<(), String> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console_window(command);
+    let mut child = command
+        .spawn()
+        .map_err(|_| "The Local Connect registration could not be reconciled.".to_owned())?;
+    let status = wait_for_connect_command(&mut child, CONNECT_COMMAND_TIMEOUT)?;
+    if !status.success() {
+        return Err("The Local Connect registration could not be reconciled.".to_owned());
+    }
+    Ok(())
+}
+
+fn new_desktop_registration_token() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+fn reconcile_pending_registration(slot: &mut ProviderLifecycle) -> Result<(), String> {
+    let Some(cleanup) = slot.pending_registration_cleanup.as_mut() else {
+        return Ok(());
+    };
+    cleanup_provider_registration(cleanup)?;
+    slot.pending_registration_cleanup = None;
+    Ok(())
+}
+
+fn reconcile_managed_provider_termination(slot: &mut ProviderLifecycle) -> Result<(), String> {
+    if slot.pending_registration_cleanup.is_some() {
+        return Err("The Local Connect registration could not be reconciled.".to_owned());
+    }
+    let Some(mut provider) = slot.managed.take() else {
+        return Ok(());
+    };
+    slot.pending_registration_cleanup = provider.registration_cleanup.take();
+    reconcile_pending_registration(slot)
+}
+
+fn run_cli_json(app: &AppHandle, arguments: &[OsString]) -> Result<Value, String> {
+    let mut command = base_engine_command(app)?;
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console_window(&mut command);
+    let mut child = command
+        .spawn()
+        .map_err(|_| "The Local Connect command could not start.".to_owned())?;
+    let Some(stdout) = child.stdout.take() else {
+        let _ = force_reap(&mut child);
+        return Err("The Local Connect command output is unavailable.".to_owned());
+    };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = force_reap(&mut child);
+        return Err("The Local Connect command output is unavailable.".to_owned());
+    };
+    let output_reader = thread::spawn(move || read_bounded(stdout, MAX_LIFECYCLE_OUTPUT_BYTES));
+    let error_reader = thread::spawn(move || read_bounded(stderr, MAX_LIFECYCLE_OUTPUT_BYTES));
+    let status = wait_for_connect_command(&mut child, CONNECT_COMMAND_TIMEOUT);
+    let output = output_reader
+        .join()
+        .map_err(|_| "The Local Connect output reader stopped.".to_owned())?
+        .map_err(|_| "The Local Connect command output was too large.".to_owned())?;
+    let error = error_reader
+        .join()
+        .map_err(|_| "The Local Connect error reader stopped.".to_owned())?
+        .map_err(|_| "The Local Connect command error output was too large.".to_owned())?;
+    let status = status?;
+    if !status.success() {
+        return Err(parse_cli_error(&error));
+    }
+    parse_single_json_object(&output)
+}
+
+fn parse_entitlement_status(value: Value) -> Result<EntitlementStatus, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "The Local Connect entitlement status is invalid.".to_owned())?;
+    if object.len() != 2 || !object.contains_key("state") || !object.contains_key("active") {
+        return Err("The Local Connect entitlement status is invalid.".to_owned());
+    }
+    let status: EntitlementStatus = serde_json::from_value(value)
+        .map_err(|_| "The Local Connect entitlement status is invalid.".to_owned())?;
+    let known = matches!(
+        status.state.as_str(),
+        "active"
+            | "authority_unavailable"
+            | "missing"
+            | "invalid"
+            | "not_yet_valid"
+            | "expired"
+            | "feature_missing"
+    );
+    if !known || status.active != (status.state == "active") {
+        return Err("The Local Connect entitlement status is invalid.".to_owned());
+    }
+    Ok(status)
+}
+
+fn read_entitlement_status(app: &AppHandle) -> Result<EntitlementStatus, String> {
+    parse_entitlement_status(run_cli_json(
+        app,
+        &[OsString::from("entitlement"), OsString::from("status")],
+    )?)
+}
+
+fn parse_provider_readiness(line: &[u8]) -> Result<(), String> {
+    match line {
+        b"{\"ready\":true}\n" | b"{\"ready\":true}\r\n" => Ok(()),
+        _ => Err("The Local Connect provider did not become ready.".to_owned()),
+    }
+}
+
+fn read_provider_readiness(reader: impl Read) -> io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    BufReader::new(reader)
+        .take((MAX_LIFECYCLE_OUTPUT_BYTES + 1) as u64)
+        .read_until(b'\n', &mut output)?;
+    if output.len() > MAX_LIFECYCLE_OUTPUT_BYTES || !output.ends_with(b"\n") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "provider readiness exceeded its boundary",
+        ));
+    }
+    Ok(output)
+}
+
+fn provider_is_running(state: &DesktopState) -> Result<bool, String> {
+    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    reconcile_pending_registration(&mut slot)?;
+    let Some(provider) = slot.managed.as_mut() else {
+        return Ok(false);
+    };
+    if provider
+        .child
+        .try_wait()
+        .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
+        .is_some()
+    {
+        reconcile_managed_provider_termination(&mut slot)?;
+        return Ok(false);
+    }
+    Ok(provider.ready)
+}
+
+fn connect_status_from(
+    entitlement: Result<EntitlementStatus, String>,
+    running: bool,
+) -> ConnectStatus {
+    let entitlement = entitlement.unwrap_or_else(|_| EntitlementStatus {
+        state: "unavailable".to_owned(),
+        active: false,
+    });
+    ConnectStatus {
+        entitlement_state: entitlement.state,
+        entitlement_active: entitlement.active,
+        provider_running: running,
+        provider_managed: running,
+    }
+}
+
+fn connect_status_value(app: &AppHandle, state: &DesktopState) -> Result<ConnectStatus, String> {
+    let entitlement = read_entitlement_status(app);
+    let running = provider_is_running(state)?;
+    Ok(connect_status_from(entitlement, running))
+}
+
+fn require_active_entitlement(entitlement: &EntitlementStatus) -> Result<(), String> {
+    if !entitlement.active {
+        return Err("Install an active Local Connect entitlement before starting.".to_owned());
+    }
+    Ok(())
+}
+
+fn begin_provider_start(state: &DesktopState) -> Result<u64, String> {
+    let mut lifecycle = state.provider.lock().map_err(|_| lock_error())?;
+    if lifecycle.active_start.is_some() {
+        return Err("The Local Connect provider is already starting.".to_owned());
+    }
+    lifecycle.next_attempt = lifecycle.next_attempt.wrapping_add(1);
+    if lifecycle.next_attempt == 0 {
+        lifecycle.next_attempt = 1;
+    }
+    let attempt = lifecycle.next_attempt;
+    lifecycle.active_start = Some(attempt);
+    Ok(attempt)
+}
+
+fn finish_provider_start(state: &DesktopState, attempt: u64) -> Result<(), String> {
+    let mut lifecycle = state.provider.lock().map_err(|_| lock_error())?;
+    if lifecycle.active_start == Some(attempt) {
+        lifecycle.active_start = None;
+    }
+    Ok(())
+}
+
+fn require_current_provider_start(state: &DesktopState, attempt: u64) -> Result<(), String> {
+    let lifecycle = state.provider.lock().map_err(|_| lock_error())?;
+    if lifecycle.active_start != Some(attempt) {
+        return Err("The Local Connect provider start was cancelled.".to_owned());
+    }
+    Ok(())
+}
+
+fn launch_managed_provider(
+    mut command: Command,
+    registration_cleanup: Option<Command>,
+    state: &DesktopState,
+    startup_timeout: Duration,
+    attempt: u64,
+) -> Result<bool, String> {
+    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    reconcile_pending_registration(&mut slot)?;
+    if slot.active_start != Some(attempt) {
+        return Err("The Local Connect provider start was cancelled.".to_owned());
+    }
+    if let Some(provider) = slot.managed.as_mut() {
+        if provider
+            .child
+            .try_wait()
+            .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
+            .is_none()
+        {
+            return if provider.ready {
+                Ok(false)
+            } else {
+                Err("The Local Connect provider is already starting.".to_owned())
+            };
+        }
+        reconcile_managed_provider_termination(&mut slot)?;
+    }
+
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    hide_console_window(&mut command);
+    let mut child = command
+        .spawn()
+        .map_err(|_| "The Local Connect provider could not start.".to_owned())?;
+    let Some(stdin) = child.stdin.take() else {
+        let _ = force_reap(&mut child);
+        return Err("The Local Connect provider control pipe is unavailable.".to_owned());
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = force_reap(&mut child);
+        return Err("The Local Connect provider readiness pipe is unavailable.".to_owned());
+    };
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = sender.send(read_provider_readiness(stdout));
+    });
+    slot.managed = Some(ManagedProvider {
+        attempt,
+        child,
+        stdin: Some(stdin),
+        registration_cleanup,
+        ready: false,
+    });
+    drop(slot);
+
+    let readiness = match receiver.recv_timeout(startup_timeout) {
+        Ok(Ok(line)) => parse_provider_readiness(&line),
+        Ok(Err(_)) => Err("The Local Connect provider readiness was invalid.".to_owned()),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            Err("The Local Connect provider did not become ready in time.".to_owned())
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("The Local Connect provider stopped during startup.".to_owned())
+        }
+    };
+    if let Err(error) = readiness {
+        stop_provider_attempt_with_timeout(state, attempt, Duration::ZERO).map_err(|_| {
+            "The Local Connect provider could not be stopped after failed startup.".to_owned()
+        })?;
+        return Err(error);
+    }
+    thread::sleep(Duration::from_millis(50));
+    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    if slot.active_start != Some(attempt) {
+        drop(slot);
+        stop_provider_attempt_with_timeout(state, attempt, Duration::ZERO).map_err(|_| {
+            "The Local Connect provider could not be stopped after cancellation.".to_owned()
+        })?;
+        return Err("The Local Connect provider start was cancelled.".to_owned());
+    }
+    let Some(provider) = slot.managed.as_mut() else {
+        return Err("The Local Connect provider stopped during startup.".to_owned());
+    };
+    if provider.attempt != attempt {
+        return Err("The Local Connect provider start was superseded.".to_owned());
+    }
+    match provider.child.try_wait() {
+        Ok(Some(_)) => {
+            reconcile_managed_provider_termination(&mut slot)?;
+            return Err("The Local Connect provider stopped during startup.".to_owned());
+        }
+        Ok(None) => provider.ready = true,
+        Err(_) => {
+            force_reap(&mut provider.child).map_err(|_| {
+                "The Local Connect provider could not be stopped after a status failure.".to_owned()
+            })?;
+            reconcile_managed_provider_termination(&mut slot)?;
+            return Err("The Local Connect provider status is unavailable.".to_owned());
+        }
+    }
+    Ok(true)
+}
+
+fn start_connect_provider(
+    app: &AppHandle,
+    state: &DesktopState,
+    attempt: u64,
+) -> Result<ConnectStatus, String> {
+    let result = (|| {
+        let entitlement = read_entitlement_status(app)?;
+        require_active_entitlement(&entitlement)?;
+        require_current_provider_start(state, attempt)?;
+        let mut command = base_engine_command(app)?;
+        let mut cleanup = base_engine_command(app)?;
+        let registration_token = new_desktop_registration_token();
+        command.env(DESKTOP_REGISTRATION_TOKEN_ENV, &registration_token);
+        cleanup
+            .arg("cleanup-registration")
+            .env(DESKTOP_REGISTRATION_TOKEN_ENV, registration_token);
+        command.args(["serve", "--desktop-managed"]);
+        launch_managed_provider(
+            command,
+            Some(cleanup),
+            state,
+            CONNECT_STARTUP_TIMEOUT,
+            attempt,
+        )?;
+        connect_status_value(app, state)
+    })();
+    finish_provider_start(state, attempt)?;
+    result
+}
+
+fn stop_managed_provider_locked(
+    slot: &mut ProviderLifecycle,
+    shutdown_timeout: Duration,
+) -> Result<bool, String> {
+    reconcile_pending_registration(slot)?;
+    let Some(provider) = slot.managed.as_mut() else {
+        return Ok(false);
+    };
+    if provider
+        .child
+        .try_wait()
+        .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
+        .is_some()
+    {
+        reconcile_managed_provider_termination(slot)?;
+        return Ok(false);
+    }
+    if let Some(mut stdin) = provider.stdin.take() {
+        let _ = stdin.write_all(b"stop\n");
+        let _ = stdin.flush();
+    }
+    let deadline = Instant::now() + shutdown_timeout;
+    loop {
+        if provider
+            .child
+            .try_wait()
+            .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
+            .is_some()
+        {
+            reconcile_managed_provider_termination(slot)?;
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            force_reap(&mut provider.child)
+                .map_err(|_| "The Local Connect provider could not be stopped.".to_owned())?;
+            reconcile_managed_provider_termination(slot)?;
+            return Ok(true);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn stop_provider_attempt_with_timeout(
+    state: &DesktopState,
+    attempt: u64,
+    shutdown_timeout: Duration,
+) -> Result<bool, String> {
+    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    if slot.managed.as_ref().map(|provider| provider.attempt) != Some(attempt) {
+        return Ok(false);
+    }
+    stop_managed_provider_locked(&mut slot, shutdown_timeout)
+}
+
+fn stop_connect_provider_with_timeout(
+    state: &DesktopState,
+    shutdown_timeout: Duration,
+) -> Result<bool, String> {
+    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    slot.active_start = None;
+    stop_managed_provider_locked(&mut slot, shutdown_timeout)
+}
+
+fn stop_connect_provider(state: &DesktopState) -> Result<bool, String> {
+    stop_connect_provider_with_timeout(state, CONNECT_SHUTDOWN_TIMEOUT)
+}
+
+fn prepare_window_close_with_timeout(
+    state: &DesktopState,
+    shutdown_timeout: Duration,
+) -> Result<(), String> {
+    let _ = request_engine_cancellation(state);
+    stop_connect_provider_with_timeout(state, shutdown_timeout).map(|_| ())
+}
+
 fn run_engine(
     app: &AppHandle,
     state: &Arc<DesktopState>,
@@ -375,7 +893,8 @@ fn run_engine(
         return Err("The prospect document is too large.".to_owned());
     }
 
-    let mut command = engine_command(app)?;
+    let mut command = base_engine_command(app)?;
+    command.arg("desktop");
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -622,6 +1141,86 @@ fn require_js_roundtrip_number_tokens(source: &[u8]) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn connect_status(
+    app: AppHandle,
+    state: State<'_, Arc<DesktopState>>,
+) -> Result<ConnectStatus, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || connect_status_value(&app, &state))
+        .await
+        .map_err(|_| "The Local Connect status check stopped unexpectedly.".to_owned())?
+}
+
+#[tauri::command]
+async fn install_connect_entitlement(
+    app: AppHandle,
+    state: State<'_, Arc<DesktopState>>,
+) -> Result<Option<ConnectStatus>, String> {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("Local Connect entitlement", &["json"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = run_cli_json(
+            &app,
+            &[
+                OsString::from("entitlement"),
+                OsString::from("install"),
+                path.into_os_string(),
+            ],
+        )?;
+        let entitlement = parse_entitlement_status(result)?;
+        let running = provider_is_running(&state)?;
+        Ok(Some(ConnectStatus {
+            entitlement_state: entitlement.state,
+            entitlement_active: entitlement.active,
+            provider_running: running,
+            provider_managed: running,
+        }))
+    })
+    .await
+    .map_err(|_| "The Local Connect activation stopped unexpectedly.".to_owned())?
+}
+
+#[tauri::command]
+async fn start_connect(
+    app: AppHandle,
+    state: State<'_, Arc<DesktopState>>,
+) -> Result<ConnectStatus, String> {
+    let state = state.inner().clone();
+    let attempt = begin_provider_start(&state)?;
+    let worker_state = state.clone();
+    match tauri::async_runtime::spawn_blocking(move || {
+        start_connect_provider(&app, &worker_state, attempt)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            finish_provider_start(&state, attempt)?;
+            Err("The Local Connect provider start stopped unexpectedly.".to_owned())
+        }
+    }
+}
+
+#[tauri::command]
+async fn stop_connect(
+    app: AppHandle,
+    state: State<'_, Arc<DesktopState>>,
+) -> Result<ConnectStatus, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_connect_provider(&state)?;
+        connect_status_value(&app, &state)
+    })
+    .await
+    .map_err(|_| "The Local Connect provider stop stopped unexpectedly.".to_owned())?
+}
+
+#[tauri::command]
 async fn engine_status(
     app: AppHandle,
     state: State<'_, Arc<DesktopState>>,
@@ -782,11 +1381,17 @@ pub fn run() {
             generate_site,
             cancel_generation,
             save_artifact,
+            connect_status,
+            install_connect_entitlement,
+            start_connect,
+            stop_connect,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<Arc<DesktopState>>();
-                let _ = request_engine_cancellation(&state);
+                if prepare_window_close_with_timeout(&state, CONNECT_SHUTDOWN_TIMEOUT).is_err() {
+                    api.prevent_close();
+                }
             }
         })
         .run(tauri::generate_context!())
@@ -796,6 +1401,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture_provider(script: &str) -> Command {
+        let mut command = Command::new("python");
+        command.args(["-u", "-c", script]);
+        command
+    }
 
     fn artifact_for(bytes: &[u8]) -> Value {
         json!({
@@ -948,16 +1559,38 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    #[ignore = "launched explicitly by the Windows process-tree test"]
+    fn windows_descendant_fixture() {
+        let pid_path = std::env::var_os("WEBSITE_GENERATOR_DESCENDANT_PID_PATH")
+            .expect("the descendant fixture requires a PID path");
+        let mut command = Command::new("cmd.exe");
+        command
+            .args(["/D", "/S", "/C", "ping -n 30 127.0.0.1 >NUL"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        hide_console_window(&mut command);
+        let mut descendant = command.spawn().unwrap();
+        fs::write(pid_path, descendant.id().to_string()).unwrap();
+        let status = descendant.wait().unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn windows_cancellation_terminates_descendants() {
         let directory = tempfile::tempdir().unwrap();
         let pid_path = directory.path().join("descendant.pid");
-        let escaped_path = pid_path.to_string_lossy().replace('\'', "''");
-        let script = format!(
-            "$child = Start-Process -FilePath 'cmd.exe' -ArgumentList '/C','ping -n 30 127.0.0.1 >NUL' -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '{escaped_path}' -Value $child.Id; Start-Sleep -Seconds 30"
-        );
-        let mut command = Command::new("powershell.exe");
+        let test_binary = std::env::current_exe().unwrap();
+        let mut command = Command::new(test_binary);
         command
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .args([
+                "--ignored",
+                "--exact",
+                "tests::windows_descendant_fixture",
+                "--nocapture",
+            ])
+            .env("WEBSITE_GENERATOR_DESCENDANT_PID_PATH", &pid_path)
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
         hide_console_window(&mut command);
@@ -998,5 +1631,362 @@ mod tests {
             .unwrap();
 
         assert!(!String::from_utf8_lossy(&output.stdout).contains(&descendant_pid));
+    }
+
+    #[test]
+    fn entitlement_status_requires_an_exact_consistent_shape() {
+        assert_eq!(
+            parse_entitlement_status(json!({"state": "active", "active": true})).unwrap(),
+            EntitlementStatus {
+                state: "active".to_owned(),
+                active: true,
+            }
+        );
+        assert!(parse_entitlement_status(json!({"state": "missing", "active": false})).is_ok());
+        assert!(parse_entitlement_status(json!({"state": "active", "active": false})).is_err());
+        assert!(parse_entitlement_status(json!({"state": "unknown", "active": false})).is_err());
+        assert!(
+            parse_entitlement_status(
+                json!({"state": "missing", "active": false, "detail": "secret"})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn provider_readiness_requires_exactly_ready_true() {
+        assert!(parse_provider_readiness(b"{\"ready\":true}\n").is_ok());
+        assert!(parse_provider_readiness(b"{\"ready\":false}\n").is_err());
+        assert!(parse_provider_readiness(b"{\"ready\":true,\"extra\":1}\n").is_err());
+        assert!(parse_provider_readiness(b"{}\n").is_err());
+        assert!(parse_provider_readiness(b"{\"ready\":true}\n{}\n").is_err());
+    }
+
+    #[test]
+    fn desktop_registration_tokens_are_valid_and_rotate() {
+        let first = new_desktop_registration_token();
+        let second = new_desktop_registration_token();
+
+        assert_eq!(first.len(), 64);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn provider_readiness_reader_enforces_its_line_boundary() {
+        struct ReadyWithoutEof(bool);
+
+        impl Read for ReadyWithoutEof {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                if self.0 {
+                    panic!("readiness must not wait for EOF after the first line");
+                }
+                self.0 = true;
+                let line = b"{\"ready\":true}\n";
+                buffer[..line.len()].copy_from_slice(line);
+                Ok(line.len())
+            }
+        }
+
+        assert_eq!(
+            read_provider_readiness(ReadyWithoutEof(false)).unwrap(),
+            b"{\"ready\":true}\n"
+        );
+        let maximum_line = format!("{}\n", "x".repeat(MAX_LIFECYCLE_OUTPUT_BYTES - 1));
+        assert_eq!(
+            read_provider_readiness(maximum_line.as_bytes())
+                .unwrap()
+                .len(),
+            MAX_LIFECYCLE_OUTPUT_BYTES
+        );
+        let oversized = format!("{}\n", "x".repeat(MAX_LIFECYCLE_OUTPUT_BYTES));
+        assert_eq!(
+            read_provider_readiness(oversized.as_bytes())
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            read_provider_readiness(&b"{\"ready\":true}"[..])
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn inactive_entitlement_cannot_start_connect() {
+        assert!(
+            require_active_entitlement(&EntitlementStatus {
+                state: "missing".to_owned(),
+                active: false,
+            })
+            .is_err()
+        );
+        assert!(
+            require_active_entitlement(&EntitlementStatus {
+                state: "active".to_owned(),
+                active: true,
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn entitlement_failure_does_not_hide_a_running_managed_provider() {
+        let status = connect_status_from(Err("private detail".to_owned()), true);
+
+        assert_eq!(status.entitlement_state, "unavailable");
+        assert!(!status.entitlement_active);
+        assert!(status.provider_running);
+        assert!(status.provider_managed);
+
+        let expired = connect_status_from(
+            Ok(EntitlementStatus {
+                state: "expired".to_owned(),
+                active: false,
+            }),
+            true,
+        );
+        assert_eq!(expired.entitlement_state, "expired");
+        assert!(!expired.entitlement_active);
+        assert!(expired.provider_running);
+        assert!(expired.provider_managed);
+    }
+
+    #[test]
+    fn managed_provider_start_is_idempotent_and_stop_reaps_the_child() {
+        let state = DesktopState::default();
+        let provider = fixture_provider(
+            "import sys; print('{\"ready\":true}', flush=True); sys.stdin.readline()",
+        );
+        let attempt = begin_provider_start(&state).unwrap();
+        assert!(
+            launch_managed_provider(provider, None, &state, Duration::from_secs(2), attempt)
+                .unwrap()
+        );
+        finish_provider_start(&state, attempt).unwrap();
+        assert!(provider_is_running(&state).unwrap());
+
+        let duplicate = Command::new("executable-that-must-not-be-started");
+        let duplicate_attempt = begin_provider_start(&state).unwrap();
+        assert!(
+            !launch_managed_provider(
+                duplicate,
+                None,
+                &state,
+                Duration::from_millis(1),
+                duplicate_attempt,
+            )
+            .unwrap()
+        );
+        finish_provider_start(&state, duplicate_attempt).unwrap();
+
+        assert!(stop_connect_provider(&state).unwrap());
+        assert!(!provider_is_running(&state).unwrap());
+        assert!(!stop_connect_provider(&state).unwrap());
+    }
+
+    #[test]
+    fn managed_provider_timeout_and_early_exit_leave_no_child() {
+        let state = DesktopState::default();
+        let timeout = fixture_provider("import time; time.sleep(2)");
+        let attempt = begin_provider_start(&state).unwrap();
+        let error =
+            launch_managed_provider(timeout, None, &state, Duration::from_millis(20), attempt)
+                .unwrap_err();
+        finish_provider_start(&state, attempt).unwrap();
+        assert!(error.contains("ready in time"));
+        assert!(!provider_is_running(&state).unwrap());
+
+        let early_exit = fixture_provider("pass");
+        let attempt = begin_provider_start(&state).unwrap();
+        assert!(
+            launch_managed_provider(early_exit, None, &state, Duration::from_secs(2), attempt,)
+                .is_err()
+        );
+        finish_provider_start(&state, attempt).unwrap();
+        assert!(!provider_is_running(&state).unwrap());
+    }
+
+    #[test]
+    fn reserved_attempt_stopped_before_worker_runs_cannot_spawn_a_child() {
+        let state = Arc::new(DesktopState::default());
+        let attempt = begin_provider_start(&state).unwrap();
+        let (release, wait) = mpsc::sync_channel(0);
+        let worker_state = state.clone();
+        let worker = thread::spawn(move || {
+            wait.recv().unwrap();
+            let command = Command::new("executable-that-must-not-be-started");
+            launch_managed_provider(
+                command,
+                None,
+                &worker_state,
+                Duration::from_secs(2),
+                attempt,
+            )
+        });
+
+        assert!(!stop_connect_provider_with_timeout(&state, Duration::ZERO).unwrap());
+        release.send(()).unwrap();
+        let error = worker.join().unwrap().unwrap_err();
+
+        assert!(error.contains("cancelled"));
+        assert!(state.provider.lock().unwrap().managed.is_none());
+    }
+
+    #[test]
+    fn managed_provider_can_be_stopped_while_starting() {
+        let state = Arc::new(DesktopState::default());
+        let start_state = state.clone();
+        let attempt = begin_provider_start(&state).unwrap();
+        let start = thread::spawn(move || {
+            let provider = fixture_provider("import time; time.sleep(2)");
+            launch_managed_provider(
+                provider,
+                None,
+                &start_state,
+                Duration::from_secs(2),
+                attempt,
+            )
+        });
+
+        let registration_deadline = Instant::now() + Duration::from_secs(1);
+        while state.provider.lock().unwrap().managed.is_none() {
+            assert!(
+                Instant::now() < registration_deadline,
+                "starting provider was not registered"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!provider_is_running(&state).unwrap());
+
+        assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).unwrap());
+        assert!(start.join().unwrap().is_err());
+        assert!(state.provider.lock().unwrap().managed.is_none());
+    }
+
+    #[test]
+    fn failed_attempt_cleanup_does_not_stop_a_newer_provider() {
+        let state = DesktopState::default();
+        let stale_attempt = begin_provider_start(&state).unwrap();
+        finish_provider_start(&state, stale_attempt).unwrap();
+
+        let current_attempt = begin_provider_start(&state).unwrap();
+        let provider = fixture_provider(
+            "import sys; print('{\"ready\":true}', flush=True); sys.stdin.readline()",
+        );
+        assert!(
+            launch_managed_provider(
+                provider,
+                None,
+                &state,
+                Duration::from_secs(2),
+                current_attempt,
+            )
+            .unwrap()
+        );
+        finish_provider_start(&state, current_attempt).unwrap();
+
+        assert!(
+            !stop_provider_attempt_with_timeout(&state, stale_attempt, Duration::ZERO).unwrap()
+        );
+        assert!(provider_is_running(&state).unwrap());
+        assert!(stop_connect_provider(&state).unwrap());
+    }
+
+    #[test]
+    fn managed_provider_forced_stop_reports_the_reconciled_state() {
+        let state = DesktopState::default();
+        let directory = tempfile::tempdir().unwrap();
+        let cleanup_path = directory.path().join("cleaned-token");
+        let provider =
+            fixture_provider("import time; print('{\"ready\":true}', flush=True); time.sleep(2)");
+        let mut cleanup = fixture_provider(
+            "import os, pathlib, sys; pathlib.Path(sys.argv[1]).write_text(os.environ[sys.argv[2]])",
+        );
+        cleanup
+            .args([
+                cleanup_path.as_os_str(),
+                DESKTOP_REGISTRATION_TOKEN_ENV.as_ref(),
+            ])
+            .env(DESKTOP_REGISTRATION_TOKEN_ENV, "test-registration-token");
+        let attempt = begin_provider_start(&state).unwrap();
+        assert!(
+            launch_managed_provider(
+                provider,
+                Some(cleanup),
+                &state,
+                Duration::from_secs(2),
+                attempt,
+            )
+            .unwrap()
+        );
+        finish_provider_start(&state, attempt).unwrap();
+        assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).unwrap());
+        assert!(!provider_is_running(&state).unwrap());
+        assert_eq!(
+            fs::read_to_string(cleanup_path).unwrap(),
+            "test-registration-token"
+        );
+    }
+
+    #[test]
+    fn failed_window_close_cleanup_is_retained_and_retried_before_close() {
+        let state = DesktopState::default();
+        let directory = tempfile::tempdir().unwrap();
+        let cleanup_path = directory.path().join("cleanup-attempt");
+        let provider =
+            fixture_provider("import time; print('{\"ready\":true}', flush=True); time.sleep(2)");
+        let mut cleanup = fixture_provider(
+            "import pathlib, sys; path = pathlib.Path(sys.argv[1]); first = not path.exists(); path.write_text('attempted' if first else 'reconciled'); raise SystemExit(1 if first else 0)",
+        );
+        cleanup.arg(&cleanup_path);
+        let attempt = begin_provider_start(&state).unwrap();
+        assert!(
+            launch_managed_provider(
+                provider,
+                Some(cleanup),
+                &state,
+                Duration::from_secs(2),
+                attempt,
+            )
+            .unwrap()
+        );
+        finish_provider_start(&state, attempt).unwrap();
+
+        assert!(prepare_window_close_with_timeout(&state, Duration::from_millis(20)).is_err());
+        {
+            let lifecycle = state.provider.lock().unwrap();
+            assert!(lifecycle.managed.is_none());
+            assert!(lifecycle.pending_registration_cleanup.is_some());
+        }
+        assert!(prepare_window_close_with_timeout(&state, Duration::ZERO).is_ok());
+        assert!(
+            state
+                .provider
+                .lock()
+                .unwrap()
+                .pending_registration_cleanup
+                .is_none()
+        );
+        assert_eq!(fs::read_to_string(cleanup_path).unwrap(), "reconciled");
+    }
+
+    #[test]
+    fn connect_command_timeout_kills_and_reaps_the_child() {
+        let mut child = fixture_provider("import time; time.sleep(2)")
+            .spawn()
+            .unwrap();
+        let error = wait_for_connect_command(&mut child, Duration::from_millis(20)).unwrap_err();
+        assert!(error.contains("finish in time"));
+        assert!(child.try_wait().unwrap().is_some());
+
+        let mut completed = fixture_provider("pass").spawn().unwrap();
+        assert!(
+            wait_for_connect_command(&mut completed, Duration::from_secs(2))
+                .unwrap()
+                .success()
+        );
     }
 }

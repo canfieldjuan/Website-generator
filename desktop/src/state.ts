@@ -26,6 +26,22 @@ export type EngineArtifact = {
   payload_base64: string;
 };
 
+export function connectAvailabilityMessage(status: {
+  entitlement_active: boolean;
+  provider_running: boolean;
+}): string {
+  if (status.entitlement_active && status.provider_running) {
+    return "Website generation is available to authenticated local apps.";
+  }
+  if (status.provider_running) {
+    return "Local Connect is running, but its access is not active. Install a current issuer-signed entitlement or stop the provider.";
+  }
+  if (status.entitlement_active) {
+    return "Connect access is active. Start the provider when you want to share this capability.";
+  }
+  return "Activate Connect with an issuer-signed entitlement file.";
+}
+
 const STRING_FIELD_MAP = {
   business_name: "businessName",
   city: "city",
