@@ -2,15 +2,16 @@
 
 ## Why this slice exists
 
-`origin/main` routes extraction, HTML generation, and pitch-draft generation
-through one eager OpenRouter client and a hard-coded cloud model. Importing the
-client module can also contact Resend before email is requested. Generated HTML
-is fence-stripped and written without checking the provider finish reason or
-whether the document actually closed.
+The original baseline for this slice routed extraction, HTML generation, and
+pitch-draft generation through one eager OpenRouter client and a hard-coded
+cloud model. Importing the client module could also contact Resend before email
+was requested. Generated HTML was fence-stripped and written without checking
+the provider finish reason or whether the document actually closed. This
+paragraph records the historical problem, not current `origin/main` behavior.
 
 The accepted product direction is local-first generation with
-`qwen/qwen3.8-27b`, explicit per-run OpenRouter selection, and a shared safe
-generation seam that the next Local Connect provider slice can invoke. The
+Ollama `qwen3-30b-a3b:latest`, explicit per-run OpenRouter selection, and a
+shared safe generation seam that Local Connect invokes. The
 provider abstraction, its two CLI callers, the HTML admission gate, and the
 negative tests are one indivisible behavior change. This exceeds the 400-line
 soft target primarily because the new tests cover both sides of every provider
@@ -744,8 +745,8 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
 6. Keep every wired HTML-generation prompt aligned with body-only admission and
    deterministic document composition.
 7. Add focused unit tests, CI enrollment, and operator documentation.
-8. Replace the legacy local transport with direct loopback vLLM health,
-   model-discovery, and chat-completion contracts plus a guarded startup script.
+8. Replace the legacy local transport with direct loopback Ollama version,
+   model-discovery, metadata, and chat-completion contracts.
 9. Enforce locality at both local request entry points and exclude head metadata
    from generated bodies while preserving SVG titles; local requests never use
    environment proxies.
@@ -759,8 +760,9 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
     visible text.
 13. Preserve uncatalogued-trade builds with the existing generic document-color
     fallback while retaining explicit-brand and supported-trade precedence.
-14. Default the standalone vLLM launcher to one explicit CUDA device with zero
-    CPU offload and no cloud fallback.
+14. Require an operator-managed Ollama runtime with the exact configured model
+    already available; do not start a runtime, download a model, or fall back to
+    CPU/cloud automatically.
 15. Enforce exact class counts for the unconditional from-scratch page skeleton
     and the shared footer structure so prompt omissions cannot ship.
 16. Give the mandatory services component an exact markup contract while
@@ -775,7 +777,7 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
     when present, `0` when absent) while leaving every other count unchanged.
 20a. Reject case variants of every required class so zero-count requirements
      cannot be bypassed and positive requirements cannot admit unstyled names.
-21. Disable redirects on every shared loopback vLLM request so a local
+21. Disable redirects on every shared loopback Ollama request so a local
     response cannot replay prompts or preflight traffic to a remote target.
 22. Scan ordered visual and accessibility exposure streams in both normalized
     and compact forms so CSS, replacement text, and markup segmentation cannot
@@ -864,7 +866,8 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
   `references/03-base-template.html`, `references/06-build-prompt.md`,
   `references/07-industry-defaults.md`
 - `.github/workflows/generator-tests.yml`
-- `scripts/start_vllm_server.sh`, `scripts/start_llama_server.sh` (retirement shim)
+- `scripts/start_vllm_server.sh`, `scripts/start_llama_server.sh` (historical
+  runtime iterations; neither is part of the active Ollama request path)
 - `README.md`
 - `plans/PR-Local-Generation-Provider.md`
 
