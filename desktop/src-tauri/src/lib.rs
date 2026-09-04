@@ -1,6 +1,7 @@
 use std::{
     fs,
     io::{self, Read, Write},
+    path::Path,
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -16,9 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
-
-#[cfg(debug_assertions)]
-use std::path::Path;
 
 const MAX_ENGINE_REQUEST_BYTES: usize = 216_384;
 const MAX_ENGINE_RESPONSE_BYTES: usize = 2_900_000;
@@ -255,6 +253,30 @@ fn read_bounded(reader: impl Read, maximum: usize) -> io::Result<Vec<u8>> {
         ));
     }
     Ok(bytes)
+}
+
+fn read_bounded_file(path: &Path, maximum: usize) -> io::Result<Vec<u8>> {
+    let file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > maximum as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "selected file exceeded its boundary",
+        ));
+    }
+    read_bounded(file, maximum)
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(bytes)?;
+    temporary.as_file_mut().sync_all()?;
+    temporary.persist(path).map_err(|error| error.error)?;
+    Ok(())
 }
 
 #[cfg(not(debug_assertions))]
@@ -690,13 +712,13 @@ fn import_prospect() -> Result<Option<ImportedProspect>, String> {
     else {
         return Ok(None);
     };
-    let metadata = fs::metadata(&path)
-        .map_err(|_| "The selected prospect file could not be read.".to_owned())?;
-    if !metadata.is_file() || metadata.len() > MAX_PROSPECT_BYTES as u64 {
-        return Err("The selected prospect file is too large or invalid.".to_owned());
-    }
-    let bytes =
-        fs::read(&path).map_err(|_| "The selected prospect file could not be read.".to_owned())?;
+    let bytes = read_bounded_file(&path, MAX_PROSPECT_BYTES).map_err(|error| {
+        if error.kind() == io::ErrorKind::InvalidData {
+            "The selected prospect file is too large or invalid.".to_owned()
+        } else {
+            "The selected prospect file could not be read.".to_owned()
+        }
+    })?;
     let document = decode_unique_json(&bytes).map_err(|_| {
         "The selected prospect file is not valid JSON or contains duplicate keys.".to_owned()
     })?;
@@ -726,7 +748,7 @@ fn export_prospect(prospect: Value) -> Result<Option<String>, String> {
     else {
         return Ok(None);
     };
-    fs::write(&path, bytes).map_err(|_| "Prospect JSON could not be saved.".to_owned())?;
+    write_atomic(&path, &bytes).map_err(|_| "Prospect JSON could not be saved.".to_owned())?;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
@@ -745,7 +767,7 @@ fn save_artifact(state: State<'_, Arc<DesktopState>>) -> Result<Option<String>, 
     else {
         return Ok(None);
     };
-    fs::write(&path, cached.bytes)
+    write_atomic(&path, &cached.bytes)
         .map_err(|_| "The generated website could not be saved.".to_owned())?;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
@@ -792,6 +814,31 @@ mod tests {
             read_bounded(&b"abcde"[..], 4).unwrap_err().kind(),
             io::ErrorKind::InvalidData
         );
+    }
+
+    #[test]
+    fn bounded_file_reader_rechecks_the_open_handle_and_caps_the_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("prospect.json");
+        fs::write(&path, b"abcd").unwrap();
+        assert_eq!(read_bounded_file(&path, 4).unwrap(), b"abcd");
+
+        fs::write(&path, b"abcde").unwrap();
+        assert_eq!(
+            read_bounded_file(&path, 4).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn atomic_write_replaces_only_after_the_new_bytes_are_complete() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("prospect.json");
+        fs::write(&path, b"original").unwrap();
+
+        write_atomic(&path, b"replacement").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"replacement");
     }
 
     #[test]

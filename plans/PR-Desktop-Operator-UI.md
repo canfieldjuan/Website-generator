@@ -89,7 +89,9 @@ memory, are sent inside the private Tauri IPC request, and are cleared when the
 provider changes or the window closes.
 
 Rust owns all filesystem and process effects. Import/export/save commands open
-native dialogs and enforce bounded UTF-8/HTML payloads. The generation command
+native dialogs, cap reads on the opened file handle, and atomically replace
+saved UTF-8/HTML payloads only after a same-directory temporary file is synced.
+The generation command
 launches the packaged engine with the `desktop` subcommand, writes exactly one
 JSON request to stdin, closes stdin, reads bounded stdout/stderr, and accepts
 only the versioned response envelope. A shared application-state slot rejects a
@@ -128,13 +130,14 @@ closing a preview revokes its prior Blob URL.
 
 - `npm test` from `desktop/`: 1 test file passed, 10 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
-- `cargo test` from `desktop/src-tauri/`: 9 tests passed. The boundary tests
+- `cargo test` from `desktop/src-tauri/`: 11 tests passed. The boundary tests
   include cancellation before child registration and reject nested numeric
   tokens that cannot survive the JavaScript round trip exactly during import,
   duplicate keys at the root or nested inside arrays/objects, and imports whose
-  canonical export would exceed the admitted size. The Windows run adds a tenth
-  process-tree regression proving cancellation also terminates a spawned
-  descendant.
+  canonical export would exceed the admitted size. They also prove bounded
+  file reads and atomic replacement of an existing saved artifact. The Windows
+  run adds a twelfth process-tree regression proving cancellation also
+  terminates a spawned descendant.
 - `cargo clippy --all-targets --all-features -- -D warnings` from
   `desktop/src-tauri/`: passed with no warnings.
 - `cargo build` from `desktop/src-tauri/`: native debug build passed.
