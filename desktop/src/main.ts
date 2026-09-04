@@ -671,5 +671,9 @@ window.addEventListener("beforeunload", () => {
   if (previewUrl) URL.revokeObjectURL(previewUrl);
 });
 
+window.addEventListener("focus", () => {
+  if (!connectBusy) void refreshConnectStatus();
+});
+
 writeFields(emptyProspectFields());
 void refreshConnectStatus();

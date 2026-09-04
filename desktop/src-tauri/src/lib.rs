@@ -51,6 +51,7 @@ struct CachedArtifact {
 struct ManagedProvider {
     child: Child,
     stdin: Option<ChildStdin>,
+    ready: bool,
 }
 
 #[derive(Default)]
@@ -548,7 +549,7 @@ fn provider_is_running(state: &DesktopState) -> Result<bool, String> {
         slot.take();
         return Ok(false);
     }
-    Ok(true)
+    Ok(provider.ready)
 }
 
 fn connect_status_from(
@@ -617,6 +618,13 @@ fn launch_managed_provider(
     thread::spawn(move || {
         let _ = sender.send(read_provider_readiness(stdout));
     });
+    *slot = Some(ManagedProvider {
+        child,
+        stdin: Some(stdin),
+        ready: false,
+    });
+    drop(slot);
+
     let readiness = match receiver.recv_timeout(startup_timeout) {
         Ok(Ok(line)) => parse_provider_readiness(&line),
         Ok(Err(_)) => Err("The Local Connect provider readiness was invalid.".to_owned()),
@@ -628,28 +636,30 @@ fn launch_managed_provider(
         }
     };
     if let Err(error) = readiness {
-        force_reap(&mut child).map_err(|_| {
+        stop_connect_provider_with_timeout(state, Duration::ZERO).map_err(|_| {
             "The Local Connect provider could not be stopped after failed startup.".to_owned()
         })?;
         return Err(error);
     }
     thread::sleep(Duration::from_millis(50));
-    match child.try_wait() {
+    let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    let Some(provider) = slot.as_mut() else {
+        return Err("The Local Connect provider stopped during startup.".to_owned());
+    };
+    match provider.child.try_wait() {
         Ok(Some(_)) => {
+            slot.take();
             return Err("The Local Connect provider stopped during startup.".to_owned());
         }
-        Ok(None) => {}
+        Ok(None) => provider.ready = true,
         Err(_) => {
-            force_reap(&mut child).map_err(|_| {
+            force_reap(&mut provider.child).map_err(|_| {
                 "The Local Connect provider could not be stopped after a status failure.".to_owned()
             })?;
+            slot.take();
             return Err("The Local Connect provider status is unavailable.".to_owned());
         }
     }
-    *slot = Some(ManagedProvider {
-        child,
-        stdin: Some(stdin),
-    });
     Ok(true)
 }
 
@@ -1541,6 +1551,30 @@ mod tests {
         let early_exit = fixture_provider("pass");
         assert!(launch_managed_provider(early_exit, &state, Duration::from_secs(2)).is_err());
         assert!(!provider_is_running(&state).unwrap());
+    }
+
+    #[test]
+    fn managed_provider_can_be_stopped_while_starting() {
+        let state = Arc::new(DesktopState::default());
+        let start_state = state.clone();
+        let start = thread::spawn(move || {
+            let provider = fixture_provider("import time; time.sleep(2)");
+            launch_managed_provider(provider, &start_state, Duration::from_secs(2))
+        });
+
+        let registration_deadline = Instant::now() + Duration::from_secs(1);
+        while state.provider.lock().unwrap().is_none() {
+            assert!(
+                Instant::now() < registration_deadline,
+                "starting provider was not registered"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!provider_is_running(&state).unwrap());
+
+        assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).unwrap());
+        assert!(start.join().unwrap().is_err());
+        assert!(state.provider.lock().unwrap().is_none());
     }
 
     #[test]
