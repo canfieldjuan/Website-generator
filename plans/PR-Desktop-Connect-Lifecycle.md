@@ -75,7 +75,9 @@ no packaged implementation, or packaging with no operator-visible proof.
   60-second startup window sized for the three sequential Ollama preflight
   requests plus packaged executable startup. Early exit, a malformed or
   oversized first line, or timeout kills and reaps the child and reports a
-  stable error. A second start is idempotent; a second provider process is never
+  stable error. Python flushes that handshake without closing process stdout,
+  then redirects later generator progress to a live sink for the provider
+  lifetime. A second start is idempotent; a second provider process is never
   created.
 - The child is recorded as starting before Rust waits for readiness and no
   provider mutex is held across that wait. Close/Stop can therefore signal or
@@ -175,7 +177,7 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 ## Estimated diff size
 
-The final patch contains 1,887 additions and 35 deletions across 12 files for
+The final patch contains 1,898 additions and 35 deletions across 12 files for
 the provider readiness adapter, native lifecycle controller, compact UI
 surface, tests, and Windows smoke step. The provider HTTP contract and
 generation stack are not part of this diff.

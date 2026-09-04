@@ -154,10 +154,9 @@ def start_desktop_shutdown_watcher(
 
 
 def emit_desktop_readiness(output: TextIO) -> None:
-    """Write the one desktop handshake and close its dedicated output pipe."""
+    """Write and flush the one desktop handshake without closing stdout."""
     output.write('{"ready":true}\n')
     output.flush()
-    output.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -231,6 +230,8 @@ def main(argv: list[str] | None = None) -> int:
     registration_ownership: ProviderLock | None = None
     token = desktop_registration_token if desktop_managed else new_bearer_token()
     listener: socket.socket | None = None
+    desktop_stdout: TextIO | None = None
+    desktop_output_sink: TextIO | None = None
     try:
         store = ConnectStore(state_dir / "connect-v2.sqlite3")
         try:
@@ -260,7 +261,10 @@ def main(argv: list[str] | None = None) -> int:
         if desktop_managed:
             input_stream = getattr(sys.stdin, "buffer", sys.stdin)
             start_desktop_shutdown_watcher(server, input_stream)
-            emit_desktop_readiness(sys.stdout)
+            desktop_stdout = sys.stdout
+            desktop_output_sink = open(os.devnull, "w", encoding="utf-8")
+            emit_desktop_readiness(desktop_stdout)
+            sys.stdout = desktop_output_sink
         else:
             print(
                 f"Website Redesign Connect v2 is available at "
@@ -279,6 +283,10 @@ def main(argv: list[str] | None = None) -> int:
         if registration_ownership is not None:
             registration_ownership.close()
         provider_lock.close()
+        if desktop_output_sink is not None:
+            if sys.stdout is desktop_output_sink and desktop_stdout is not None:
+                sys.stdout = desktop_stdout
+            desktop_output_sink.close()
 
 
 if __name__ == "__main__":

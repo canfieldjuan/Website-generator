@@ -1130,11 +1130,12 @@ class GenerationSeamTests(unittest.TestCase):
             ) as watcher, patch.object(
                 connect_provider.uvicorn.Server,
                 "run",
+                side_effect=lambda **_kwargs: print("post-handshake progress"),
             ), redirect_stdout(output):
                 self.assertEqual(connect_provider.main(), 0)
 
             self.assertEqual(output.getvalue(), '{"ready":true}\n')
-            self.assertTrue(output.closed_by_provider)
+            self.assertFalse(output.closed_by_provider)
             watcher.assert_called_once()
 
     def test_desktop_shutdown_pipe_stops_the_managed_server(self):
