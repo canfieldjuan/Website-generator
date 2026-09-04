@@ -1,5 +1,15 @@
 # Local-first generation provider
 
+## Document status
+
+This plan retains the implementation history that led through LM Studio,
+llama.cpp, and vLLM. Those named runtime revisions and their verification
+entries are historical evidence, not current startup instructions. The current
+contract is the accepted direction below plus `Scope (this PR)`, `Mechanism`,
+`Intentional`, `Completed dependent slices`, `Deferred`, and `Current Ollama
+completion proof`. Where older narrative conflicts with those sections, current
+executable code and the current contract control.
+
 ## Why this slice exists
 
 The original baseline for this slice routed extraction, HTML generation, and
