@@ -625,8 +625,9 @@ fn connect_status_from(
 }
 
 fn connect_status_value(app: &AppHandle, state: &DesktopState) -> Result<ConnectStatus, String> {
+    let entitlement = read_entitlement_status(app);
     let running = provider_is_running(state)?;
-    Ok(connect_status_from(read_entitlement_status(app), running))
+    Ok(connect_status_from(entitlement, running))
 }
 
 fn require_active_entitlement(entitlement: &EntitlementStatus) -> Result<(), String> {
@@ -1151,7 +1152,7 @@ async fn connect_status(
 }
 
 #[tauri::command]
-fn install_connect_entitlement(
+async fn install_connect_entitlement(
     app: AppHandle,
     state: State<'_, Arc<DesktopState>>,
 ) -> Result<Option<ConnectStatus>, String> {
@@ -1161,22 +1162,27 @@ fn install_connect_entitlement(
     else {
         return Ok(None);
     };
-    let result = run_cli_json(
-        &app,
-        &[
-            OsString::from("entitlement"),
-            OsString::from("install"),
-            path.into_os_string(),
-        ],
-    )?;
-    let entitlement = parse_entitlement_status(result)?;
-    let running = provider_is_running(&state)?;
-    Ok(Some(ConnectStatus {
-        entitlement_state: entitlement.state,
-        entitlement_active: entitlement.active,
-        provider_running: running,
-        provider_managed: running,
-    }))
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = run_cli_json(
+            &app,
+            &[
+                OsString::from("entitlement"),
+                OsString::from("install"),
+                path.into_os_string(),
+            ],
+        )?;
+        let entitlement = parse_entitlement_status(result)?;
+        let running = provider_is_running(&state)?;
+        Ok(Some(ConnectStatus {
+            entitlement_state: entitlement.state,
+            entitlement_active: entitlement.active,
+            provider_running: running,
+            provider_managed: running,
+        }))
+    })
+    .await
+    .map_err(|_| "The Local Connect activation stopped unexpectedly.".to_owned())?
 }
 
 #[tauri::command]

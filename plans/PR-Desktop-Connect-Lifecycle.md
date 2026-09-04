@@ -67,7 +67,10 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 - Entitlement status and install execute the packaged engine's existing
   `entitlement` subcommands. Rust never parses, copies, signs, or persists the
-  license itself, and the selected source path is not returned to the UI.
+  license itself, and the selected source path is not returned to the UI. Slow
+  entitlement subprocesses run off the desktop event loop, and current status
+  checks inspect the child after the entitlement read so their running state is
+  not older than that bounded subprocess.
 - Provider start first requires the activation adapter to report `active`.
   It then launches the same executable with an explicit desktop-managed serve
   flag. The Python process emits exactly one compact readiness envelope only
@@ -154,7 +157,7 @@ no packaged implementation, or packaging with no operator-visible proof.
   no-command standalone mode.
 - `python -m compileall -q build.py pipeline.py connect_provider.py lib tests`:
   passed.
-- `npm test` from `desktop/`: 1 test file passed, 14 tests passed.
+- `npm test` from `desktop/`: 1 test file passed, 15 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
 - `cargo fmt --check` from `desktop/src-tauri/`: passed.
 - `cargo test` from `desktop/src-tauri/`: 25 tests passed. The lifecycle cases
@@ -183,7 +186,7 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 ## Estimated diff size
 
-The final patch contains 1,938 additions and 35 deletions across 14 files for
+The final patch contains 1,947 additions and 35 deletions across 14 files for
 the provider readiness adapter, native lifecycle controller, compact UI
 surface, tests, and Windows smoke step. The provider HTTP contract and
 generation stack are not part of this diff.
