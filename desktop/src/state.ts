@@ -39,7 +39,7 @@ export function emptyProspectFields(): ProspectFields {
     businessName: "",
     trade: "",
     city: "",
-    state: "IL",
+    state: "",
     phone: "",
     address: "",
     ownerEmail: "",

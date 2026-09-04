@@ -12,7 +12,9 @@ import {
 
 describe("prospect projection", () => {
   it("does not invent a trade for a new or incomplete prospect", () => {
-    expect(fieldsFromProspect({}).trade).toBe("");
+    const fields = fieldsFromProspect({});
+    expect(fields.trade).toBe("");
+    expect(fields.state).toBe("");
   });
 
   it("rejects unsupported known values instead of silently rewriting them", () => {
