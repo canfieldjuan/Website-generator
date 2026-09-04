@@ -115,15 +115,22 @@ closing a preview revokes its prior Blob URL.
 
 ## Verification
 
-- Frontend typecheck and production build.
-- Frontend state/protocol tests, including unknown-field preservation, provider
-  credential clearing, exact artifact decode, and stale-result rejection.
-- Rust format, unit tests, and Clippy with warnings denied.
-- Tauri development build against the source engine.
-- Existing Python suite and compile gate remain green.
-- Windows installer build and smoke launch on the available Windows VM, plus a
-  no-write local status check and one designated fixture generation.
-- `bash scripts/local_pr_review.sh` after commit.
+- `npm test` from `desktop/`: 1 test file passed, 9 tests passed.
+- `npm run build` from `desktop/`: TypeScript and Vite production build passed.
+- `cargo test` from `desktop/src-tauri/`: 5 tests passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` from
+  `desktop/src-tauri/`: passed with no warnings.
+- `cargo build` from `desktop/src-tauri/`: native debug build passed.
+- `xvfb-run -a timeout 3s desktop/src-tauri/target/debug/website-generator`:
+  the native app remained running for the smoke window and emitted no stderr.
+- Direct `generation.status` desktop-protocol probe with the UI's local payload:
+  returned available for provider `local`, model `qwen3-30b-a3b:latest`, and
+  the loopback Ollama base URL.
+- Desktop and mobile viewport screenshots: inspected with no horizontal cutoff.
+- `python scripts/run_local_pr_review.py --base origin/main`: passed.
+- `.github/workflows/generator-tests.yml`: parsed as valid YAML. The
+  `windows-connect-package` job supplies the native Windows engine and NSIS
+  package proof on the PR head; it is not represented as local VM proof.
 
 ## Estimated diff size
 

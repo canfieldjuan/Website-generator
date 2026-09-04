@@ -248,6 +248,7 @@ function syncProviderFields(provider: "local" | "openrouter"): void {
   openRouterSettings.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
     input.disabled = provider !== "openrouter";
   });
+  checkModelButton.textContent = provider === "local" ? "Check model connection" : "Validate cloud settings";
 }
 
 function collectFields(): ProspectFields {
@@ -381,6 +382,15 @@ checkModelButton.addEventListener("click", async () => {
   setStatus("Checking the selected model…", "working");
   try {
     const status = await checkEngine(currentGeneration());
+    if (selectedProvider() === "openrouter") {
+      setStatus(
+        status.available
+          ? "OpenRouter settings are accepted. The connection will be verified when you generate."
+          : "Complete the OpenRouter model and API key settings.",
+        status.available ? "success" : "error",
+      );
+      return;
+    }
     setStatus(
       status.available
         ? `${status.model} is ready.`
