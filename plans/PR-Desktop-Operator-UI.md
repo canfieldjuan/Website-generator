@@ -65,6 +65,7 @@ being done without competing with the customer preview.
    enforce one active generation, bound stdin/stdout, support cancellation, and
    surface stable engine errors.
 5. Decode the admitted HTML artifact, render it only in a sandboxed preview,
+   reproduce the trusted failed-image fallback without enabling iframe scripts,
    and save those exact bytes through a native dialog.
 6. Produce and exercise the native Windows installer using the existing Windows
    packaging host and approved public entitlement keyring.
@@ -104,9 +105,12 @@ builds locate the source checkout and Python entry point; packaged builds use
 the bundled engine executable.
 
 The preview receives a Blob URL generated from admitted bytes and uses an iframe
-with an empty `sandbox` token set. Generated scripts therefore cannot execute,
-navigate the app, submit forms, or inherit the desktop origin. Replacing or
-closing a preview revokes its prior Blob URL.
+whose sandbox permits same-origin DOM inspection but not script execution,
+forms, popups, or top-level navigation. The parent process attaches one-shot
+image error listeners after the document loads and hides images that already
+failed, reproducing the code-owned saved-artifact fallback without executing the
+artifact's inline handler. Replacing or closing a preview revokes its prior Blob
+URL.
 
 ## Intentional
 
@@ -132,7 +136,7 @@ closing a preview revokes its prior Blob URL.
 
 ## Verification
 
-- `npm test` from `desktop/`: 1 test file passed, 11 tests passed.
+- `npm test` from `desktop/`: 1 test file passed, 14 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
 - `cargo test` from `desktop/src-tauri/`: 11 tests passed. The boundary tests
   include cancellation before child registration and reject nested numeric

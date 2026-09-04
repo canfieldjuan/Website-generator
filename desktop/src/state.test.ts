@@ -6,6 +6,7 @@ import {
   decodeArtifact,
   documentForGeneration,
   fieldsFromProspect,
+  installPreviewImageFallbacks,
   mergeProspectFields,
   settingsForProvider,
   type EngineArtifact,
@@ -179,6 +180,59 @@ describe("artifact boundary", () => {
     expect(() => decodeArtifact(artifact(btoa("a"), 2 * 1024 * 1024 + 1))).toThrow(
       "invalid",
     );
+  });
+});
+
+describe("preview image fallback", () => {
+  it("hides failed images without enabling scripts in the preview", () => {
+    let errorHandler: (() => void) | undefined;
+    const image = {
+      complete: false,
+      naturalWidth: 0,
+      style: { display: "" },
+      addEventListener: (
+        event: string,
+        handler: () => void,
+        options: AddEventListenerOptions,
+      ) => {
+        expect(event).toBe("error");
+        expect(options).toEqual({ once: true });
+        errorHandler = handler;
+      },
+    } as unknown as HTMLImageElement;
+
+    installPreviewImageFallbacks([image]);
+    expect(image.style.display).toBe("");
+    expect(errorHandler).toBeTypeOf("function");
+
+    errorHandler?.();
+    expect(image.style.display).toBe("none");
+  });
+
+  it("hides an image that had already failed before the load handler ran", () => {
+    const image = {
+      complete: true,
+      naturalWidth: 0,
+      style: { display: "" },
+      addEventListener: () => undefined,
+    } as unknown as HTMLImageElement;
+
+    installPreviewImageFallbacks([image]);
+
+    expect(image.style.display).toBe("none");
+  });
+
+  it("keeps an image visible when it has already loaded successfully", () => {
+    const image = {
+      complete: true,
+      naturalWidth: 640,
+      style: { display: "" },
+      addEventListener: () => undefined,
+    } as unknown as HTMLImageElement;
+
+    installPreviewImageFallbacks([image]);
+
+    expect(image.style.display).toBe("");
   });
 });
 

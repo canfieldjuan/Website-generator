@@ -123,6 +123,16 @@ export function documentForGeneration(document: ProspectDocument): ProspectDocum
   return normalized;
 }
 
+export function installPreviewImageFallbacks(images: readonly HTMLImageElement[]): void {
+  for (const image of images) {
+    const hideFailedImage = (): void => {
+      image.style.display = "none";
+    };
+    image.addEventListener("error", hideFailedImage, { once: true });
+    if (image.complete && image.naturalWidth === 0) hideFailedImage();
+  }
+}
+
 export function settingsForProvider(
   provider: "local" | "openrouter",
   values: {

@@ -15,6 +15,7 @@ import {
   documentForGeneration,
   emptyProspectFields,
   fieldsFromProspect,
+  installPreviewImageFallbacks,
   mergeProspectFields,
   settingsForProvider,
   type ProspectDocument,
@@ -188,9 +189,9 @@ app.innerHTML = `
           <div class="empty-preview" id="empty-preview">
             <div class="page-outline" aria-hidden="true"><i></i><i></i><i></i></div>
             <h3>Your generated page will appear here</h3>
-            <p>The preview is isolated from the app and cannot run scripts or submit forms.</p>
+            <p>The preview is sandboxed and cannot run scripts or submit forms.</p>
           </div>
-          <iframe id="site-preview" title="Generated customer website" sandbox referrerpolicy="no-referrer" hidden></iframe>
+          <iframe id="site-preview" title="Generated customer website" sandbox="allow-same-origin" referrerpolicy="no-referrer" hidden></iframe>
           <div class="generation-sweep" aria-hidden="true"></div>
         </div>
         <div class="artifact-receipt" id="artifact-receipt" hidden>
@@ -231,6 +232,12 @@ let busy = false;
 let activeGeneration: Promise<void> | null = null;
 const attempts = new AttemptGate();
 const editedProspectFields = new Set<ProspectFieldKey>();
+
+preview.addEventListener("load", () => {
+  const previewDocument = preview.contentDocument;
+  if (!previewDocument) return;
+  installPreviewImageFallbacks(Array.from(previewDocument.images));
+});
 
 const prospectControlFields: Record<string, ProspectFieldKey> = {
   "business-name": "businessName",
