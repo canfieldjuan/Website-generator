@@ -85,13 +85,13 @@ export function mergeProspectFields(
     const value = fields[fieldKey].trim();
     if (value) {
       merged[documentKey] = value;
-    } else {
+    } else if (source[documentKey] !== null) {
       delete merged[documentKey];
     }
   }
   if (fields.trade) {
     merged.trade = fields.trade;
-  } else {
+  } else if (source.trade !== null) {
     delete merged.trade;
   }
   const services = fields.servicesText
@@ -100,7 +100,7 @@ export function mergeProspectFields(
     .filter(Boolean);
   if (services.length) {
     merged.services = services;
-  } else {
+  } else if (source.services !== null) {
     delete merged.services;
   }
   return merged;

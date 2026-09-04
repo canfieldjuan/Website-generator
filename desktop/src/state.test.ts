@@ -71,6 +71,20 @@ describe("prospect projection", () => {
     expect(merged).not.toHaveProperty("owner_email");
     expect(merged).not.toHaveProperty("services");
   });
+
+  it("preserves explicit nulls during an untouched import and export round trip", () => {
+    const imported = {
+      business_name: "Example Plumbing",
+      trade: null,
+      address: null,
+      owner_email: null,
+      services: null,
+    };
+
+    const merged = mergeProspectFields(imported, fieldsFromProspect(imported));
+
+    expect(merged).toEqual(imported);
+  });
 });
 
 describe("provider session state", () => {

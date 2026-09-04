@@ -140,6 +140,9 @@ closing a preview revokes its prior Blob URL.
 - Direct `generation.status` desktop-protocol probe with the UI's local payload:
   returned available for provider `local`, model `qwen3-30b-a3b:latest`, and
   the loopback Ollama base URL.
+- Canonical plumber fixture build completed through local Ollama with
+  `qwen3-30b-a3b:latest`; the required unresolved-placeholder and fabricated-
+  claim scans each returned `0` matches.
 - Desktop and mobile viewport screenshots: inspected with no horizontal cutoff.
 - `bash scripts/local_pr_review.sh`: passed.
 - `.github/workflows/generator-tests.yml`: parsed as valid YAML. The
