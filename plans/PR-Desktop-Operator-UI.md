@@ -127,7 +127,7 @@ closing a preview revokes its prior Blob URL.
   returned available for provider `local`, model `qwen3-30b-a3b:latest`, and
   the loopback Ollama base URL.
 - Desktop and mobile viewport screenshots: inspected with no horizontal cutoff.
-- `python scripts/run_local_pr_review.py --base origin/main`: passed.
+- `bash scripts/local_pr_review.sh`: passed.
 - `.github/workflows/generator-tests.yml`: parsed as valid YAML. The
   `windows-connect-package` job supplies the native Windows engine and NSIS
   package proof on the PR head; it is not represented as local VM proof.
