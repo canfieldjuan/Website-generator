@@ -24,9 +24,9 @@ same bounded regular file that it opened without following a final symlink.
 3. Treat non-regular, symlinked, oversized, disappeared, or replaced paths as
    unowned while retaining existing optional propagation for genuine I/O
    failures on a canonical regular registration.
-4. Serialize external Windows token cleanup with the same per-instance lock a
-   live provider holds before publication, so stale cleanup cannot unlink a
-   replacement owned by a restarted provider.
+4. Serialize external token cleanup on every platform with the same per-instance
+   lock a live provider holds before publication, so stale cleanup cannot unlink
+   a replacement owned by a restarted provider.
 5. Add boundary tests for valid owned registration, symlink, FIFO/non-regular,
    oversized file, and replacement during validation, including the Windows
    pre-unlink and live-provider ownership boundaries.
@@ -49,10 +49,13 @@ The parent-directory open preserves supported symlinked runtime-directory
 overrides; only the final registration entry is no-follow. Only admitted bytes
 reach JSON and token validation. Windows keeps its existing ACL-aware bounded
 reader and repeats that bounded read immediately before unlink, requiring the
-same registration bytes. External Windows token cleanup also acquires the
-candidate's per-instance ownership lock before validation and holds it through
-unlink. Since providers acquire that lock before publication and retain it for
-their lifetime, stale cleanup skips a registration owned by a live restart.
+same registration bytes. External token cleanup on both platforms also acquires
+the candidate's per-instance ownership lock before validation and holds it
+through unlink. Since providers acquire that lock before publication and retain
+it for their lifetime, stale cleanup skips a registration owned by a live
+restart. POSIX stores this advisory lock inside the runtime directory so
+symlinked aliases converge on the same lock inode; Windows retains its existing
+private per-instance lock path.
 
 ## Intentional
 
@@ -77,19 +80,23 @@ their lifetime, stale cleanup skips a registration owned by a live restart.
   and removed a final symlink, removed an oversized registration, and blocked
   while opening a FIFO.
 - `python -m unittest -v tests.test_connect_provider.RegistrationTests` passed
-  19 tests, including exact-size/max-plus-one, mixed valid/unsafe candidates,
+  20 tests, including exact-size/max-plus-one, mixed valid/unsafe candidates,
   stable I/O failure propagation, replacement-before-unlink boundaries, and
   both cleanup paths through a symlinked runtime-directory override. A
   platform-neutral Windows-path probe proves changed registration bytes prevent
-  unlink, and another proves busy instance ownership prevents token cleanup.
+  unlink, another proves busy instance ownership prevents token cleanup, and a
+  real POSIX handoff proves cleanup waits for provider ownership.
 - `tests/test_connect_windows.py` extends the native Windows package gate to
   prove a held provider lock blocks cleanup, release permits cleanup, and the
   cleanup lock is itself released for the next provider. That exact platform
   result is pending GitHub's Windows job on the pushed head.
 - With `CONNECT_CONTRACTS_DIR=/home/juan-canfield/Desktop/connect-contracts`,
-  `python -m unittest -v tests.test_connect_provider` passed 72 tests.
-- With the same contract directory, `python -m unittest discover -s tests`
-  passed 279 tests with 10 native-Windows skips.
+  `python -m unittest -q tests.test_connect_provider` passed 76 tests on the
+  current change.
+- Before the review fixes, the same contract directory and
+  `python -m unittest discover -s tests` passed 279 tests with 10
+  native-Windows skips; the exact pushed head is covered by GitHub's unit and
+  Windows jobs.
 - `python -m compileall -q connect_provider.py lib tests` and
   `git diff --check` passed.
 - The required no-effect local fixture used the already-installed
@@ -107,9 +114,9 @@ their lifetime, stale cleanup skips a registration owned by a live restart.
 
 ## Estimated diff size
 
-The current diff contains 592 added lines and 67 removed lines across the reader,
+The current diff contains 642 added lines and 71 removed lines across the reader,
 ownership coordination, their boundary matrix, and this plan. This exceeds the
-400-line soft target because
-the guard and its pass/fail, mixed-object, numeric-boundary, blocking, and race
+400-line soft target because the guard and its pass/fail, mixed-object,
+numeric-boundary, blocking, and race
 probes are one indivisible safety change; splitting the tests would publish an
 unproved cleanup guard.

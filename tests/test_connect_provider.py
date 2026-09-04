@@ -40,6 +40,7 @@ from lib.connect_v2 import (
     ProviderRuntime,
     ProtocolError,
     _authenticate,
+    acquire_registration_ownership,
     create_app,
     decode_job_request,
     default_runtime_dir,
@@ -1683,6 +1684,28 @@ class RegistrationTests(unittest.TestCase):
 
             acquire_ownership.assert_called_once_with(runtime, instance_id)
             remove_registration.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX registration ownership")
+    def test_posix_token_cleanup_waits_for_provider_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            document = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            ownership = acquire_registration_ownership(
+                runtime, document["instance_id"]
+            )
+            self.assertIsNotNone(ownership)
+            path = write_registration(runtime, document)
+            try:
+                self.assertEqual(remove_registration_for_token(runtime, TOKEN), 0)
+                self.assertTrue(path.exists())
+            finally:
+                if ownership is not None:
+                    ownership.close()
+
+            self.assertEqual(remove_registration_for_token(runtime, TOKEN), 1)
+            self.assertFalse(path.exists())
 
     def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
         with tempfile.TemporaryDirectory() as directory:

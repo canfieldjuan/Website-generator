@@ -781,18 +781,22 @@ def windows_v2_ownership_lock_path(
 def acquire_registration_ownership(
     directory: str | Path, instance_id: str
 ) -> ProviderLock | None:
-    if os.name != "nt":
-        return None
-    lock_path = windows_v2_ownership_lock_path(directory, instance_id)
-    ensure_private_directory(lock_path.parent, root=local_app_data_root())
+    if os.name == "nt":
+        lock_path = windows_v2_ownership_lock_path(directory, instance_id)
+        ensure_private_directory(lock_path.parent, root=local_app_data_root())
+        return ProviderLock(lock_path)
+    if not is_uuid4(instance_id):
+        raise ValueError("Registration instance_id must be a lowercase UUIDv4.")
+    provider_dir = Path(directory)
+    provider_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(provider_dir, 0o700)
+    lock_path = provider_dir / f".{APP_ID}-{instance_id}.lock"
     return ProviderLock(lock_path)
 
 
 def _try_acquire_registration_cleanup_ownership(
     directory: str | Path, instance_id: str
 ) -> tuple[bool, ProviderLock | None]:
-    if os.name != "nt":
-        return True, None
     try:
         return True, acquire_registration_ownership(directory, instance_id)
     except RuntimeError:
