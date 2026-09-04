@@ -24,7 +24,6 @@ const MAX_ENGINE_RESPONSE_BYTES: usize = 2_900_000;
 const MAX_ENGINE_STDERR_BYTES: usize = 65_536;
 const MAX_PROSPECT_BYTES: usize = 200_000;
 const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
-const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 const ENGINE_IDLE: u8 = 0;
 const ENGINE_ACTIVE: u8 = 1;
 const ENGINE_CANCELLED: u8 = 2;
@@ -66,7 +65,32 @@ fn kill_running(state: &DesktopState) {
         return;
     };
     if let Some(child) = running.as_mut() {
-        let _ = child.kill();
+        let _ = terminate_process_tree(child);
+    }
+}
+
+fn terminate_process_tree(child: &mut Child) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("taskkill.exe");
+        command
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        hide_console_window(&mut command);
+        let status = command.status()?;
+        if status.success() || child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        return Err(io::Error::other(
+            "Windows could not terminate the process tree",
+        ));
+    }
+
+    #[cfg(not(windows))]
+    {
+        child.kill()
     }
 }
 
@@ -117,8 +141,7 @@ fn request_engine_cancellation(state: &DesktopState) -> Result<bool, String> {
             .map_err(|_| "The Website Generator process status is unavailable.".to_owned())?
             .is_some();
         if !exited {
-            child
-                .kill()
+            terminate_process_tree(child)
                 .map_err(|_| "The Website Generator process could not be cancelled.".to_owned())?;
         }
     }
@@ -344,36 +367,137 @@ fn validate_artifact(value: Value) -> Result<(EngineArtifact, CachedArtifact), S
     Ok((artifact, cached))
 }
 
-fn require_js_safe_integers(value: &Value) -> Result<(), String> {
-    match value {
-        Value::Number(number) => {
-            let unsafe_integer = if let Some(value) = number.as_i64() {
-                !(-JS_MAX_SAFE_INTEGER..=JS_MAX_SAFE_INTEGER).contains(&value)
-            } else if let Some(value) = number.as_u64() {
-                value > JS_MAX_SAFE_INTEGER as u64
-            } else if let Some(value) = number.as_f64() {
-                value.fract() == 0.0 && value.abs() > JS_MAX_SAFE_INTEGER as f64
-            } else {
-                true
-            };
-            if unsafe_integer {
-                return Err(
-                    "Prospect JSON contains an integer this app cannot preserve exactly."
-                        .to_owned(),
-                );
-            }
+#[derive(Debug, PartialEq, Eq)]
+struct CanonicalDecimal {
+    negative: bool,
+    digits: String,
+    exponent: i64,
+}
+
+fn canonical_decimal(token: &str) -> Option<CanonicalDecimal> {
+    let (negative, unsigned) = match token.strip_prefix('-') {
+        Some(unsigned) => (true, unsigned),
+        None => (false, token),
+    };
+    let (mantissa, exponent) = match unsigned.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, exponent.parse::<i64>().ok()?),
+        None => (unsigned, 0),
+    };
+    let (whole, fraction) = match mantissa.split_once('.') {
+        Some(parts) => parts,
+        None => (mantissa, ""),
+    };
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let fraction_len = i64::try_from(fraction.len()).ok()?;
+    let mut power = exponent.checked_sub(fraction_len)?;
+    let combined = format!("{whole}{fraction}");
+    let significant = combined.trim_start_matches('0');
+    if significant.is_empty() {
+        return Some(CanonicalDecimal {
+            negative,
+            digits: "0".to_owned(),
+            exponent: 0,
+        });
+    }
+    let mut digits = significant.to_owned();
+    while digits.ends_with('0') {
+        digits.pop();
+        power = power.checked_add(1)?;
+    }
+    Some(CanonicalDecimal {
+        negative,
+        digits,
+        exponent: power,
+    })
+}
+
+fn exceeds_js_safe_integer(number: &CanonicalDecimal) -> bool {
+    if number.digits == "0" || number.exponent < 0 {
+        return false;
+    }
+    let Ok(zeroes) = usize::try_from(number.exponent) else {
+        return true;
+    };
+    let Some(length) = number.digits.len().checked_add(zeroes) else {
+        return true;
+    };
+    const MAX_SAFE: &str = "9007199254740991";
+    if length != MAX_SAFE.len() {
+        return length > MAX_SAFE.len();
+    }
+    let mut magnitude = number.digits.clone();
+    magnitude.extend(std::iter::repeat_n('0', zeroes));
+    magnitude.as_str() > MAX_SAFE
+}
+
+fn require_js_roundtrip_number_token(token: &str) -> Result<(), String> {
+    let original = canonical_decimal(token);
+    let parsed = token.parse::<f64>().ok().filter(|value| value.is_finite());
+    let roundtrip = parsed.and_then(|value| {
+        if value == 0.0 && value.is_sign_negative() {
+            Some("0".to_owned())
+        } else {
+            serde_json::to_string(&value).ok()
         }
-        Value::Array(values) => {
-            for value in values {
-                require_js_safe_integers(value)?;
+    });
+    let preserved = original.as_ref().is_some_and(|original| {
+        roundtrip
+            .as_deref()
+            .and_then(canonical_decimal)
+            .is_some_and(|roundtrip| roundtrip == *original)
+            && !exceeds_js_safe_integer(original)
+    });
+    if preserved {
+        Ok(())
+    } else {
+        Err("Prospect JSON contains a number this app cannot preserve exactly.".to_owned())
+    }
+}
+
+fn require_js_roundtrip_number_tokens(source: &[u8]) -> Result<(), String> {
+    let mut index = 0;
+    let mut in_string = false;
+    while index < source.len() {
+        let byte = source[index];
+        if in_string {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+                continue;
             }
-        }
-        Value::Object(values) => {
-            for value in values.values() {
-                require_js_safe_integers(value)?;
+            if byte == b'"' {
+                in_string = false;
             }
+            index += 1;
+            continue;
         }
-        _ => {}
+        if byte == b'"' {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if byte == b'-' || byte.is_ascii_digit() {
+            let start = index;
+            index += 1;
+            while index < source.len()
+                && !matches!(
+                    source[index],
+                    b' ' | b'\t' | b'\r' | b'\n' | b',' | b']' | b'}'
+                )
+            {
+                index += 1;
+            }
+            let token = std::str::from_utf8(&source[start..index]).map_err(|_| {
+                "Prospect JSON contains a number this app cannot preserve exactly.".to_owned()
+            })?;
+            require_js_roundtrip_number_token(token)?;
+            continue;
+        }
+        index += 1;
     }
     Ok(())
 }
@@ -468,7 +592,7 @@ fn import_prospect() -> Result<Option<ImportedProspect>, String> {
     if !document.is_object() {
         return Err("The selected prospect JSON must contain one object.".to_owned());
     }
-    require_js_safe_integers(&document)?;
+    require_js_roundtrip_number_tokens(&bytes)?;
     let file_name = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -626,21 +750,60 @@ mod tests {
     }
 
     #[test]
-    fn imported_numbers_reject_only_unsafe_integers() {
-        for accepted in [
-            json!(JS_MAX_SAFE_INTEGER),
-            json!(-JS_MAX_SAFE_INTEGER),
-            json!({"nested": [0, 1.5, JS_MAX_SAFE_INTEGER]}),
+    fn imported_numbers_must_survive_the_javascript_roundtrip() {
+        for source in [
+            r#"{"value":9007199254740991}"#,
+            r#"{"value":-9007199254740991}"#,
+            r#"{"nested":[0,0.1,1.5,1e3]}"#,
         ] {
-            assert!(require_js_safe_integers(&accepted).is_ok());
+            serde_json::from_str::<Value>(source).unwrap();
+            assert!(require_js_roundtrip_number_tokens(source.as_bytes()).is_ok());
         }
 
-        for rejected in [
-            json!(JS_MAX_SAFE_INTEGER + 1),
-            json!(-JS_MAX_SAFE_INTEGER - 1),
-            json!({"nested": [JS_MAX_SAFE_INTEGER as u64 + 1]}),
+        for source in [
+            r#"{"value":9007199254740992}"#,
+            r#"{"value":-9007199254740992}"#,
+            r#"{"value":0.10000000000000001}"#,
+            r#"{"value":-0}"#,
+            r#"{"nested":[1e400]}"#,
         ] {
-            assert!(require_js_safe_integers(&rejected).is_err());
+            assert!(
+                require_js_roundtrip_number_tokens(source.as_bytes()).is_err(),
+                "unexpectedly admitted {source}"
+            );
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_cancellation_terminates_descendants() {
+        let directory = tempfile::tempdir().unwrap();
+        let pid_path = directory.path().join("descendant.pid");
+        let escaped_path = pid_path.to_string_lossy().replace('\'', "''");
+        let script = format!(
+            "$child = Start-Process -FilePath 'cmd.exe' -ArgumentList '/C','ping -n 30 127.0.0.1 >NUL' -WindowStyle Hidden -PassThru; Set-Content -LiteralPath '{escaped_path}' -Value $child.Id; Start-Sleep -Seconds 30"
+        );
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+        hide_console_window(&mut command);
+        let mut parent = command.spawn().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !pid_path.is_file() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(25));
+        }
+        if !pid_path.is_file() {
+            let _ = terminate_process_tree(&mut parent);
+            panic!("the descendant PID was not published");
+        }
+        let descendant_pid = fs::read_to_string(&pid_path).unwrap().trim().to_owned();
+
+        terminate_process_tree(&mut parent).unwrap();
+        let _ = parent.wait();
+        let output = Command::new("tasklist.exe")
+            .args(["/FI", &format!("PID eq {descendant_pid}"), "/NH"])
+            .output()
+            .unwrap();
+
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(&descendant_pid));
     }
 }
