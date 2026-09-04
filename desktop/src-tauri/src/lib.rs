@@ -24,6 +24,7 @@ const MAX_ENGINE_RESPONSE_BYTES: usize = 2_900_000;
 const MAX_ENGINE_STDERR_BYTES: usize = 65_536;
 const MAX_PROSPECT_BYTES: usize = 200_000;
 const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
+const JS_MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 const ENGINE_IDLE: u8 = 0;
 const ENGINE_ACTIVE: u8 = 1;
 const ENGINE_CANCELLED: u8 = 2;
@@ -343,6 +344,40 @@ fn validate_artifact(value: Value) -> Result<(EngineArtifact, CachedArtifact), S
     Ok((artifact, cached))
 }
 
+fn require_js_safe_integers(value: &Value) -> Result<(), String> {
+    match value {
+        Value::Number(number) => {
+            let unsafe_integer = if let Some(value) = number.as_i64() {
+                !(-JS_MAX_SAFE_INTEGER..=JS_MAX_SAFE_INTEGER).contains(&value)
+            } else if let Some(value) = number.as_u64() {
+                value > JS_MAX_SAFE_INTEGER as u64
+            } else if let Some(value) = number.as_f64() {
+                value.fract() == 0.0 && value.abs() > JS_MAX_SAFE_INTEGER as f64
+            } else {
+                true
+            };
+            if unsafe_integer {
+                return Err(
+                    "Prospect JSON contains an integer this app cannot preserve exactly."
+                        .to_owned(),
+                );
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                require_js_safe_integers(value)?;
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values() {
+                require_js_safe_integers(value)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn engine_status(
     app: AppHandle,
@@ -433,6 +468,7 @@ fn import_prospect() -> Result<Option<ImportedProspect>, String> {
     if !document.is_object() {
         return Err("The selected prospect JSON must contain one object.".to_owned());
     }
+    require_js_safe_integers(&document)?;
     let file_name = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -587,5 +623,24 @@ mod tests {
 
         finish_engine_operation(&state);
         assert!(!request_engine_cancellation(&state).unwrap());
+    }
+
+    #[test]
+    fn imported_numbers_reject_only_unsafe_integers() {
+        for accepted in [
+            json!(JS_MAX_SAFE_INTEGER),
+            json!(-JS_MAX_SAFE_INTEGER),
+            json!({"nested": [0, 1.5, JS_MAX_SAFE_INTEGER]}),
+        ] {
+            assert!(require_js_safe_integers(&accepted).is_ok());
+        }
+
+        for rejected in [
+            json!(JS_MAX_SAFE_INTEGER + 1),
+            json!(-JS_MAX_SAFE_INTEGER - 1),
+            json!({"nested": [JS_MAX_SAFE_INTEGER as u64 + 1]}),
+        ] {
+            assert!(require_js_safe_integers(&rejected).is_err());
+        }
     }
 }

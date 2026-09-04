@@ -226,6 +226,7 @@ let sourceDocument: ProspectDocument = {};
 let activeProvider: "local" | "openrouter" = "local";
 let previewUrl: string | null = null;
 let busy = false;
+let activeGeneration: Promise<void> | null = null;
 const attempts = new AttemptGate();
 
 function inputValue(id: string): string {
@@ -414,39 +415,48 @@ generateButton.addEventListener("click", async () => {
   setBusy(true);
   setStage("generate");
   setStatus("Generating and checking the website…", "working");
-  try {
-    sourceDocument = currentDocument();
-    const artifact = await generateSite(sourceDocument, currentGeneration());
-    if (!attempts.isCurrent(attempt)) return;
-    const bytes = decodeArtifact(artifact);
-    const htmlBuffer = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(htmlBuffer).set(bytes);
-    previewUrl = URL.createObjectURL(new Blob([htmlBuffer], { type: "text/html" }));
-    preview.src = previewUrl;
-    preview.hidden = false;
-    emptyPreview.hidden = true;
-    previewWrap.dataset.empty = "false";
-    element<HTMLElement>("artifact-name").textContent = artifact.display_name;
-    element<HTMLElement>("artifact-size").textContent = `${Math.ceil(bytes.byteLength / 1024)} KB`;
-    receipt.hidden = false;
-    saveButton.disabled = false;
-    setStage("review");
-    setStatus("Website generated and admitted. Review it before saving.", "success");
-    if (window.matchMedia("(max-width: 900px)").matches) setMobileView("preview");
-  } catch (error) {
-    if (attempts.isCurrent(attempt)) showError(error);
-  } finally {
-    if (attempts.isCurrent(attempt)) setBusy(false);
-  }
+  const operation = (async () => {
+    try {
+      sourceDocument = currentDocument();
+      const artifact = await generateSite(sourceDocument, currentGeneration());
+      if (!attempts.isCurrent(attempt)) return;
+      const bytes = decodeArtifact(artifact);
+      const htmlBuffer = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(htmlBuffer).set(bytes);
+      previewUrl = URL.createObjectURL(new Blob([htmlBuffer], { type: "text/html" }));
+      preview.src = previewUrl;
+      preview.hidden = false;
+      emptyPreview.hidden = true;
+      previewWrap.dataset.empty = "false";
+      element<HTMLElement>("artifact-name").textContent = artifact.display_name;
+      element<HTMLElement>("artifact-size").textContent = `${Math.ceil(bytes.byteLength / 1024)} KB`;
+      receipt.hidden = false;
+      saveButton.disabled = false;
+      setStage("review");
+      setStatus("Website generated and admitted. Review it before saving.", "success");
+      if (window.matchMedia("(max-width: 900px)").matches) setMobileView("preview");
+    } catch (error) {
+      if (attempts.isCurrent(attempt)) showError(error);
+    } finally {
+      if (attempts.isCurrent(attempt)) setBusy(false);
+    }
+  })();
+  activeGeneration = operation;
+  await operation;
+  if (activeGeneration === operation) activeGeneration = null;
 });
 
 cancelButton.addEventListener("click", async () => {
   attempts.invalidate();
+  setBusy(true, false);
   setStatus("Cancelling generation…", "working");
+  const operation = activeGeneration;
   try {
     const cancelled = await cancelGeneration();
+    if (operation) await operation;
     setStatus(cancelled ? "Generation cancelled." : "No generation was running.");
   } catch (error) {
+    if (operation) await operation;
     showError(error);
   } finally {
     setBusy(false);
