@@ -349,9 +349,10 @@ native `/api/chat` probe before sending the generation request. The request is
 admitted only when the complete prompt leaves the configured output reserve in
 the 40,960-token context. Each request disables thinking; reasoning or tool
 output still fails closed. The application neither starts Ollama nor downloads
-a model, and it never falls back to OpenRouter. The legacy vLLM launcher remains
-in the repository as historical manual tooling but is no longer wired into
-application configuration. For HTML work, the model
+a model, and it never falls back to OpenRouter. The historical
+`scripts/start_llama_server.sh` and `scripts/start_vllm_server.sh` filenames
+remain only as fail-closed compatibility stubs; operators must install and start
+Ollama themselves. For HTML work, the model
 returns only the variable `<body>`; trusted code supplies the
 base template's head and CSS,
 applies the selected palette and theme, and validates the assembled standalone
