@@ -19,6 +19,7 @@ from lib.generation import (
     DEFAULT_LOCAL_MODEL,
     DEFAULT_LOCAL_TIMEOUT_SECONDS,
     DEFAULT_MAX_OUTPUT_TOKENS,
+    LOCAL_CONTEXT_SAFETY_TOKENS,
     MAX_SHORT_TEXT_OUTPUT_TOKENS,
     MAX_GENERATED_BODY_BYTES,
     MAX_GENERATED_BODY_TOKENS,
@@ -216,6 +217,7 @@ class FakeLocalClient:
         self,
         chat_payload=_UNSET,
         *,
+        prompt_payload=_UNSET,
         health_payload=_UNSET,
         models_payload=_UNSET,
         show_payload=_UNSET,
@@ -264,6 +266,21 @@ class FakeLocalClient:
             status_error=chat_status_error,
             status_code=chat_status_code,
         )
+        self.prompt_response = FakeLocalResponse(
+            {
+                "model": DEFAULT_LOCAL_MODEL,
+                "message": {"role": "assistant", "content": ""},
+                "done": True,
+                "done_reason": "length",
+                "prompt_eval_count": 12,
+                "eval_count": 1,
+            }
+            if prompt_payload is _UNSET
+            else prompt_payload,
+            status_error=chat_status_error,
+            status_code=chat_status_code,
+        )
+        self.chat_calls = 0
 
     def get(self, url, **kwargs):
         self.calls.append(("GET", url, kwargs))
@@ -279,16 +296,24 @@ class FakeLocalClient:
             return self.show_response
         if not url.endswith("/api/chat"):
             raise AssertionError(f"unexpected local POST URL: {url}")
-        return self.chat_response
+        response = self.prompt_response if self.chat_calls % 2 == 0 else self.chat_response
+        self.chat_calls += 1
+        return response
 
 
-def local_chat_payload(content=COMPLETE_HTML, finish_reason="stop", **message_fields):
+def local_chat_payload(
+    content=COMPLETE_HTML,
+    finish_reason="stop",
+    prompt_eval_count=12,
+    eval_count=8,
+    **message_fields,
+):
     return {
         "message": {"content": content, **message_fields},
         "done": True,
         "done_reason": finish_reason,
-        "prompt_eval_count": 12,
-        "eval_count": 8,
+        "prompt_eval_count": prompt_eval_count,
+        "eval_count": eval_count,
     }
 
 
@@ -298,6 +323,7 @@ def config(provider="local", model=DEFAULT_LOCAL_MODEL):
         model=model,
         base_url=DEFAULT_LOCAL_BASE_URL,
         api_key="test-key",
+        max_output_tokens=MAX_GENERATED_BODY_TOKENS,
     )
 
 
@@ -1108,7 +1134,19 @@ class ProviderBoundaryTests(unittest.TestCase):
             client=client,
         )
 
-        method, url, call = client.calls[0]
+        probe_method, probe_url, probe_call = client.calls[0]
+        method, url, call = client.calls[1]
+        self.assertEqual(probe_method, "POST")
+        self.assertEqual(probe_url, "http://127.0.0.1:11434/api/chat")
+        self.assertEqual(
+            probe_call["json"]["options"],
+            {
+                "temperature": 0,
+                "seed": 0,
+                "num_predict": 1,
+                "num_ctx": DEFAULT_LOCAL_CONTEXT_TOKENS,
+            },
+        )
         self.assertEqual(method, "POST")
         self.assertEqual(url, "http://127.0.0.1:11434/api/chat")
         self.assertEqual(
@@ -1136,6 +1174,45 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertNotIn("cache_control", str(call["json"]))
         self.assertEqual(generated.finish_reason, "stop")
         self.assertEqual(generated.usage["completion_tokens"], 8)
+
+    def test_local_prompt_budget_accepts_boundary_and_rejects_boundary_plus_one(self):
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+        )
+        maximum = (
+            DEFAULT_LOCAL_CONTEXT_TOKENS
+            - selected.max_output_tokens
+            - LOCAL_CONTEXT_SAFETY_TOKENS
+        )
+        accepted = FakeLocalClient(
+            prompt_payload=local_chat_payload(prompt_eval_count=maximum)
+        )
+        rejected = FakeLocalClient(
+            prompt_payload=local_chat_payload(prompt_eval_count=maximum + 1)
+        )
+
+        generate_text(
+            selected,
+            system_prompt="system",
+            user_parts=(PromptPart("input"),),
+            temperature=0.4,
+            client=accepted,
+        )
+        with self.assertRaisesRegex(GenerationResponseError, "does not fit"):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=rejected,
+            )
+
+        self.assertEqual(len(accepted.calls), 2)
+        self.assertEqual(len(rejected.calls), 1)
 
     def test_local_request_marks_output_limit_as_incomplete(self):
         selected = GenerationConfig(
@@ -1316,6 +1393,7 @@ class ProviderBoundaryTests(unittest.TestCase):
                     model=DEFAULT_LOCAL_MODEL,
                     base_url=base_url,
                     api_key="test-key",
+                    max_output_tokens=MAX_GENERATED_BODY_TOKENS,
                 )
                 client = FakeLocalClient()
 
@@ -2621,7 +2699,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         draft = build.generate_email_draft(prospect, config(), client)
 
         self.assertIn("[VERCEL_URL_PLACEHOLDER]", draft)
-        request = next(call for call in client.calls if call[0] == "POST")
+        request = next(
+            call
+            for call in client.calls
+            if call[0] == "POST"
+            and call[2]["json"]["options"]["num_predict"]
+            == MAX_SHORT_TEXT_OUTPUT_TOKENS
+        )
         self.assertEqual(
             request[2]["json"]["options"]["num_predict"],
             MAX_SHORT_TEXT_OUTPUT_TOKENS,

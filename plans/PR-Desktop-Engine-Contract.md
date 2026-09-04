@@ -86,11 +86,15 @@ required context and disable thinking. OpenRouter uses its fixed endpoint
 and requires a session-supplied model and API key. The API key is never written
 to disk, command-line arguments, stdout, or error text.
 
-The Ollama request uses a stable seed and a 40,960-token context. That context
-was selected from the measured 28,811-token fixture prompt plus the existing
-8,192-token body limit, while remaining fully resident on the current GPU. The
-build prompt is filtered to its code-derived review mode before dispatch so the
-model is not asked to reason across mutually exclusive markup contracts.
+The Ollama request uses a stable seed and a 40,960-token context. Before every
+local generation, the engine sends the complete rendered messages through a
+one-token Ollama probe and reads its exact `prompt_eval_count`. Generation
+proceeds only when that count leaves the configured output reserve plus a
+64-token safety margin. The measured 28,811-token fixture therefore fits with
+the existing 8,192-token body limit, while larger admitted prospect documents
+fail closed instead of being truncated. The build prompt is filtered to its
+code-derived review mode before dispatch so the model is not asked to reason
+across mutually exclusive markup contracts.
 
 ## Intentional
 
@@ -120,7 +124,7 @@ model is not asked to reason across mutually exclusive markup contracts.
 - `python -m unittest tests.test_desktop_protocol` -- 21 passed.
 - `python -m unittest tests.test_connect_provider` -- 60 passed, 5 skipped.
 - Exact Linux CI shape with `CONNECT_CONTRACTS_DIR` pinned to `c5405935...`:
-  279 passed, 10 skipped.
+  280 passed, 10 skipped.
 - `python -m compileall -q build.py pipeline.py connect_provider.py lib tests`
   and `git diff --check` -- passed.
 - Required source fixture build through live Ollama -- completed; placeholder

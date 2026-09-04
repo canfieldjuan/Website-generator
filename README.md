@@ -306,13 +306,14 @@ Provider configuration and admission checks live in `lib/generation.py`.
 OpenRouter prompt caching (`cache_control: ephemeral`) is enabled only for the
 cloud build request. Local generation identifies Ollama through `/api/version`,
 confirms the selected alias through `/api/tags`, verifies its context capacity
-through `/api/show`, then sends one non-streaming native request to `/api/chat`.
-Each request disables thinking and provisions the 40,960-token context required
-by the current build contract; reasoning or tool output still fails closed. The
-application neither starts Ollama nor downloads a model, and it never falls back
-to OpenRouter. The legacy vLLM launcher remains in the repository as historical
-manual tooling but is no longer wired into application configuration. For HTML
-work, the model
+through `/api/show`, then uses Ollama's exact prompt accounting from a one-token
+native `/api/chat` probe before sending the generation request. The request is
+admitted only when the complete prompt leaves the configured output reserve in
+the 40,960-token context. Each request disables thinking; reasoning or tool
+output still fails closed. The application neither starts Ollama nor downloads
+a model, and it never falls back to OpenRouter. The legacy vLLM launcher remains
+in the repository as historical manual tooling but is no longer wired into
+application configuration. For HTML work, the model
 returns only the variable `<body>`; trusted code supplies the
 base template's head and CSS,
 applies the selected palette and theme, and validates the assembled standalone

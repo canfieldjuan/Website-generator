@@ -26,6 +26,7 @@ DEFAULT_LOCAL_MODEL = "qwen3-30b-a3b:latest"
 DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_LOCAL_API_KEY = "no-key"
 DEFAULT_LOCAL_CONTEXT_TOKENS = 40960
+LOCAL_CONTEXT_SAFETY_TOKENS = 64
 DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
 LOCAL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
@@ -1014,12 +1015,13 @@ def _generate_local_text(
     _health_url, _models_url, _show_url, endpoint = _local_ollama_urls(
         config.base_url
     )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
     request_body = {
         "model": config.model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
+        "messages": messages,
         "stream": False,
         "think": False,
         "options": {
@@ -1029,7 +1031,50 @@ def _generate_local_text(
             "num_ctx": DEFAULT_LOCAL_CONTEXT_TOKENS,
         },
     }
+    prompt_budget = (
+        DEFAULT_LOCAL_CONTEXT_TOKENS
+        - config.max_output_tokens
+        - LOCAL_CONTEXT_SAFETY_TOKENS
+    )
+    if prompt_budget < 1:
+        raise GenerationResponseError(
+            "Local generation output reserve leaves no room for the complete prompt."
+        )
+    token_probe = {
+        "model": config.model,
+        "messages": messages,
+        "stream": False,
+        "think": False,
+        "options": {
+            "temperature": 0,
+            "seed": 0,
+            "num_predict": 1,
+            "num_ctx": DEFAULT_LOCAL_CONTEXT_TOKENS,
+        },
+    }
     try:
+        probe_response = selected_client.post(
+            endpoint,
+            json=token_probe,
+            timeout=config.timeout_seconds,
+            allow_redirects=False,
+        )
+        _raise_for_local_response_status(probe_response)
+        probe_payload = probe_response.json()
+        if not isinstance(probe_payload, dict) or probe_payload.get("done") is not True:
+            raise ValueError("Ollama returned an incomplete prompt probe")
+        prompt_tokens = probe_payload.get("prompt_eval_count")
+        if (
+            not isinstance(prompt_tokens, int)
+            or isinstance(prompt_tokens, bool)
+            or prompt_tokens < 0
+        ):
+            raise ValueError("Ollama returned invalid prompt token accounting")
+        if prompt_tokens > prompt_budget:
+            raise GenerationResponseError(
+                "The complete local generation prompt does not fit alongside "
+                "the required output reserve. Reduce the prospect data."
+            )
         response = selected_client.post(
             endpoint,
             json=request_body,
@@ -1037,6 +1082,8 @@ def _generate_local_text(
             allow_redirects=False,
         )
         _raise_for_local_response_status(response)
+    except GenerationResponseError:
+        raise
     except Exception as exc:
         raise GenerationProviderUnavailable(
             f"local generation failed for model {config.model!r}: {exc}"
