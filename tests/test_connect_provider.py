@@ -1150,12 +1150,12 @@ class GenerationSeamTests(unittest.TestCase):
         connect_provider.watch_desktop_shutdown(server, io.BytesIO(b"continue\n"))
         self.assertFalse(server.should_exit)
 
-    def test_cleanup_command_bypasses_generation_preflight(self):
+    def test_cleanup_command_bypasses_provider_state_and_generation_preflight(self):
         with tempfile.TemporaryDirectory() as directory:
             args = SimpleNamespace(
                 command="cleanup-registration",
                 runtime_dir=Path(directory) / "runtime",
-                state_dir=Path(directory) / "state",
+                state_dir=Path("unavailable-relative-state"),
             )
             with patch.dict(
                 os.environ,

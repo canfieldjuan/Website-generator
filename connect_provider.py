@@ -169,6 +169,25 @@ def main(argv: list[str] | None = None) -> int:
         return _run_entitlement_command(args)
     if getattr(args, "command", None) == "desktop":
         return run_desktop_stdio()
+
+    if getattr(args, "command", None) == "cleanup-registration":
+        try:
+            runtime_dir = args.runtime_dir or default_runtime_dir()
+            if not runtime_dir.is_absolute():
+                raise RuntimeError("Connect runtime directory must be absolute.")
+            if os.name == "nt":
+                ensure_private_directory(runtime_dir, root=local_app_data_root())
+            if desktop_registration_token is None:
+                raise ValueError("Desktop registration ownership is unavailable.")
+            removed = remove_registration_for_token(
+                runtime_dir, desktop_registration_token
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            print(f"Connect registration cleanup failed: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps({"removed": removed}, separators=(",", ":")))
+        return 0
+
     try:
         runtime_dir = args.runtime_dir or default_runtime_dir()
         state_dir = args.state_dir or default_state_dir()
@@ -184,19 +203,6 @@ def main(argv: list[str] | None = None) -> int:
     if os.name != "nt":
         state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         state_dir.chmod(0o700)
-
-    if getattr(args, "command", None) == "cleanup-registration":
-        try:
-            if desktop_registration_token is None:
-                raise ValueError("Desktop registration ownership is unavailable.")
-            removed = remove_registration_for_token(
-                runtime_dir, desktop_registration_token
-            )
-        except (OSError, TypeError, ValueError) as exc:
-            print(f"Connect registration cleanup failed: {exc}", file=sys.stderr)
-            return 2
-        print(json.dumps({"removed": removed}, separators=(",", ":")))
-        return 0
 
     try:
         generation_config = resolve_connect_generation_config()

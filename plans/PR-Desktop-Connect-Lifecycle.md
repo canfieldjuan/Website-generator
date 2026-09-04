@@ -95,7 +95,9 @@ no packaged implementation, or packaging with no operator-visible proof.
   process IDs; a replacement or a different provider registration is
   preserved. Terminated-child state is separate from pending registration
   cleanup state, so a failed cleanup remains bearer-bound and retryable from
-  Stop, Status, or the next Start until reconciliation succeeds.
+  Stop, Status, or the next Start until reconciliation succeeds. The hidden
+  cleanup command resolves only the owner-private discovery runtime; provider
+  database/state availability cannot block dead-registration removal.
 - Entitlement-status failure is reported independently from managed-process
   state, so it cannot hide a running child or remove the operator's Stop path.
 - Standalone generation may disable activation and provider startup while it
@@ -169,7 +171,7 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 ## Estimated diff size
 
-The final patch contains 1,826 additions and 33 deletions across 12 files for
+The final patch contains 1,834 additions and 33 deletions across 12 files for
 the provider readiness adapter, native lifecycle controller, compact UI
 surface, tests, and Windows smoke step. The provider HTTP contract and
 generation stack are not part of this diff.
