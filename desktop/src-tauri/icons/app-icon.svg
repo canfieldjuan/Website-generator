@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Website Generator">
+  <rect width="512" height="512" rx="112" fill="#102a33"/>
+  <path d="M112 139h288v234H112z" fill="#fcfefe"/>
+  <path d="M112 139h288v58H112z" fill="#167c80"/>
+  <circle cx="151" cy="168" r="11" fill="#f26b38"/>
+  <circle cx="184" cy="168" r="11" fill="#fcfefe" opacity=".72"/>
+  <path d="M163 252h116v31H163zm0 58h186v31H163z" fill="#102a33"/>
+  <path d="m324 226 55 55-55 55-22-22 33-33-33-33z" fill="#f26b38"/>
+</svg>
