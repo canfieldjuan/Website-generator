@@ -1,16 +1,27 @@
 # Local-first generation provider
 
+## Document status
+
+This plan retains the implementation history that led through LM Studio,
+llama.cpp, and vLLM. Those named runtime revisions and their verification
+entries are historical evidence, not current startup instructions. The current
+contract is the accepted direction below plus `Scope (this PR)`, `Mechanism`,
+`Intentional`, `Completed dependent slices`, `Deferred`, and `Current Ollama
+completion proof`. Where older narrative conflicts with those sections, current
+executable code and the current contract control.
+
 ## Why this slice exists
 
-`origin/main` routes extraction, HTML generation, and pitch-draft generation
-through one eager OpenRouter client and a hard-coded cloud model. Importing the
-client module can also contact Resend before email is requested. Generated HTML
-is fence-stripped and written without checking the provider finish reason or
-whether the document actually closed.
+The original baseline for this slice routed extraction, HTML generation, and
+pitch-draft generation through one eager OpenRouter client and a hard-coded
+cloud model. Importing the client module could also contact Resend before email
+was requested. Generated HTML was fence-stripped and written without checking
+the provider finish reason or whether the document actually closed. This
+paragraph records the historical problem, not current `origin/main` behavior.
 
 The accepted product direction is local-first generation with
-`qwen/qwen3.8-27b`, explicit per-run OpenRouter selection, and a shared safe
-generation seam that the next Local Connect provider slice can invoke. The
+Ollama `qwen3-30b-a3b:latest`, explicit per-run OpenRouter selection, and a
+shared safe generation seam that Local Connect invokes. The
 provider abstraction, its two CLI callers, the HTML admission gate, and the
 negative tests are one indivisible behavior change. This exceeds the 400-line
 soft target primarily because the new tests cover both sides of every provider
@@ -744,8 +755,8 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
 6. Keep every wired HTML-generation prompt aligned with body-only admission and
    deterministic document composition.
 7. Add focused unit tests, CI enrollment, and operator documentation.
-8. Replace the legacy local transport with direct loopback vLLM health,
-   model-discovery, and chat-completion contracts plus a guarded startup script.
+8. Replace the legacy local transport with direct loopback Ollama version,
+   model-discovery, metadata, and chat-completion contracts.
 9. Enforce locality at both local request entry points and exclude head metadata
    from generated bodies while preserving SVG titles; local requests never use
    environment proxies.
@@ -759,8 +770,9 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
     visible text.
 13. Preserve uncatalogued-trade builds with the existing generic document-color
     fallback while retaining explicit-brand and supported-trade precedence.
-14. Default the standalone vLLM launcher to one explicit CUDA device with zero
-    CPU offload and no cloud fallback.
+14. Require an operator-managed Ollama runtime with the exact configured model
+    already available; do not start a runtime, download a model, or fall back to
+    CPU/cloud automatically.
 15. Enforce exact class counts for the unconditional from-scratch page skeleton
     and the shared footer structure so prompt omissions cannot ship.
 16. Give the mandatory services component an exact markup contract while
@@ -775,7 +787,7 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
     when present, `0` when absent) while leaving every other count unchanged.
 20a. Reject case variants of every required class so zero-count requirements
      cannot be bypassed and positive requirements cannot admit unstyled names.
-21. Disable redirects on every shared loopback vLLM request so a local
+21. Disable redirects on every shared loopback Ollama request so a local
     response cannot replay prompts or preflight traffic to a remote target.
 22. Scan ordered visual and accessibility exposure streams in both normalized
     and compact forms so CSS, replacement text, and markup segmentation cannot
@@ -864,7 +876,8 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
   `references/03-base-template.html`, `references/06-build-prompt.md`,
   `references/07-industry-defaults.md`
 - `.github/workflows/generator-tests.yml`
-- `scripts/start_vllm_server.sh`, `scripts/start_llama_server.sh` (retirement shim)
+- `scripts/start_vllm_server.sh`, `scripts/start_llama_server.sh` (historical
+  runtime iterations; neither is part of the active Ollama request path)
 - `README.md`
 - `plans/PR-Local-Generation-Provider.md`
 
@@ -872,27 +885,27 @@ provider/runtime behavior, retry behavior, Connect jobs, or external effects.
 
 The CLI resolves a `GenerationConfig` from explicit arguments and environment
 configuration. Local is the default, accepts only localhost or literal loopback
-endpoints, ignores environment proxy settings, and preflights standalone vLLM
-`/health` and `/v1/models` responses; OpenRouter requires the operator to select
-it and provide a model. Local generation uses vLLM's OpenAI-compatible
-`/v1/chat/completions` contract, sends plain system/user messages, disables Qwen
-thinking through chat-template parameters, and rejects any returned reasoning
-or tool-call surface. OpenRouter keeps its existing request path and receives
-cache metadata only when it was requested by the caller.
+endpoints, ignores environment proxy settings, and preflights Ollama's
+`/api/version`, `/api/tags`, and `/api/show` responses; OpenRouter requires the
+operator to select it and provide a model. Local generation uses Ollama's
+`/api/chat` contract, sends plain system/user messages, disables Qwen thinking,
+and rejects any returned reasoning or tool-call surface. OpenRouter keeps its
+existing request path and receives cache metadata only when it was requested by
+the caller.
 
 Local generation uses a two-hour default request deadline because the exact Qwen
 fixture exceeds the former cloud-oriented ten-minute deadline on supported local
-hardware. The OpenAI-compatible client disables automatic retries, so one CLI or
-Connect generation attempt produces exactly one model request instead of silently
-restarting an expensive completion after a read timeout. An explicit
+hardware. The direct Ollama request path does not retry transport failures, so one
+CLI or Connect generation attempt cannot silently restart an expensive completion
+after a read timeout. An explicit
 `GENERATION_TIMEOUT_SECONDS` value still overrides either provider default;
 OpenRouter keeps the existing ten-minute default.
 
-The local OpenAI-compatible adapter requires exactly one choice, a string
-finish reason, a text message, and an object usage record. Any reasoning, tool,
-malformed, or multi-choice output fails closed. The returned finish reason feeds
-the existing normal-completion gate, and the complete-document gate remains the
-final truncation check for HTML.
+The local Ollama adapter requires a completed non-streaming response, text content,
+valid token accounting, and no reasoning or tool-call surface. Malformed or
+incomplete output fails closed. The returned completion reason feeds the existing
+normal-completion gate, and the complete-document gate remains the final truncation
+check for HTML.
 
 ### Full-template timeout correction
 
@@ -968,7 +981,7 @@ override before assembly.
 ## Intentional
 
 - Generation commands do not auto-start or silently fall back from
-  vLLM; a missing runtime/model exits with the documented standalone
+  Ollama; a missing runtime/model exits with the documented standalone
   startup instruction.
 - OpenRouter is never an automatic fallback because it changes cost and data
   locality.
@@ -982,16 +995,55 @@ override before assembly.
 - Resend's informational domain check still occurs when email is actually sent,
   not when unrelated modules import.
 
-## Deferred
+## Completed dependent slices
 
 - Local Connect v2 registration, authenticated routes, durable jobs, and
-  conformance tests remain isolated in the dependent Connect-provider slice.
-- Desktop/web UI, model catalogs, automatic model loading, and cloud fallback
-  remain outside this milestone.
+  conformance tests were completed in the dependent Connect-provider slices.
+- The desktop operator UI, packaged engine, entitlement activation, and Connect
+  lifecycle were completed in their dependent desktop/release slices.
+
+## Deferred
+
+- Model catalogs, application-managed Ollama loading, and cloud fallback remain
+  outside this milestone.
 - Generated inline-style value bounds are tracked as issue #33. Property-value
   hardening is separate from proving the current local-generation slice.
 
 ## Verification
+
+### Current Ollama completion proof
+
+- At repository head `f46ca15dbbcd2f498fd77f15b391762e76fbc72a`, Ollama
+  `0.24.0` listed `qwen3-30b-a3b:latest` locally and reported no loaded models
+  before the run. No model download or application-started runtime occurred.
+- `python build.py examples/prospect-plumber-template.json --skip-image-gen
+  --skip-email-draft --skip-deploy` completed through loopback Ollama. The first
+  candidate failed closed on the unsupported `Not a Franchise` claim; the one
+  bounded correction completed and passed the shared admission path.
+- During inference, Ollama reported the selected model at context length
+  `40960`, fully resident in VRAM, while `nvidia-smi` reported the Ollama compute
+  process using `21330 MiB`. This proves the controlled fixture used the GPU
+  rather than a CPU fallback.
+- The accepted artifact was
+  `outputs/builds/drees-plumbing-inc/index.html` (`71878` bytes, SHA-256
+  `65f5dbe48d6cc53c9139df1a77255b4c5b8c302815bd7bb1019516ba62c5b641`).
+  Current `validate_generated_html` re-admitted the exact bytes; the document
+  begins with the HTML doctype, contains exactly one contact form, contains no
+  `Not a Franchise` claim and no image element. Its only `{{` occurrence is the
+  identical code-owned injection-token documentation comment in
+  `references/03-base-template.html`, not model output.
+- The command output recorded all three no-effect gates: image generation,
+  pitch-email drafting, and Vercel deployment were skipped. The isolated output
+  tree contained only the admitted `index.html` artifact.
+- The matching Ollama chat unload returned `done_reason=unload`; the subsequent
+  `/api/ps` check reported no loaded models and `nvidia-smi` reported no GPU
+  compute process.
+- With `CONNECT_CONTRACTS_DIR=/home/juan-canfield/Desktop/connect-contracts`,
+  the full Python suite ran `287` tests successfully with `10` native-Windows
+  skips. Python bytecode compilation also passed. The exact-head GitHub
+  `Generator Tests` run `33915338213` passed both `unit` and
+  `windows-connect-package`, including the native Windows installer build and
+  installed desktop/bundled-engine smoke test.
 
 - `gh release list --repo vllm-project/vllm-gguf-plugin --limit 5` reported
   `v0.0.5` as the latest release. `gh pr view 120 --repo
