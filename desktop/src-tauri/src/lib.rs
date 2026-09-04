@@ -873,6 +873,14 @@ fn stop_connect_provider(state: &DesktopState) -> Result<bool, String> {
     stop_connect_provider_with_timeout(state, CONNECT_SHUTDOWN_TIMEOUT)
 }
 
+fn prepare_window_close_with_timeout(
+    state: &DesktopState,
+    shutdown_timeout: Duration,
+) -> Result<(), String> {
+    let _ = request_engine_cancellation(state);
+    stop_connect_provider_with_timeout(state, shutdown_timeout).map(|_| ())
+}
+
 fn run_engine(
     app: &AppHandle,
     state: &Arc<DesktopState>,
@@ -1378,10 +1386,11 @@ pub fn run() {
             stop_connect,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<Arc<DesktopState>>();
-                let _ = request_engine_cancellation(&state);
-                let _ = stop_connect_provider(&state);
+                if prepare_window_close_with_timeout(&state, CONNECT_SHUTDOWN_TIMEOUT).is_err() {
+                    api.prevent_close();
+                }
             }
         })
         .run(tauri::generate_context!())
@@ -1910,7 +1919,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_registration_reconciliation_is_retained_for_retry() {
+    fn failed_window_close_cleanup_is_retained_and_retried_before_close() {
         let state = DesktopState::default();
         let directory = tempfile::tempdir().unwrap();
         let cleanup_path = directory.path().join("cleanup-attempt");
@@ -1933,13 +1942,13 @@ mod tests {
         );
         finish_provider_start(&state, attempt).unwrap();
 
-        assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).is_err());
+        assert!(prepare_window_close_with_timeout(&state, Duration::from_millis(20)).is_err());
         {
             let lifecycle = state.provider.lock().unwrap();
             assert!(lifecycle.managed.is_none());
             assert!(lifecycle.pending_registration_cleanup.is_some());
         }
-        assert!(!stop_connect_provider_with_timeout(&state, Duration::ZERO).unwrap());
+        assert!(prepare_window_close_with_timeout(&state, Duration::ZERO).is_ok());
         assert!(
             state
                 .provider
