@@ -985,12 +985,17 @@ override before assembly.
 - Resend's informational domain check still occurs when email is actually sent,
   not when unrelated modules import.
 
-## Deferred
+## Completed dependent slices
 
 - Local Connect v2 registration, authenticated routes, durable jobs, and
-  conformance tests remain isolated in the dependent Connect-provider slice.
-- Desktop/web UI, model catalogs, automatic model loading, and cloud fallback
-  remain outside this milestone.
+  conformance tests were completed in the dependent Connect-provider slices.
+- The desktop operator UI, packaged engine, entitlement activation, and Connect
+  lifecycle were completed in their dependent desktop/release slices.
+
+## Deferred
+
+- Model catalogs, application-managed Ollama loading, and cloud fallback remain
+  outside this milestone.
 - Generated inline-style value bounds are tracked as issue #33. Property-value
   hardening is separate from proving the current local-generation slice.
 
