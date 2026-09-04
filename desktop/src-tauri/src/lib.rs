@@ -4,7 +4,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU8, Ordering},
     },
     thread,
     time::Duration,
@@ -24,6 +24,9 @@ const MAX_ENGINE_RESPONSE_BYTES: usize = 2_900_000;
 const MAX_ENGINE_STDERR_BYTES: usize = 65_536;
 const MAX_PROSPECT_BYTES: usize = 200_000;
 const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
+const ENGINE_IDLE: u8 = 0;
+const ENGINE_ACTIVE: u8 = 1;
+const ENGINE_CANCELLED: u8 = 2;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct EngineArtifact {
@@ -43,7 +46,7 @@ struct CachedArtifact {
 #[derive(Default)]
 struct DesktopState {
     running: Mutex<Option<Child>>,
-    cancelled: AtomicBool,
+    engine_phase: AtomicU8,
     artifact: Mutex<Option<CachedArtifact>>,
 }
 
@@ -64,6 +67,61 @@ fn kill_running(state: &DesktopState) {
     if let Some(child) = running.as_mut() {
         let _ = child.kill();
     }
+}
+
+fn begin_engine_operation(state: &DesktopState) -> Result<(), String> {
+    state
+        .engine_phase
+        .compare_exchange(
+            ENGINE_IDLE,
+            ENGINE_ACTIVE,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .map(|_| ())
+        .map_err(|_| "A Website Generator operation is already running.".to_owned())
+}
+
+fn finish_engine_operation(state: &DesktopState) {
+    state.engine_phase.store(ENGINE_IDLE, Ordering::SeqCst);
+}
+
+fn request_engine_cancellation(state: &DesktopState) -> Result<bool, String> {
+    loop {
+        match state.engine_phase.load(Ordering::SeqCst) {
+            ENGINE_IDLE => return Ok(false),
+            ENGINE_CANCELLED => break,
+            ENGINE_ACTIVE => {
+                if state
+                    .engine_phase
+                    .compare_exchange(
+                        ENGINE_ACTIVE,
+                        ENGINE_CANCELLED,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    )
+                    .is_ok()
+                {
+                    break;
+                }
+            }
+            _ => return Err("The Website Generator process state is invalid.".to_owned()),
+        }
+    }
+
+    let mut running = state.running.lock().map_err(|_| lock_error())?;
+    if let Some(child) = running.as_mut() {
+        let exited = child
+            .try_wait()
+            .map_err(|_| "The Website Generator process status is unavailable.".to_owned())?
+            .is_some();
+        if !exited {
+            child
+                .kill()
+                .map_err(|_| "The Website Generator process could not be cancelled.".to_owned())?;
+        }
+    }
+    Ok(true)
 }
 
 fn read_bounded(reader: impl Read, maximum: usize) -> io::Result<Vec<u8>> {
@@ -184,9 +242,11 @@ fn run_engine(
     let (mut stdin, stdout, stderr) = {
         let mut running = state.running.lock().map_err(|_| lock_error())?;
         if running.is_some() {
-            return Err("A website generation is already running.".to_owned());
+            return Err("A Website Generator operation is already running.".to_owned());
         }
-        state.cancelled.store(false, Ordering::SeqCst);
+        if state.engine_phase.load(Ordering::SeqCst) == ENGINE_CANCELLED {
+            return Err("Website generation was cancelled.".to_owned());
+        }
         let mut child = command
             .spawn()
             .map_err(|_| "The Website Generator engine could not start.".to_owned())?;
@@ -246,7 +306,7 @@ fn run_engine(
         .map_err(|_| "The Website Generator error reader stopped.".to_owned())?
         .map_err(|_| "The Website Generator error output was too large.".to_owned())?;
 
-    if state.cancelled.swap(false, Ordering::SeqCst) {
+    if state.engine_phase.load(Ordering::SeqCst) == ENGINE_CANCELLED {
         return Err("Website generation was cancelled.".to_owned());
     }
     if write_result.is_err() {
@@ -290,16 +350,19 @@ async fn engine_status(
     generation: Value,
 ) -> Result<Value, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    begin_engine_operation(&state)?;
+    let worker_state = state.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         run_engine(
             &app,
-            &state,
+            &worker_state,
             "generation.status",
             json!({ "generation": generation }),
         )
     })
-    .await
-    .map_err(|_| "The model check stopped unexpectedly.".to_owned())?
+    .await;
+    finish_engine_operation(&state);
+    result.map_err(|_| "The model check stopped unexpectedly.".to_owned())?
 }
 
 #[tauri::command]
@@ -312,15 +375,23 @@ async fn generate_site(
     if !prospect.is_object() {
         return Err("Prospect data must be a JSON object.".to_owned());
     }
+    let state = state.inner().clone();
+    begin_engine_operation(&state)?;
     {
-        let mut cached = state.artifact.lock().map_err(|_| lock_error())?;
+        let mut cached = match state.artifact.lock() {
+            Ok(cached) => cached,
+            Err(_) => {
+                finish_engine_operation(&state);
+                return Err(lock_error());
+            }
+        };
         cached.take();
     }
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let worker_state = state.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let data = run_engine(
             &app,
-            &state,
+            &worker_state,
             "site.generate",
             json!({ "prospect": prospect, "generation": generation }),
         )?;
@@ -329,24 +400,17 @@ async fn generate_site(
             .cloned()
             .ok_or_else(|| "The Website Generator returned no artifact.".to_owned())?;
         let (artifact, cached) = validate_artifact(value)?;
-        *state.artifact.lock().map_err(|_| lock_error())? = Some(cached);
+        *worker_state.artifact.lock().map_err(|_| lock_error())? = Some(cached);
         Ok(artifact)
     })
-    .await
-    .map_err(|_| "Website generation stopped unexpectedly.".to_owned())?
+    .await;
+    finish_engine_operation(&state);
+    result.map_err(|_| "Website generation stopped unexpectedly.".to_owned())?
 }
 
 #[tauri::command]
 fn cancel_generation(state: State<'_, Arc<DesktopState>>) -> Result<bool, String> {
-    let mut running = state.running.lock().map_err(|_| lock_error())?;
-    let Some(child) = running.as_mut() else {
-        return Ok(false);
-    };
-    state.cancelled.store(true, Ordering::SeqCst);
-    child
-        .kill()
-        .map_err(|_| "The Website Generator process could not be cancelled.".to_owned())?;
-    Ok(true)
+    request_engine_cancellation(&state)
 }
 
 #[tauri::command]
@@ -509,5 +573,19 @@ mod tests {
         let mut artifact = artifact_for(html);
         artifact["display_name"] = json!("../outside.html");
         assert!(validate_artifact(artifact).is_err());
+    }
+
+    #[test]
+    fn cancellation_is_recorded_before_a_child_is_registered() {
+        let state = DesktopState::default();
+
+        begin_engine_operation(&state).unwrap();
+        assert!(begin_engine_operation(&state).is_err());
+        assert!(request_engine_cancellation(&state).unwrap());
+        assert_eq!(state.engine_phase.load(Ordering::SeqCst), ENGINE_CANCELLED);
+        assert!(state.running.lock().unwrap().is_none());
+
+        finish_engine_operation(&state);
+        assert!(!request_engine_cancellation(&state).unwrap());
     }
 }
