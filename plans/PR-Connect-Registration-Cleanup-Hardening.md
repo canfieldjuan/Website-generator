@@ -89,7 +89,7 @@ ACL-aware bounded reader.
 
 ## Estimated diff size
 
-The staged diff contains 471 added lines and 67 removed lines across one reader, its full
+The current diff contains 470 added lines and 67 removed lines across one reader, its full
 boundary matrix, and this plan. This exceeds the 400-line soft target because
 the guard and its pass/fail, mixed-object, numeric-boundary, blocking, and race
 probes are one indivisible safety change; splitting the tests would publish an
