@@ -257,7 +257,7 @@ function collectFields(): ProspectFields {
     businessName: inputValue("business-name"),
     trade: element<HTMLSelectElement>("trade").value as ProspectFields["trade"],
     city: inputValue("city"),
-    state: inputValue("state").toUpperCase(),
+    state: inputValue("state"),
     phone: inputValue("phone"),
     address: inputValue("address"),
     ownerEmail: inputValue("owner-email"),

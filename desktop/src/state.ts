@@ -84,7 +84,8 @@ export function mergeProspectFields(
   const originalFields = fieldsFromProspect(source);
   for (const [documentKey, fieldKey] of Object.entries(STRING_FIELD_MAP)) {
     if (fields[fieldKey] === originalFields[fieldKey]) continue;
-    const value = fields[fieldKey].trim();
+    const trimmed = fields[fieldKey].trim();
+    const value = fieldKey === "state" ? trimmed.toUpperCase() : trimmed;
     if (value) {
       merged[documentKey] = value;
     } else {

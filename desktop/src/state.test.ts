@@ -76,6 +76,7 @@ describe("prospect projection", () => {
     const imported = {
       business_name: "Example Plumbing",
       trade: null,
+      state: "iL",
       address: null,
       owner_email: "",
       formspree_endpoint: "",
@@ -85,6 +86,10 @@ describe("prospect projection", () => {
     const merged = mergeProspectFields(imported, fieldsFromProspect(imported));
 
     expect(merged).toEqual(imported);
+
+    const edited = fieldsFromProspect(imported);
+    edited.state = "wi";
+    expect(mergeProspectFields(imported, edited).state).toBe("WI");
   });
 });
 
