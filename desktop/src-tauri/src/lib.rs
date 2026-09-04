@@ -723,8 +723,11 @@ fn launch_managed_provider(
     Ok(true)
 }
 
-fn start_connect_provider(app: &AppHandle, state: &DesktopState) -> Result<ConnectStatus, String> {
-    let attempt = begin_provider_start(state)?;
+fn start_connect_provider(
+    app: &AppHandle,
+    state: &DesktopState,
+    attempt: u64,
+) -> Result<ConnectStatus, String> {
     let result = (|| {
         let entitlement = read_entitlement_status(app)?;
         require_active_entitlement(&entitlement)?;
@@ -1118,9 +1121,19 @@ async fn start_connect(
     state: State<'_, Arc<DesktopState>>,
 ) -> Result<ConnectStatus, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || start_connect_provider(&app, &state))
-        .await
-        .map_err(|_| "The Local Connect provider start stopped unexpectedly.".to_owned())?
+    let attempt = begin_provider_start(&state)?;
+    let worker_state = state.clone();
+    match tauri::async_runtime::spawn_blocking(move || {
+        start_connect_provider(&app, &worker_state, attempt)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            finish_provider_start(&state, attempt)?;
+            Err("The Local Connect provider start stopped unexpectedly.".to_owned())
+        }
+    }
 }
 
 #[tauri::command]
@@ -1700,14 +1713,20 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_provider_attempt_cannot_spawn_a_child() {
-        let state = DesktopState::default();
+    fn reserved_attempt_stopped_before_worker_runs_cannot_spawn_a_child() {
+        let state = Arc::new(DesktopState::default());
         let attempt = begin_provider_start(&state).unwrap();
-        assert!(!stop_connect_provider_with_timeout(&state, Duration::ZERO).unwrap());
+        let (release, wait) = mpsc::sync_channel(0);
+        let worker_state = state.clone();
+        let worker = thread::spawn(move || {
+            wait.recv().unwrap();
+            let command = Command::new("executable-that-must-not-be-started");
+            launch_managed_provider(command, &worker_state, Duration::from_secs(2), attempt)
+        });
 
-        let command = Command::new("executable-that-must-not-be-started");
-        let error =
-            launch_managed_provider(command, &state, Duration::from_secs(2), attempt).unwrap_err();
+        assert!(!stop_connect_provider_with_timeout(&state, Duration::ZERO).unwrap());
+        release.send(()).unwrap();
+        let error = worker.join().unwrap().unwrap_err();
 
         assert!(error.contains("cancelled"));
         assert!(state.provider.lock().unwrap().managed.is_none());

@@ -78,7 +78,8 @@ no packaged implementation, or packaging with no operator-visible proof.
   provider mutex is held across that wait. Close/Stop can therefore signal or
   force-reap a slow preflight instead of waiting for the startup deadline.
 - A monotonic start attempt, its active state, and the managed child share one
-  lifecycle mutex. Stop or Close atomically invalidates that attempt before
+  lifecycle mutex. The native command reserves the attempt before scheduling
+  its blocking worker. Stop or Close atomically invalidates that attempt before
   checking for a child, so a cancelled preflight cannot later spawn an
   untracked provider and retry cannot race past an incomplete stop. Failed
   startup cleanup is attempt-scoped and cannot stop a newer provider.
@@ -157,7 +158,7 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 ## Estimated diff size
 
-The final patch contains 1,416 additions and 19 deletions across 9 files for
+The final patch contains 1,436 additions and 19 deletions across 9 files for
 the provider readiness adapter, native lifecycle controller, compact UI
 surface, tests, and Windows smoke step. The provider HTTP contract and
 generation stack are not part of this diff.
