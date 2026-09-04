@@ -795,12 +795,7 @@ fn start_connect_provider(
             CONNECT_STARTUP_TIMEOUT,
             attempt,
         )?;
-        Ok(ConnectStatus {
-            entitlement_state: entitlement.state,
-            entitlement_active: true,
-            provider_running: true,
-            provider_managed: true,
-        })
+        connect_status_value(app, state)
     })();
     finish_provider_start(state, attempt)?;
     result
@@ -1739,6 +1734,18 @@ mod tests {
         assert!(!status.entitlement_active);
         assert!(status.provider_running);
         assert!(status.provider_managed);
+
+        let expired = connect_status_from(
+            Ok(EntitlementStatus {
+                state: "expired".to_owned(),
+                active: false,
+            }),
+            true,
+        );
+        assert_eq!(expired.entitlement_state, "expired");
+        assert!(!expired.entitlement_active);
+        assert!(expired.provider_running);
+        assert!(expired.provider_managed);
     }
 
     #[test]
