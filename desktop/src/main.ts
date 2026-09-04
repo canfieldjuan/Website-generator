@@ -17,6 +17,7 @@ import {
   mergeProspectFields,
   settingsForProvider,
   type ProspectDocument,
+  type ProspectFieldKey,
   type ProspectFields,
 } from "./state";
 
@@ -228,6 +229,19 @@ let previewUrl: string | null = null;
 let busy = false;
 let activeGeneration: Promise<void> | null = null;
 const attempts = new AttemptGate();
+const editedProspectFields = new Set<ProspectFieldKey>();
+
+const prospectControlFields: Record<string, ProspectFieldKey> = {
+  "business-name": "businessName",
+  trade: "trade",
+  city: "city",
+  state: "state",
+  phone: "phone",
+  address: "address",
+  "owner-email": "ownerEmail",
+  "formspree-endpoint": "formspreeEndpoint",
+  services: "servicesText",
+};
 
 function inputValue(id: string): string {
   return element<HTMLInputElement | HTMLTextAreaElement>(id).value;
@@ -279,7 +293,13 @@ function writeFields(fields: ProspectFields): void {
 }
 
 function currentDocument(): ProspectDocument {
-  return mergeProspectFields(sourceDocument, collectFields());
+  return mergeProspectFields(sourceDocument, collectFields(), editedProspectFields);
+}
+
+function recordProspectEdit(target: EventTarget | null): void {
+  if (!(target instanceof HTMLElement)) return;
+  const field = prospectControlFields[target.id];
+  if (field) editedProspectFields.add(field);
 }
 
 function currentGeneration() {
@@ -333,6 +353,7 @@ function showError(error: unknown): void {
 }
 
 form.addEventListener("input", (event) => {
+  recordProspectEdit(event.target);
   if (event.target instanceof HTMLInputElement && event.target.name === "provider") return;
   if (!busy && !saveButton.disabled) {
     attempts.invalidate();
@@ -343,6 +364,7 @@ form.addEventListener("input", (event) => {
 });
 
 form.addEventListener("change", (event) => {
+  recordProspectEdit(event.target);
   if (!(event.target instanceof HTMLInputElement) || event.target.name !== "provider") return;
   const next = selectedProvider();
   openRouterKey.value = clearCloudCredentialOnProviderChange(activeProvider, next, openRouterKey.value);
@@ -359,6 +381,7 @@ importButton.addEventListener("click", async () => {
     if (!imported) return;
     const fields = fieldsFromProspect(imported.document);
     sourceDocument = imported.document;
+    editedProspectFields.clear();
     writeFields(fields);
     clearPreview();
     setStage("facts");
@@ -418,6 +441,7 @@ generateButton.addEventListener("click", async () => {
   const operation = (async () => {
     try {
       sourceDocument = currentDocument();
+      editedProspectFields.clear();
       const artifact = await generateSite(sourceDocument, currentGeneration());
       if (!attempts.isCurrent(attempt)) return;
       const bytes = decodeArtifact(artifact);

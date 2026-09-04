@@ -12,6 +12,8 @@ export type ProspectFields = {
   servicesText: string;
 };
 
+export type ProspectFieldKey = keyof ProspectFields;
+
 export type GenerationSettings =
   | { provider: "local"; model: string; base_url: string }
   | { provider: "openrouter"; model: string; api_key: string };
@@ -79,11 +81,11 @@ export function fieldsFromProspect(document: ProspectDocument): ProspectFields {
 export function mergeProspectFields(
   source: ProspectDocument,
   fields: ProspectFields,
+  editedFields: ReadonlySet<ProspectFieldKey>,
 ): ProspectDocument {
   const merged = structuredClone(source);
-  const originalFields = fieldsFromProspect(source);
   for (const [documentKey, fieldKey] of Object.entries(STRING_FIELD_MAP)) {
-    if (fields[fieldKey] === originalFields[fieldKey]) continue;
+    if (!editedFields.has(fieldKey)) continue;
     const trimmed = fields[fieldKey].trim();
     const value = fieldKey === "state" ? trimmed.toUpperCase() : trimmed;
     if (value) {
@@ -92,14 +94,14 @@ export function mergeProspectFields(
       delete merged[documentKey];
     }
   }
-  if (fields.trade !== originalFields.trade) {
+  if (editedFields.has("trade")) {
     if (fields.trade) {
       merged.trade = fields.trade;
     } else {
       delete merged.trade;
     }
   }
-  if (fields.servicesText !== originalFields.servicesText) {
+  if (editedFields.has("servicesText")) {
     const services = fields.servicesText
       .split(/\r?\n/)
       .map((service) => service.trim())

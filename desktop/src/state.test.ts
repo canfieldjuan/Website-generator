@@ -39,7 +39,11 @@ describe("prospect projection", () => {
     fields.businessName = "New Name";
     fields.servicesText = "Drain cleaning\n\n Water heaters ";
 
-    const merged = mergeProspectFields(imported, fields);
+    const merged = mergeProspectFields(
+      imported,
+      fields,
+      new Set(["businessName", "servicesText"]),
+    );
 
     expect(merged.business_name).toBe("New Name");
     expect(merged.services).toEqual(["Drain cleaning", "Water heaters"]);
@@ -65,7 +69,11 @@ describe("prospect projection", () => {
     fields.ownerEmail = "";
     fields.servicesText = "";
 
-    const merged = mergeProspectFields(imported, fields);
+    const merged = mergeProspectFields(
+      imported,
+      fields,
+      new Set(["address", "ownerEmail", "servicesText"]),
+    );
 
     expect(merged).not.toHaveProperty("address");
     expect(merged).not.toHaveProperty("owner_email");
@@ -83,13 +91,17 @@ describe("prospect projection", () => {
       services: [] as string[],
     };
 
-    const merged = mergeProspectFields(imported, fieldsFromProspect(imported));
+    const merged = mergeProspectFields(
+      imported,
+      fieldsFromProspect(imported),
+      new Set(),
+    );
 
     expect(merged).toEqual(imported);
 
     const edited = fieldsFromProspect(imported);
     edited.state = "wi";
-    expect(mergeProspectFields(imported, edited).state).toBe("WI");
+    expect(mergeProspectFields(imported, edited, new Set(["state"])).state).toBe("WI");
   });
 });
 

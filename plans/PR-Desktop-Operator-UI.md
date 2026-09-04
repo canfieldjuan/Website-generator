@@ -80,11 +80,13 @@ being done without competing with the customer preview.
 
 ## Mechanism
 
-The frontend maintains one in-memory prospect document. Known form fields are
-projected into that document immediately before validation, generation, or
-export, preserving every unknown imported key. Provider credentials live only
-in JavaScript memory, are sent inside the private Tauri IPC request, and are
-cleared when the provider changes or the window closes.
+The frontend maintains one in-memory prospect document and an explicit set of
+known controls the operator has edited. Only those fields are projected back
+before validation, generation, or export, preserving exact untouched known
+representations and every unknown imported key even when browser controls
+normalize their displayed values. Provider credentials live only in JavaScript
+memory, are sent inside the private Tauri IPC request, and are cleared when the
+provider changes or the window closes.
 
 Rust owns all filesystem and process effects. Import/export/save commands open
 native dialogs and enforce bounded UTF-8/HTML payloads. The generation command
