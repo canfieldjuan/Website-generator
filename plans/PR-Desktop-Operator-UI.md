@@ -124,7 +124,7 @@ closing a preview revokes its prior Blob URL.
 
 ## Verification
 
-- `npm test` from `desktop/`: 1 test file passed, 9 tests passed.
+- `npm test` from `desktop/`: 1 test file passed, 10 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
 - `cargo test` from `desktop/src-tauri/`: 8 tests passed. The boundary tests
   include cancellation before child registration and reject nested numeric
