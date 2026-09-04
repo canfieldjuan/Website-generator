@@ -93,7 +93,9 @@ no packaged implementation, or packaging with no operator-visible proof.
   registration carrying its private desktop-issued bearer. This remains exact
   when a packaged one-file bootloader and its Python worker have different
   process IDs; a replacement or a different provider registration is
-  preserved.
+  preserved. Terminated-child state is separate from pending registration
+  cleanup state, so a failed cleanup remains bearer-bound and retryable from
+  Stop, Status, or the next Start until reconciliation succeeds.
 - Entitlement-status failure is reported independently from managed-process
   state, so it cannot hide a running child or remove the operator's Stop path.
 - Standalone generation may disable activation and provider startup while it
@@ -141,13 +143,14 @@ no packaged implementation, or packaging with no operator-visible proof.
 - `npm test` from `desktop/`: 1 test file passed, 14 tests passed.
 - `npm run build` from `desktop/`: TypeScript and Vite production build passed.
 - `cargo fmt --check` from `desktop/src-tauri/`: passed.
-- `cargo test` from `desktop/src-tauri/`: 24 tests passed. The lifecycle cases
+- `cargo test` from `desktop/src-tauri/`: 25 tests passed. The lifecycle cases
   cover exact/bounded readiness without EOF, inactive entitlement, duplicate
   start, timeout and early-exit cleanup, cancellation before spawn and during
   the readiness wait, attempt-scoped cleanup that preserves a newer provider,
   graceful stop/reap, an ownership-matched registration cleanup after a forced
-  fallback, and independent provider state when entitlement status is
-  unavailable. The Windows run adds the process-tree cancellation regression.
+  fallback, retry after cleanup-command failure, and independent provider state
+  when entitlement status is unavailable. The Windows run adds the process-tree
+  cancellation regression.
 - `cargo clippy --all-targets --all-features -- -D warnings` from
   `desktop/src-tauri/`: passed.
 - `python connect_provider.py entitlement status`: returned the expected
@@ -166,7 +169,7 @@ no packaged implementation, or packaging with no operator-visible proof.
 
 ## Estimated diff size
 
-The final patch contains 1,720 additions and 25 deletions across 12 files for
+The final patch contains 1,776 additions and 25 deletions across 12 files for
 the provider readiness adapter, native lifecycle controller, compact UI
 surface, tests, and Windows smoke step. The provider HTTP contract and
 generation stack are not part of this diff.

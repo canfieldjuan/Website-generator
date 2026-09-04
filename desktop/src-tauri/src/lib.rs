@@ -61,6 +61,7 @@ struct ManagedProvider {
 #[derive(Default)]
 struct ProviderLifecycle {
     managed: Option<ManagedProvider>,
+    pending_registration_cleanup: Option<Command>,
     active_start: Option<u64>,
     next_attempt: u64,
 }
@@ -461,7 +462,6 @@ fn wait_for_connect_command(
 
 fn cleanup_provider_registration(command: &mut Command) -> Result<(), String> {
     command
-        .arg("cleanup-registration")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -480,11 +480,24 @@ fn new_desktop_registration_token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
-fn reconcile_terminated_provider(provider: &mut ManagedProvider) -> Result<(), String> {
-    let Some(mut cleanup) = provider.registration_cleanup.take() else {
+fn reconcile_pending_registration(slot: &mut ProviderLifecycle) -> Result<(), String> {
+    let Some(cleanup) = slot.pending_registration_cleanup.as_mut() else {
         return Ok(());
     };
-    cleanup_provider_registration(&mut cleanup)
+    cleanup_provider_registration(cleanup)?;
+    slot.pending_registration_cleanup = None;
+    Ok(())
+}
+
+fn reconcile_managed_provider_termination(slot: &mut ProviderLifecycle) -> Result<(), String> {
+    if slot.pending_registration_cleanup.is_some() {
+        return Err("The Local Connect registration could not be reconciled.".to_owned());
+    }
+    let Some(mut provider) = slot.managed.take() else {
+        return Ok(());
+    };
+    slot.pending_registration_cleanup = provider.registration_cleanup.take();
+    reconcile_pending_registration(slot)
 }
 
 fn run_cli_json(app: &AppHandle, arguments: &[OsString]) -> Result<Value, String> {
@@ -579,6 +592,7 @@ fn read_provider_readiness(reader: impl Read) -> io::Result<Vec<u8>> {
 
 fn provider_is_running(state: &DesktopState) -> Result<bool, String> {
     let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    reconcile_pending_registration(&mut slot)?;
     let Some(provider) = slot.managed.as_mut() else {
         return Ok(false);
     };
@@ -588,8 +602,7 @@ fn provider_is_running(state: &DesktopState) -> Result<bool, String> {
         .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
         .is_some()
     {
-        let mut provider = slot.managed.take().expect("managed provider was present");
-        reconcile_terminated_provider(&mut provider)?;
+        reconcile_managed_provider_termination(&mut slot)?;
         return Ok(false);
     }
     Ok(provider.ready)
@@ -661,6 +674,7 @@ fn launch_managed_provider(
     attempt: u64,
 ) -> Result<bool, String> {
     let mut slot = state.provider.lock().map_err(|_| lock_error())?;
+    reconcile_pending_registration(&mut slot)?;
     if slot.active_start != Some(attempt) {
         return Err("The Local Connect provider start was cancelled.".to_owned());
     }
@@ -677,8 +691,7 @@ fn launch_managed_provider(
                 Err("The Local Connect provider is already starting.".to_owned())
             };
         }
-        let mut provider = slot.managed.take().expect("managed provider was present");
-        reconcile_terminated_provider(&mut provider)?;
+        reconcile_managed_provider_termination(&mut slot)?;
     }
 
     command
@@ -743,8 +756,7 @@ fn launch_managed_provider(
     }
     match provider.child.try_wait() {
         Ok(Some(_)) => {
-            let mut provider = slot.managed.take().expect("managed provider was present");
-            reconcile_terminated_provider(&mut provider)?;
+            reconcile_managed_provider_termination(&mut slot)?;
             return Err("The Local Connect provider stopped during startup.".to_owned());
         }
         Ok(None) => provider.ready = true,
@@ -752,8 +764,7 @@ fn launch_managed_provider(
             force_reap(&mut provider.child).map_err(|_| {
                 "The Local Connect provider could not be stopped after a status failure.".to_owned()
             })?;
-            let mut provider = slot.managed.take().expect("managed provider was present");
-            reconcile_terminated_provider(&mut provider)?;
+            reconcile_managed_provider_termination(&mut slot)?;
             return Err("The Local Connect provider status is unavailable.".to_owned());
         }
     }
@@ -773,7 +784,9 @@ fn start_connect_provider(
         let mut cleanup = base_engine_command(app)?;
         let registration_token = new_desktop_registration_token();
         command.env(DESKTOP_REGISTRATION_TOKEN_ENV, &registration_token);
-        cleanup.env(DESKTOP_REGISTRATION_TOKEN_ENV, registration_token);
+        cleanup
+            .arg("cleanup-registration")
+            .env(DESKTOP_REGISTRATION_TOKEN_ENV, registration_token);
         command.args(["serve", "--desktop-managed"]);
         launch_managed_provider(
             command,
@@ -797,6 +810,7 @@ fn stop_managed_provider_locked(
     slot: &mut ProviderLifecycle,
     shutdown_timeout: Duration,
 ) -> Result<bool, String> {
+    reconcile_pending_registration(slot)?;
     let Some(provider) = slot.managed.as_mut() else {
         return Ok(false);
     };
@@ -806,8 +820,7 @@ fn stop_managed_provider_locked(
         .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
         .is_some()
     {
-        let mut provider = slot.managed.take().expect("managed provider was present");
-        reconcile_terminated_provider(&mut provider)?;
+        reconcile_managed_provider_termination(slot)?;
         return Ok(false);
     }
     if let Some(mut stdin) = provider.stdin.take() {
@@ -822,15 +835,13 @@ fn stop_managed_provider_locked(
             .map_err(|_| "The Local Connect provider status is unavailable.".to_owned())?
             .is_some()
         {
-            let mut provider = slot.managed.take().expect("managed provider was present");
-            reconcile_terminated_provider(&mut provider)?;
+            reconcile_managed_provider_termination(slot)?;
             return Ok(true);
         }
         if Instant::now() >= deadline {
             force_reap(&mut provider.child)
                 .map_err(|_| "The Local Connect provider could not be stopped.".to_owned())?;
-            let mut provider = slot.managed.take().expect("managed provider was present");
-            reconcile_terminated_provider(&mut provider)?;
+            reconcile_managed_provider_termination(slot)?;
             return Ok(true);
         }
         thread::sleep(Duration::from_millis(50));
@@ -1896,6 +1907,48 @@ mod tests {
             fs::read_to_string(cleanup_path).unwrap(),
             "test-registration-token"
         );
+    }
+
+    #[test]
+    fn failed_registration_reconciliation_is_retained_for_retry() {
+        let state = DesktopState::default();
+        let directory = tempfile::tempdir().unwrap();
+        let cleanup_path = directory.path().join("cleanup-attempt");
+        let provider =
+            fixture_provider("import time; print('{\"ready\":true}', flush=True); time.sleep(2)");
+        let mut cleanup = fixture_provider(
+            "import pathlib, sys; path = pathlib.Path(sys.argv[1]); first = not path.exists(); path.write_text('attempted' if first else 'reconciled'); raise SystemExit(1 if first else 0)",
+        );
+        cleanup.arg(&cleanup_path);
+        let attempt = begin_provider_start(&state).unwrap();
+        assert!(
+            launch_managed_provider(
+                provider,
+                Some(cleanup),
+                &state,
+                Duration::from_secs(2),
+                attempt,
+            )
+            .unwrap()
+        );
+        finish_provider_start(&state, attempt).unwrap();
+
+        assert!(stop_connect_provider_with_timeout(&state, Duration::from_millis(20)).is_err());
+        {
+            let lifecycle = state.provider.lock().unwrap();
+            assert!(lifecycle.managed.is_none());
+            assert!(lifecycle.pending_registration_cleanup.is_some());
+        }
+        assert!(!stop_connect_provider_with_timeout(&state, Duration::ZERO).unwrap());
+        assert!(
+            state
+                .provider
+                .lock()
+                .unwrap()
+                .pending_registration_cleanup
+                .is_none()
+        );
+        assert_eq!(fs::read_to_string(cleanup_path).unwrap(), "reconciled");
     }
 
     #[test]
