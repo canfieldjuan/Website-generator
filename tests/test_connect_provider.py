@@ -1185,6 +1185,23 @@ class GenerationSeamTests(unittest.TestCase):
             unowned_cleanup.assert_not_called()
             unowned_preflight.assert_not_called()
 
+            with patch.dict(
+                os.environ,
+                {connect_provider.DESKTOP_REGISTRATION_TOKEN_ENV: TOKEN},
+                clear=False,
+            ), patch.object(
+                connect_provider, "parse_args", return_value=args
+            ), patch.object(
+                connect_provider,
+                "remove_registration_for_token",
+                side_effect=PermissionError("temporarily locked"),
+            ), patch.object(
+                connect_provider, "preflight_generation_provider"
+            ) as failed_preflight:
+                self.assertEqual(connect_provider.main(), 2)
+
+            failed_preflight.assert_not_called()
+
     def test_no_command_preserves_standalone_serve_mode(self):
         standalone = connect_provider.parse_args([])
         managed = connect_provider.parse_args(["serve", "--desktop-managed"])
@@ -1541,6 +1558,25 @@ class RegistrationTests(unittest.TestCase):
             for invalid in (None, False, "", "short", "!" * 64):
                 with self.subTest(token=invalid), self.assertRaises(ValueError):
                     remove_registration_for_token(runtime, invalid)
+
+    def test_token_cleanup_propagates_owned_registration_unlink_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            document = registration_document(
+                instance_id=str(uuid.uuid4()), port=43127, token=TOKEN, pid=4242
+            )
+            path = write_registration(runtime, document)
+            unlink_target = (
+                "lib.connect_v2.unlink_regular_file"
+                if os.name == "nt"
+                else "pathlib.Path.unlink"
+            )
+
+            with patch(unlink_target, side_effect=PermissionError("temporarily locked")):
+                with self.assertRaises(PermissionError):
+                    remove_registration_for_token(runtime, TOKEN)
+
+            self.assertTrue(path.exists())
 
     def test_malformed_registration_never_removes_or_aborts_cleanup(self):
         malformed_contents = {

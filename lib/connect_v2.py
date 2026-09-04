@@ -820,7 +820,9 @@ def write_registration(directory: str | Path, document: dict[str, Any]) -> Path:
                 pass
 
 
-def remove_registration_if_owned(path: str | Path, token: str) -> bool:
+def remove_registration_if_owned(
+    path: str | Path, token: str, *, raise_on_io_error: bool = False
+) -> bool:
     registration_path = Path(path)
     try:
         if os.name == "nt":
@@ -830,13 +832,13 @@ def remove_registration_if_owned(path: str | Path, token: str) -> bool:
             current = json.loads(content)
         else:
             current = json.loads(registration_path.read_text(encoding="utf-8"))
-    except (
-        FileNotFoundError,
-        OSError,
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        RecursionError,
-    ):
+    except FileNotFoundError:
+        return False
+    except OSError:
+        if raise_on_io_error:
+            raise
+        return False
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
         return False
     if not isinstance(current, dict):
         return False
@@ -855,7 +857,11 @@ def remove_registration_if_owned(path: str | Path, token: str) -> bool:
                 unlink_regular_file(registration_path)
             else:
                 registration_path.unlink()
-        except (FileNotFoundError, OSError):
+        except FileNotFoundError:
+            return False
+        except OSError:
+            if raise_on_io_error:
+                raise
             return False
         return True
     return False
@@ -912,7 +918,7 @@ def remove_registration_for_token(directory: str | Path, token: str) -> int:
         )
         if candidate != expected:
             continue
-        if remove_registration_if_owned(candidate, token):
+        if remove_registration_if_owned(candidate, token, raise_on_io_error=True):
             removed += 1
     return removed
 
