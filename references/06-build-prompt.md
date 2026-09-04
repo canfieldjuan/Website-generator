@@ -390,6 +390,7 @@ The per-section rules:
 7. Customer Reviews -- branching logic based on what prospect data
    contains. Three possible renderings:
 
+   <!-- REVIEW_BRANCH_A_START -->
    **Branch A -- prospect.reviews has 3+ entries**: render the
    card-grid treatment. Three reviews maximum (use any 3 complete
    source entries if the array has more). Each review object MUST have the shape
@@ -421,7 +422,9 @@ The per-section rules:
      </div>
    </div>
    ```
+   <!-- REVIEW_BRANCH_A_END -->
 
+   <!-- REVIEW_BRANCH_B_START -->
    **Branch B -- prospect.reviews is empty OR has fewer than 3 entries,
    BUT prospect.google_review_score is a number AND
    prospect.google_review_count is a positive integer**: fall back to the
@@ -443,11 +446,14 @@ The per-section rules:
      </div>
    </div>
    ```
+   <!-- REVIEW_BRANCH_B_END -->
 
+   <!-- REVIEW_BRANCH_C_START -->
    **Branch C -- fewer than 3 complete reviews AND no complete numeric
    score/count pair**:
    OMIT the entire Customer Reviews section. Do NOT render the section
    header alone.
+   <!-- REVIEW_BRANCH_C_END -->
 
    **For `google_reviews_url` in Branch B or a Branch A summary**: use
    prospect.google_business_url verbatim if present. Otherwise fall

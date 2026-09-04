@@ -19,6 +19,7 @@ from lib.connect_entitlement import (
 )
 from lib.connect_store import ConnectStore
 from lib.connect_windows import ensure_private_directory, local_app_data_root
+from lib.desktop_protocol import run_desktop_stdio
 from lib.connect_v2 import (
     ProviderLock,
     ProviderRuntime,
@@ -43,7 +44,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Expose local JSON-to-HTML generation through Local Connect v2. "
-            "Standalone vLLM must already serve qwen/qwen3.8-27b."
+            "Ollama must already serve the configured model on loopback."
         )
     )
     parser.add_argument(
@@ -73,6 +74,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Install an acquired signed entitlement from a selected file.",
     )
     install.add_argument("source", type=Path)
+    commands.add_parser(
+        "desktop",
+        help="Handle one private desktop JSON request on stdin.",
+    )
     return parser.parse_args(argv)
 
 
@@ -114,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if getattr(args, "command", None) == "entitlement":
         return _run_entitlement_command(args)
+    if getattr(args, "command", None) == "desktop":
+        return run_desktop_stdio()
     try:
         runtime_dir = args.runtime_dir or default_runtime_dir()
         state_dir = args.state_dir or default_state_dir()

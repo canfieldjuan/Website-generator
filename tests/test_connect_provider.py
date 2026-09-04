@@ -553,7 +553,7 @@ class ConcurrencyAndFailureTests(unittest.TestCase):
                 ),
                 "MODEL_RUNTIME_UNAVAILABLE",
                 True,
-                "scripts/start_vllm_server.sh",
+                "Ollama",
             ),
             (
                 lambda _input: (_ for _ in ()).throw(
@@ -1002,24 +1002,25 @@ class GenerationSeamTests(unittest.TestCase):
     def test_connect_client_bypasses_environment_proxies(self):
         class ModelHandler(BaseHTTPRequestHandler):
             def do_GET(self):
-                if self.path == "/health":
-                    payload = b""
+                if self.path == "/api/version":
+                    payload = json.dumps({"version": "0.24.0"}).encode("utf-8")
                 else:
-                    document = {
-                        "object": "list",
-                        "data": [
-                            {
-                                "id": DEFAULT_LOCAL_MODEL,
-                                "object": "model",
-                                "created": 0,
-                                "owned_by": "vllm",
-                            }
-                        ],
-                    }
+                    document = {"models": [{"name": DEFAULT_LOCAL_MODEL}]}
                     payload = json.dumps(document).encode("utf-8")
                 self.send_response(200)
                 if payload:
                     self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def do_POST(self):
+                document = {
+                    "model_info": {"qwen3moe.context_length": 262144}
+                }
+                payload = json.dumps(document).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
