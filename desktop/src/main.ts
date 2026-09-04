@@ -458,7 +458,7 @@ generateButton.addEventListener("click", async () => {
       saveButton.disabled = false;
       setStage("review");
       setStatus("Website generated and admitted. Review it before saving.", "success");
-      if (window.matchMedia("(max-width: 900px)").matches) setMobileView("preview");
+      if (window.matchMedia("(max-width: 926px)").matches) setMobileView("preview");
     } catch (error) {
       if (attempts.isCurrent(attempt)) showError(error);
     } finally {
