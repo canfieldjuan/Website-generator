@@ -114,7 +114,6 @@ SITE_ANALYSIS_SCHEMA = _object(
                     "type": TEXT,
                     "headline": NULLABLE_TEXT,
                     "items": _array(CONTENT_ITEM_SCHEMA),
-                    "source_url": URL,
                 },
                 required=("type",),
             )
@@ -525,11 +524,6 @@ def validate_site_analysis(
 ) -> dict:
     """Admit one homepage analysis only when its source-owned facts are grounded."""
     admitted = copy.deepcopy(document)
-    sections = admitted.get("sections") if isinstance(admitted, dict) else None
-    if isinstance(sections, list) and source_url:
-        for section in sections:
-            if isinstance(section, dict):
-                section["source_url"] = source_url
     error = _validation_error(_ANALYSIS_VALIDATOR, admitted)
     if error:
         raise SiteExtractionError(error)

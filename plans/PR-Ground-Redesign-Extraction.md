@@ -36,8 +36,9 @@ analysis may control presentation but may not authorize a visible business claim
 4. Make homepage analysis fail closed when validation or grounding fails. Preserve
    enrichment's existing best-effort contract by logging and skipping an invalid
    page result rather than merging it.
-5. Overwrite homepage-section and enrichment `source_url` with the effective URL
-   selected and fetched by code; never accept model-authored provenance.
+5. Overwrite enrichment `source_url` with the effective URL selected and fetched
+   by code; never accept model-authored provenance. Keep homepage sections free of
+   that field because generation uses it as the interior-enrichment discriminator.
 6. Remove redesign-prompt instructions that synthesize availability promises from
    urgency classification, and state the derived-versus-source authority boundary
    at the generation prompt.

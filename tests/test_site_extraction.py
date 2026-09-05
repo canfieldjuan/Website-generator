@@ -100,7 +100,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         supplied_prompt = client.calls[0]["messages"][1]["content"]
         self.assertIn("SOURCE_URL: https://acme.test/", supplied_prompt)
 
-    def test_homepage_section_provenance_is_owned_by_code(self):
+    def test_homepage_section_does_not_gain_enrichment_provenance(self):
         document = {
             "site": {"name": "Drees Plumbing"},
             "sections": [
@@ -128,10 +128,15 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         )
 
         self.assertNotIn("source_url", document["sections"][0])
-        self.assertEqual(
-            admitted["sections"][0]["source_url"],
-            "https://example.com/home",
-        )
+        self.assertNotIn("source_url", admitted["sections"][0])
+
+        document["sections"][0]["source_url"] = "https://attacker.test/spoofed"
+        with self.assertRaisesRegex(SiteExtractionError, "schema"):
+            validate_site_analysis(
+                document,
+                html,
+                "https://example.com/home",
+            )
 
     def test_site_analysis_rejects_one_fabricated_value_in_mixed_collection(self):
         document = {
