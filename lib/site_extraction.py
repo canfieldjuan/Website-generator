@@ -239,6 +239,7 @@ _TEXT_ATTRIBUTES = {
 _ACTION_URL_ATTRIBUTES = {"href"}
 _IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
 _ASSERTION_CONTEXT_TAGS = {
+    "a",
     "address",
     "article",
     "aside",
@@ -269,6 +270,15 @@ _ASSERTION_CONTEXT_TAGS = {
     "td",
     "th",
 }
+_CONTACT_CONTEXT_TAGS = _ASSERTION_CONTEXT_TAGS - {
+    "aside",
+    "body",
+    "footer",
+    "header",
+    "main",
+    "nav",
+    "section",
+}
 _IGNORED_TEXT_TAGS = {"noscript", "script", "style", "template"}
 _EMAIL_PATTERN = re.compile(
     r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@"
@@ -281,8 +291,10 @@ _PHONE_PATTERN = re.compile(
     re.I,
 )
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
-_CLAUSE_BREAK_PATTERN = re.compile(
-    r"[,.!?;:]|\b(?:but|however|yet|except)\b",
+_SENTENCE_BREAK_PATTERN = re.compile(r"[.!?;]")
+_CONTRAST_BREAK_PATTERN = re.compile(r"\b(?:but|however|yet|except)\b", re.I)
+_LEADING_PARENTHETICAL_CONTRAST = re.compile(
+    r"^\s*,\s*(?:however|though|nevertheless)\s*,\s*",
     re.I,
 )
 _WORD_PATTERN = re.compile(r"[a-z0-9]+(?:['’][a-z]+)?", re.I)
@@ -359,14 +371,17 @@ def _words_contain_negation(words: list[str], *, postposed: bool = False) -> boo
 
 
 def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
-    preceding_clause = _CLAUSE_BREAK_PATTERN.split(text[:start])[-1]
+    preceding_sentence = _SENTENCE_BREAK_PATTERN.split(text[:start])[-1]
+    preceding_clause = _CONTRAST_BREAK_PATTERN.split(preceding_sentence)[-1]
     preceding_words = [
         word.replace("’", "'") for word in _WORD_PATTERN.findall(preceding_clause)
     ][-6:]
     if _words_contain_negation(preceding_words):
         return True
 
-    following_clause = _CLAUSE_BREAK_PATTERN.split(text[start + length :])[0]
+    following_text = _LEADING_PARENTHETICAL_CONTRAST.sub(" ", text[start + length :])
+    following_sentence = _SENTENCE_BREAK_PATTERN.split(following_text)[0]
+    following_clause = _CONTRAST_BREAK_PATTERN.split(following_sentence)[0]
     following_words = [
         word.replace("’", "'") for word in _WORD_PATTERN.findall(following_clause)
     ][:6]
@@ -376,8 +391,8 @@ def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
 def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
     before = text[:start]
     after = text[start + length :]
-    preceding_clause = re.split(r"[.!?;:]", before)[-1]
-    following_match = re.search(r"[.!?;:]", after)
+    preceding_clause = re.split(r"[.!?]", before)[-1]
+    following_match = re.search(r"[.!?]", after)
     following_clause = after[: following_match.start()] if following_match else after
     following_boundary = following_match.group(0) if following_match else ""
     if following_boundary == "?":
@@ -410,7 +425,19 @@ def _attribute_values(value: Any) -> Iterable[str]:
 
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
 _ATOMIC_RECORD_TAGS = {"address", "blockquote", "details", "li", "p", "td", "th", "tr"}
-_RECORD_CONTAINER_TAGS = {"article", "details", "div", "li", "section", "table", "tr"}
+_RECORD_CONTAINER_TAGS = {
+    "article",
+    "details",
+    "div",
+    "dl",
+    "li",
+    "menu",
+    "ol",
+    "section",
+    "table",
+    "tr",
+    "ul",
+}
 
 
 def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
@@ -441,6 +468,17 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
             ):
                 append(str(element))
 
+    for term in soup.find_all("dt"):
+        parts = [str(term)]
+        for sibling in term.next_siblings:
+            sibling_name = getattr(sibling, "name", None)
+            if sibling_name == "dt":
+                break
+            if sibling_name is not None and sibling_name != "dd":
+                break
+            parts.append(str(sibling))
+        append("".join(parts))
+
     for heading in soup.find_all(_HEADING_TAG_PATTERN):
         if _HEADING_TAG_PATTERN.fullmatch(heading.name or "") is None:
             continue
@@ -466,6 +504,7 @@ class SourceEvidence:
     text_segments: tuple[str, ...]
     assertion_segments: tuple[str, ...]
     action_labels: frozenset[str]
+    action_pairs: frozenset[tuple[str, str]]
     action_urls: frozenset[str]
     image_urls: frozenset[str]
     emails: frozenset[str]
@@ -491,7 +530,7 @@ class SourceEvidence:
 
         soup = BeautifulSoup(source_html, "html.parser")
         context_parts: dict[int, list[str]] = {}
-        visible_parts: list[str] = []
+        contact_context_parts: dict[int, list[str]] = {}
         for node in soup.find_all(string=True):
             if isinstance(node, Comment):
                 continue
@@ -501,11 +540,19 @@ class SourceEvidence:
             parent = node.parent
             if parent is not None and parent.name in _IGNORED_TEXT_TAGS:
                 continue
-            visible_parts.append(value)
             context = parent
             while context is not None and context.name not in _ASSERTION_CONTEXT_TAGS:
                 context = context.parent
             context_parts.setdefault(id(context or node), []).append(value)
+            contact_context = parent
+            while (
+                contact_context is not None
+                and contact_context.name not in _CONTACT_CONTEXT_TAGS
+            ):
+                contact_context = contact_context.parent
+            contact_context_parts.setdefault(
+                id(contact_context or parent or node), []
+            ).append(value)
         assertion_segments = tuple(
             dict.fromkeys(
                 segment
@@ -513,35 +560,47 @@ class SourceEvidence:
                 if (segment := _normalize_text(" ".join(parts)))
             )
         )
+        contact_segments = tuple(
+            dict.fromkeys(
+                segment
+                for parts in contact_context_parts.values()
+                if (segment := _normalize_text(" ".join(parts)))
+            )
+        )
         attribute_parts: list[str] = []
         raw_action_urls: set[str] = set()
+        raw_action_pairs: set[tuple[str, str]] = set()
         raw_image_urls: set[str] = set()
-        email_values: list[str] = list(visible_parts)
-        phone_values: list[str] = list(visible_parts)
+        email_values: list[str] = list(contact_segments)
+        phone_values: list[str] = list(contact_segments)
         action_labels: set[str] = set()
 
         for element in soup.find_all(True):
             role = str(element.get("role") or "").casefold()
+            action_label = ""
             if (
-                element.name == "a"
+                element.name in {"a", "area"}
                 and element.has_attr("href")
                 or element.name == "button"
                 or role == "button"
             ):
-                label = _normalize_text(element.get_text(" ", strip=True))
-                if not label:
-                    label = _normalize_text(str(element.get("aria-label") or ""))
-                if label:
-                    action_labels.add(label)
+                action_label = _normalize_text(element.get_text(" ", strip=True))
+                if not action_label:
+                    action_label = _normalize_text(
+                        str(element.get("aria-label") or element.get("title") or "")
+                    )
             if (
                 element.name == "input"
                 and str(element.get("type") or "").casefold() == "submit"
             ):
-                label = _normalize_text(
+                action_label = _normalize_text(
                     str(element.get("value") or element.get("aria-label") or "")
                 )
-                if label:
-                    action_labels.add(label)
+            if action_label:
+                action_labels.add(action_label)
+                raw_href = element.get("href")
+                if element.name in {"a", "area"} and isinstance(raw_href, str):
+                    raw_action_pairs.add((action_label, raw_href))
             for name, raw_value in element.attrs.items():
                 for value in _attribute_values(raw_value):
                     if name in _TEXT_ATTRIBUTES:
@@ -589,15 +648,15 @@ class SourceEvidence:
                     admitted.add(urljoin(source_url, candidate))
             return frozenset(admitted)
 
-        normalized_emails = " ".join(email_values)
         emails = {
             match.group(0).casefold()
-            for match in _EMAIL_PATTERN.finditer(normalized_emails)
+            for segment in email_values
+            for match in _EMAIL_PATTERN.finditer(segment)
         }
-        normalized_phones = " ".join(phone_values)
         phones: set[str] = set()
-        for match in _PHONE_PATTERN.finditer(normalized_phones):
-            phones.update(_phone_variants(match.group(0)))
+        for segment in phone_values:
+            for match in _PHONE_PATTERN.finditer(segment):
+                phones.update(_phone_variants(match.group(0)))
 
         attribute_segments = tuple(
             dict.fromkeys(
@@ -618,6 +677,11 @@ class SourceEvidence:
             text_segments=tuple(dict.fromkeys(assertion_segments + attribute_segments)),
             assertion_segments=assertion_segments,
             action_labels=frozenset(action_labels),
+            action_pairs=frozenset(
+                (label, destination)
+                for label, raw_url in raw_action_pairs
+                for destination in resolved((raw_url,))
+            ),
             action_urls=resolved(raw_action_urls),
             image_urls=resolved(raw_image_urls),
             emails=frozenset(emails),
@@ -655,6 +719,14 @@ class SourceEvidence:
         if _normalize_text(value) not in self.action_labels:
             raise SiteExtractionError(
                 f"{path} is not grounded in a source action label."
+            )
+
+    def require_action(self, path: str, label: Any, url: Any) -> None:
+        normalized_label = _normalize_text(label) if isinstance(label, str) else ""
+        normalized_url = html.unescape(url).strip() if isinstance(url, str) else ""
+        if (normalized_label, normalized_url) not in self.action_pairs:
+            raise SiteExtractionError(
+                f"{path}.url and label are not grounded in one source action."
             )
 
     def require_email(self, path: str, value: Any) -> None:
@@ -768,11 +840,15 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
     evidence.require_url("brand.logo_url", brand.get("logo_url"), image=True)
 
     for index, item in enumerate(document.get("nav") or []):
-        evidence.require_text(f"nav[{index}].label", item["label"])
-        evidence.require_url(f"nav[{index}].url", item["url"])
+        evidence.require_action(f"nav[{index}]", item["label"], item["url"])
     cta = document.get("cta") or {}
-    evidence.require_action_label("cta.label", cta.get("label"))
-    evidence.require_url("cta.url", cta.get("url"))
+    cta_label = cta.get("label")
+    cta_url = cta.get("url")
+    if cta_label is not None and cta_url is not None:
+        evidence.require_action("cta", cta_label, cta_url)
+    else:
+        evidence.require_action_label("cta.label", cta_label)
+        evidence.require_url("cta.url", cta_url)
 
     for index, section in enumerate(document.get("sections") or []):
         path = f"sections[{index}]"
@@ -785,11 +861,9 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
     for index, social in enumerate(document.get("social") or []):
         evidence.require_url(f"social[{index}].url", social["url"])
     for index, item in enumerate(document.get("footer_links") or []):
-        evidence.require_text(f"footer_links[{index}].label", item["label"])
-        evidence.require_url(f"footer_links[{index}].url", item["url"])
+        evidence.require_action(f"footer_links[{index}]", item["label"], item["url"])
     for index, page in enumerate(document.get("pages_to_fetch") or []):
-        evidence.require_text(f"pages_to_fetch[{index}].label", page["label"])
-        evidence.require_url(f"pages_to_fetch[{index}].url", page["url"])
+        evidence.require_action(f"pages_to_fetch[{index}]", page["label"], page["url"])
 
     for index, section in enumerate(document.get("single_page_sections") or []):
         path = f"single_page_sections[{index}]"

@@ -82,8 +82,14 @@ cannot be recombined. HTML comments are excluded from visible text and contact
 evidence. The downstream generation action contract is assembled only from the
 schema's action-owned fields plus code-owned enrichment and contact-page source
 destinations, preserving these separations after extraction. Flat heading records
-stop before sibling structural containers, so a section heading cannot turn a
-collection of independent cards into one evidence record.
+stop before sibling structural containers, including list wrappers, so a section
+heading cannot turn a collection of independent cards into one evidence record.
+Definition-list terms and their owned definitions form individual records.
+Navigation, CTA, footer, and fetch-page labels remain paired with the destination
+of the same interactive source element. Phone and email scans operate per local
+DOM context rather than concatenating unrelated page nodes. Assertion context
+survives commas, parenthetical contrast modifiers, and colons until a real
+sentence or contrast boundary.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
 button, and text inputs cannot promote their values into published CTA copy.
 Classifications, layout choices, color selections, and image-generation guidance
@@ -135,7 +141,7 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 29 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 32 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
 - `python -m unittest discover -s tests -q`: passed on the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
@@ -155,7 +161,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 2,171 insertions and 66 deletions across seven files. This
+The reviewed diff is 2,369 insertions and 66 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

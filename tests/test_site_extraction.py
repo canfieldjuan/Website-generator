@@ -318,6 +318,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "<h1>Acme Cleaning</h1><p>Free Estimates are not available</p>",
                 {"existing_ctas": ["Free Estimates"]},
             ),
+            (
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    "<p>Free Estimates, however, are not available.</p>"
+                ),
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
         )
         for html, conversion_profile in cases:
             with (
@@ -388,6 +395,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for source_text in (
             "Free Estimates are not only available but easy to request",
             "Free Estimates are available without obligation",
+            "Free Estimates are available, however financing is not",
         ):
             with self.subTest(source_text=source_text):
                 self.assertEqual(
@@ -414,6 +422,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             (
                 "<p><strong>Free Estimates</strong> <span>are not available</span></p>",
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
+            (
+                "<p><strong>Free Estimates</strong>: Are they available?</p>",
                 {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
             ),
         )
@@ -470,6 +482,51 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                         f'<input type="{input_type}" value="Free Estimates">'
                     ),
                 )
+
+    def test_navigation_label_and_url_must_share_one_source_action(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "nav": [
+                {"label": "Contact", "url": "https://acme.test/about"},
+                {"label": "About", "url": "https://acme.test/contact"},
+            ],
+        }
+
+        with self.assertRaisesRegex(SiteExtractionError, "one source action"):
+            validate_site_analysis(
+                document,
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    '<a href="/contact">Contact</a>'
+                    '<a href="/about">About</a>'
+                ),
+                "https://acme.test/",
+            )
+
+    def test_phone_evidence_is_local_but_combines_inline_parts(self):
+        document = {
+            "site": {
+                "name": "Acme Cleaning",
+                "contact": {"phone": "217-555-0100"},
+            }
+        }
+
+        with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+            validate_site_analysis(
+                document,
+                ("<h1>Acme Cleaning</h1><div>217</div><div>555</div><div>0100</div>"),
+            )
+
+        self.assertEqual(
+            validate_site_analysis(
+                document,
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    "<p><span>217</span> <span>555</span> <span>0100</span></p>"
+                ),
+            ),
+            document,
+        )
 
     def test_contact_uri_parameters_do_not_become_contact_evidence(self):
         cases = (
@@ -815,6 +872,67 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 source_html=html,
                 source_url="https://acme.test/questions",
             )
+
+    def test_section_heading_record_cannot_span_list_records(self):
+        document = {
+            "type": "misc",
+            "headline": "FAQ",
+            "items": [
+                {
+                    "title": "Do you offer free estimates?",
+                    "url": None,
+                    "image_url": None,
+                    "tag": "faq",
+                    "meta": "Yes.",
+                }
+            ],
+        }
+        sources = (
+            (
+                "ul",
+                "<ul><li><h3>Do you offer free estimates?</h3><p>No.</p></li>"
+                "<li><h3>Do you offer recurring service?</h3><p>Yes.</p></li></ul>",
+            ),
+            (
+                "ol",
+                "<ol><li><h3>Do you offer free estimates?</h3><p>No.</p></li>"
+                "<li><h3>Do you offer recurring service?</h3><p>Yes.</p></li></ol>",
+            ),
+            (
+                "dl",
+                "<dl><dt>Do you offer free estimates?</dt><dd>No.</dd>"
+                "<dt>Do you offer recurring service?</dt><dd>Yes.</dd></dl>",
+            ),
+        )
+
+        for wrapper, source in sources:
+            with (
+                self.subTest(wrapper=wrapper),
+                self.assertRaisesRegex(SiteExtractionError, "one source container"),
+            ):
+                validate_enrichment_result(
+                    document,
+                    page_type="faq",
+                    source_html=f"<h2>Questions</h2>{source}",
+                    source_url="https://acme.test/questions",
+                )
+
+        valid = {
+            **document,
+            "items": [{**document["items"][0], "meta": "Yes."}],
+        }
+        self.assertEqual(
+            validate_enrichment_result(
+                valid,
+                page_type="faq",
+                source_html=(
+                    "<h2>Questions</h2><dl>"
+                    "<dt>Do you offer free estimates?</dt><dd>Yes.</dd></dl>"
+                ),
+                source_url="https://acme.test/questions",
+            )["items"],
+            valid["items"],
+        )
 
     def test_pipeline_skips_invalid_enrichment_without_mutating_site_json(self):
         site_json = {
