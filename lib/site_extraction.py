@@ -402,7 +402,7 @@ def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     preceding_clause = _CONTRAST_BREAK_PATTERN.split(preceding_sentence)[-1]
     preceding_words = [
         word.replace("’", "'") for word in _WORD_PATTERN.findall(preceding_clause)
-    ][-6:]
+    ]
     if _words_contain_negation(preceding_words):
         return True
 
@@ -411,7 +411,7 @@ def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     following_clause = _CONTRAST_BREAK_PATTERN.split(following_sentence)[0]
     following_words = [
         word.replace("’", "'") for word in _WORD_PATTERN.findall(following_clause)
-    ][:6]
+    ]
     return _words_contain_negation(following_words, postposed=True)
 
 
@@ -629,6 +629,8 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
         parts = [str(heading)]
         for sibling in heading.next_siblings:
             sibling_name = getattr(sibling, "name", None)
+            if sibling_name in {"article", "section"}:
+                break
             sibling_heading = (
                 _HEADING_TAG_PATTERN.fullmatch(sibling_name)
                 if isinstance(sibling_name, str)
@@ -649,6 +651,7 @@ class SourceEvidence:
     text_segments: tuple[str, ...]
     assertion_segments: tuple[str, ...]
     identity_segments: tuple[str, ...]
+    heading_segments: tuple[str, ...]
     action_labels: frozenset[str]
     action_pairs: frozenset[tuple[str, str]]
     action_urls: frozenset[str]
@@ -727,14 +730,17 @@ class SourceEvidence:
         raw_image_pairs: set[tuple[str, str]] = set()
         raw_logo_urls: set[str] = set()
         identity_parts: list[str] = []
+        heading_parts: list[str] = []
         email_values: list[str] = list(contact_segments)
         phone_values: list[str] = list(contact_segments)
         action_labels: set[str] = set()
 
-        for element in soup.find_all(
-            ["title", "h1", "h2", "h3", "h4", "h5", "h6"], limit=MAX_ITEMS
-        ):
+        for element in soup.find_all(["title", "h1"], limit=MAX_ITEMS):
             identity_parts.append(element.get_text(" ", strip=True))
+        for element in soup.find_all(
+            ["h1", "h2", "h3", "h4", "h5", "h6"], limit=MAX_ITEMS
+        ):
+            heading_parts.append(element.get_text(" ", strip=True))
         for meta in soup.find_all("meta", limit=MAX_ITEMS):
             property_name = str(
                 meta.get("property") or meta.get("name") or ""
@@ -946,6 +952,13 @@ class SourceEvidence:
                     if (segment := _normalize_text(part))
                 )
             ),
+            heading_segments=tuple(
+                dict.fromkeys(
+                    segment
+                    for part in heading_parts
+                    if (segment := _normalize_text(part))
+                )
+            ),
             action_labels=frozenset(action_labels),
             action_pairs=frozenset(
                 (label, destination)
@@ -1010,6 +1023,21 @@ class SourceEvidence:
         if found:
             raise SiteExtractionError(f"{path} drops source identity context.")
         raise SiteExtractionError(f"{path} is not grounded in source identity.")
+
+    def require_heading(self, path: str, value: Any) -> None:
+        if value is None:
+            return
+        normalized = _normalize_text(value)
+        if not normalized:
+            raise SiteExtractionError(f"{path} is not grounded in a source heading.")
+        for source_text in self.heading_segments:
+            for index in _phrase_occurrences(source_text, normalized):
+                if _occurrence_is_negated(source_text, index, len(normalized)):
+                    continue
+                if _occurrence_is_nonassertive(source_text, index, len(normalized)):
+                    continue
+                return
+        raise SiteExtractionError(f"{path} is not grounded in a source heading.")
 
     def require_action_label(self, path: str, value: Any) -> None:
         if value is None:
@@ -1253,33 +1281,54 @@ def _require_site_facts(
     for index, section in enumerate(document.get("single_page_sections") or []):
         path = f"single_page_sections[{index}]"
         anchor = section.get("anchor")
-        section_evidence = evidence
+        content = section.get("content") or {}
+
+        def require_content(section_evidence: SourceEvidence) -> None:
+            section_evidence.require_text(
+                f"{path}.content.headline", content.get("headline"), asserted=True
+            )
+            section_evidence.require_text(
+                f"{path}.content.body_text", content.get("body_text"), asserted=True
+            )
+            _require_content_items(
+                section_evidence,
+                f"{path}.content.items",
+                content.get("items"),
+                allow_nonassertive_title=section.get("page_type") == "faq",
+            )
+            section_evidence.require_form_fields(
+                f"{path}.content.form_fields", content.get("form_fields")
+            )
+            _require_contact(
+                section_evidence,
+                f"{path}.content.contact_info",
+                content.get("contact_info"),
+            )
+
         if anchor is not None:
             evidence.require_action(path, section["nav_label"], anchor)
             section_evidence = evidence.require_section_target(f"{path}.anchor", anchor)
+            require_content(section_evidence)
+            continue
+
+        evidence.require_action_label(f"{path}.nav_label", section["nav_label"])
+        if not content:
+            raise SiteExtractionError(
+                f"{path} has no anchor or content that can be scoped to a source section."
+            )
+        for section_evidence in evidence.content_sections:
+            try:
+                section_evidence.require_heading(
+                    f"{path}.nav_label", section["nav_label"]
+                )
+                require_content(section_evidence)
+            except SiteExtractionError:
+                continue
+            break
         else:
-            evidence.require_text(f"{path}.nav_label", section["nav_label"])
-        content = section.get("content") or {}
-        section_evidence.require_text(
-            f"{path}.content.headline", content.get("headline"), asserted=True
-        )
-        section_evidence.require_text(
-            f"{path}.content.body_text", content.get("body_text"), asserted=True
-        )
-        _require_content_items(
-            section_evidence,
-            f"{path}.content.items",
-            content.get("items"),
-            allow_nonassertive_title=section.get("page_type") == "faq",
-        )
-        section_evidence.require_form_fields(
-            f"{path}.content.form_fields", content.get("form_fields")
-        )
-        _require_contact(
-            section_evidence,
-            f"{path}.content.contact_info",
-            content.get("contact_info"),
-        )
+            raise SiteExtractionError(
+                f"{path} navigation and content are not grounded in one source section."
+            )
 
     conversion = document.get("conversion_profile") or {}
     evidence.require_phone("conversion_profile.phone", conversion.get("phone"))

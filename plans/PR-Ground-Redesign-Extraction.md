@@ -95,9 +95,12 @@ sentence or contrast boundary; inline links inherit their surrounding prose for
 assertion checks while retaining a link-local contact context. Claim-bearing
 content fields require assertive evidence, except FAQ questions. Single-page
 navigation labels bind to their own anchors, and the section content is validated
-inside that exact target container. The code-owned image inventory is emitted as
-real prompt-visible image attributes, so the same bounded URLs remain available
-to validation even when their original elements fall after HTML truncation.
+inside that exact target container. When no anchor exists, the navigation label
+must be a real source action and match a heading in the same bounded semantic
+section as all submitted content; an unscoped or empty section fails closed. The
+code-owned image inventory is emitted as real prompt-visible image attributes, so
+the same bounded URLs remain available to validation even when their original
+elements fall after HTML truncation.
 Claim-bearing section headings, body text, taglines, locations, addresses, and
 hours preserve the same assertion context instead of treating an unanswered
 question or conditional as an affirmative fact. Form-field evidence comes only
@@ -118,9 +121,12 @@ accessible label, duplicate references to the same source label are collapsed,
 and labels are assigned one-to-one to distinct controls. Social platform names
 are derived from recognized destination hosts; otherwise the name and URL must
 belong to the same source action.
-Business identity is further limited to title, heading, site-name metadata, and
-explicit brand/logo evidence; arbitrary footer or body attribution cannot become
-the prospect name. Figures are atomic content records. When a homepage section
+Business identity is further limited to title, primary H1, site-name metadata,
+and explicit brand/logo evidence; ordinary subsection headings and arbitrary
+footer or body attribution cannot become the prospect name. Negation is retained
+across the complete owning clause rather than a fixed word window. Figures are
+atomic content records. Heading-delimited section fallback stops at sibling
+`article` and `section` containers. When a homepage section
 contains both a headline and items, both must validate inside one semantic or
 heading-delimited source section before admission.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
@@ -174,9 +180,9 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 48 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 49 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests -q`: 333 tests passed with 34 skipped on
+- `python -m unittest discover -s tests -q`: 334 tests passed with 34 skipped on
   the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
@@ -195,7 +201,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 3,339 insertions and 72 deletions across seven files. This
+The reviewed diff is 3,453 insertions and 72 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

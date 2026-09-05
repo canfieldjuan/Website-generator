@@ -331,6 +331,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 ),
                 {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
             ),
+            (
+                (
+                    "<h1>Acme Cleaning</h1><p>We do not under any circumstances "
+                    "at this time offer Free Estimates.</p>"
+                ),
+                {"existing_ctas": ["Free Estimates"]},
+            ),
         )
         for html, conversion_profile in cases:
             with (
@@ -618,6 +625,15 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(
                 {"site": {"name": "Acme Web Design"}},
                 ("<h1>Acme Cleaning</h1><footer>Website by Acme Web Design</footer>"),
+            )
+
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Acme Web Design"}},
+                (
+                    "<h1>Acme Cleaning</h1><section><h2>Acme Web Design</h2>"
+                    "<p>Our website partner.</p></section>"
+                ),
             )
 
     def test_pages_to_fetch_derives_fetchability_from_destination(self):
@@ -984,6 +1000,16 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "one source section"):
             validate_site_analysis(mismatched, source)
 
+        structural_siblings = (
+            "<h1>Acme Cleaning</h1><h2>Our Team</h2>"
+            "<section><h3>Jane Doe</h3><p>Operations Manager</p></section>"
+            "<section><h3>Office Cleaning</h3><p>Nightly service.</p></section>"
+        )
+        structural_mismatch = copy.deepcopy(valid)
+        structural_mismatch["sections"][0]["headline"] = "Our Team"
+        with self.assertRaisesRegex(SiteExtractionError, "one source section"):
+            validate_site_analysis(structural_mismatch, structural_siblings)
+
     def test_single_page_section_binds_navigation_and_scopes_content(self):
         source = (
             "<h1>Acme Cleaning</h1><nav>"
@@ -1024,6 +1050,39 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(SiteExtractionError, "source text"):
             validate_site_analysis(cross_section_content, source)
+
+    def test_single_page_section_without_anchor_uses_one_heading_owned_scope(self):
+        source = (
+            "<h1>Acme Cleaning</h1><nav><button>About</button>"
+            "<button>Contact</button></nav>"
+            "<section><h2>About Us</h2><p>Family owned.</p></section>"
+            "<section><h2>Contact Us</h2><p>Call today.</p></section>"
+        )
+        valid = {
+            "site": {"name": "Acme Cleaning"},
+            "single_page_sections": [
+                {
+                    "nav_label": "About",
+                    "anchor": None,
+                    "page_type": "about",
+                    "content": {"headline": "About Us", "body_text": "Family owned."},
+                }
+            ],
+        }
+        self.assertEqual(validate_site_analysis(valid, source), valid)
+
+        mismatched = copy.deepcopy(valid)
+        mismatched["single_page_sections"][0]["content"] = {
+            "headline": "Contact Us",
+            "body_text": "Call today.",
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "one source section"):
+            validate_site_analysis(mismatched, source)
+
+        empty = copy.deepcopy(valid)
+        empty["single_page_sections"][0].pop("content")
+        with self.assertRaisesRegex(SiteExtractionError, "no anchor or content"):
+            validate_site_analysis(empty, source)
 
     def test_contact_uri_parameters_do_not_become_contact_evidence(self):
         cases = (
