@@ -233,6 +233,9 @@ business-specific claims.
   review, CTA-pair, and logo-ownership tests passed. A subsequent full-suite run
   hung during teardown without returning a verdict; the exact-head GitHub unit
   gate remains the required final full-suite proof.
+- Review-mode action binding check: the focused card-mode and aggregate-mode
+  build/admission regressions both passed after their distinct code-owned labels
+  were bound to the corresponding review mode.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.
@@ -250,8 +253,8 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 4,267 insertions and 83 deletions across eleven files. This
-exceeds the 400-line soft target because the extraction document has many
+The reviewed diff deliberately exceeds the 400-line soft target because the
+extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource
 admission leave ambiguous traversal and unsafe boundaries. The enforcement and
