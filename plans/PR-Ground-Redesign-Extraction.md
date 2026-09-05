@@ -126,8 +126,8 @@ business-specific claims.
   reproduced the same full-request stall before artifact persistence. No
   placeholder/claim scan is reported because no new artifact was written. This
   separate runtime defect is tracked in issue #46.
-- `bash scripts/local_pr_review.sh`: pending the commit, as required by the local
-  review script.
+- `bash scripts/local_pr_review.sh`: passed on the committed diff against
+  `origin/main`.
 
 ## Estimated diff size
 
