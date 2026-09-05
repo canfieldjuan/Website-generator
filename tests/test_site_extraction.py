@@ -605,6 +605,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     f"<h1>Acme Cleaning</h1>{source}",
                 )
 
+    def test_business_name_requires_assertive_identity_evidence(self):
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(
+                {"site": {"name": "Acme Cleaning"}},
+                "<p>Are you Acme Cleaning?</p>",
+            )
+
     def test_pages_to_fetch_derives_fetchability_from_destination(self):
         document = {
             "site": {"name": "Acme Cleaning"},
@@ -667,8 +674,47 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "same source image"):
             validate_site_analysis(swapped, source, "https://acme.test/")
 
+    def test_social_platform_is_bound_to_its_destination(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "social": [
+                {
+                    "platform": "Facebook",
+                    "url": "https://www.instagram.com/acme-cleaning",
+                }
+            ],
+        }
+        source = (
+            "<h1>Acme Cleaning</h1>"
+            '<a href="https://www.instagram.com/acme-cleaning">Instagram</a>'
+        )
+
+        admitted = validate_site_analysis(document, source, "https://acme.test/")
+
+        self.assertEqual(document["social"][0]["platform"], "Facebook")
+        self.assertEqual(admitted["social"][0]["platform"], "Instagram")
+
+        unknown_destination = {
+            "site": {"name": "Acme Cleaning"},
+            "social": [
+                {
+                    "platform": "Invented Network",
+                    "url": "https://community.acme.test/profile",
+                }
+            ],
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "one source action"):
+            validate_site_analysis(
+                unknown_destination,
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    '<a href="https://community.acme.test/profile">Mastodon</a>'
+                ),
+                "https://acme.test/",
+            )
+
     def test_form_fields_require_actual_labeled_controls(self):
-        valid = {"form_fields": ["Name", "Email", "Project Type", "Message"]}
+        valid = {"form_fields": ["Your Name *", "Email", "Project Type", "Message"]}
         source = """
         <form>
           <label for="name">Your Name *</label><input id="name">
@@ -689,7 +735,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         )
 
         unsupported = {"form_fields": ["Name", "Email"]}
-        with self.assertRaisesRegex(SiteExtractionError, "actual source form control"):
+        with self.assertRaisesRegex(SiteExtractionError, "complete label"):
             validate_enrichment_result(
                 unsupported,
                 page_type="contact",
@@ -700,6 +746,59 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 ),
                 source_url="https://acme.test/contact",
             )
+
+        for document, source_html in (
+            (
+                {"form_fields": ["Name"]},
+                '<label for="referral">Name of referral source</label>'
+                '<input id="referral">',
+            ),
+            (
+                {"form_fields": ["Email", "Email"]},
+                '<label for="email">Email</label><input id="email">',
+            ),
+            (
+                {"form_fields": ["Referral"]},
+                '<span id="ref-kind">Referral</span>'
+                '<span id="ref-source">source</span>'
+                '<input aria-labelledby="ref-kind ref-source">',
+            ),
+        ):
+            with (
+                self.subTest(document=document),
+                self.assertRaisesRegex(SiteExtractionError, "complete label"),
+            ):
+                validate_enrichment_result(
+                    document,
+                    page_type="contact",
+                    source_html=source_html,
+                    source_url="https://acme.test/contact",
+                )
+
+    def test_article_record_does_not_span_nested_content_cards(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [
+                {
+                    "type": "services",
+                    "items": [
+                        {
+                            "title": "Plumbing",
+                            "description": "Electrical repairs",
+                        }
+                    ],
+                }
+            ],
+        }
+        source = (
+            "<h1>Acme Cleaning</h1><article><h1>Services</h1>"
+            "<div><strong>Plumbing</strong><p>Pipe repairs</p></div>"
+            "<div><strong>Electrical</strong><p>Electrical repairs</p></div>"
+            "</article>"
+        )
+
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_site_analysis(document, source)
 
     def test_single_page_section_binds_navigation_and_scopes_content(self):
         source = (

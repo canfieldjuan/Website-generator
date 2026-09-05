@@ -245,6 +245,20 @@ _NON_DATA_INPUT_TYPES = {
     "reset",
     "submit",
 }
+_SOCIAL_HOST_PLATFORMS = (
+    ("facebook.com", "Facebook"),
+    ("fb.com", "Facebook"),
+    ("instagram.com", "Instagram"),
+    ("linkedin.com", "LinkedIn"),
+    ("nextdoor.com", "Nextdoor"),
+    ("pinterest.com", "Pinterest"),
+    ("tiktok.com", "TikTok"),
+    ("twitter.com", "X"),
+    ("x.com", "X"),
+    ("youtube.com", "YouTube"),
+    ("youtu.be", "YouTube"),
+    ("yelp.com", "Yelp"),
+)
 _ASSERTION_CONTEXT_TAGS = {
     "address",
     "article",
@@ -490,11 +504,7 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
         if element.name in _ATOMIC_RECORD_TAGS:
             append(str(element))
             continue
-        if element.name == "article":
-            if len(element.find_all(_HEADING_TAG_PATTERN)) <= 1:
-                append(str(element))
-            continue
-        if element.name in {"div", "section"}:
+        if element.name in {"article", "div", "section"}:
             nested_record = element.find(
                 ["article", "details", "div", "li", "section", "tr"]
             )
@@ -544,7 +554,7 @@ class SourceEvidence:
     action_urls: frozenset[str]
     image_urls: frozenset[str]
     image_pairs: frozenset[tuple[str, str]]
-    form_field_segments: tuple[str, ...]
+    form_control_labels: tuple[str, ...]
     emails: frozenset[str]
     phones: frozenset[str]
     records: tuple[SourceEvidence, ...]
@@ -681,7 +691,7 @@ class SourceEvidence:
             if element.name == "img" and isinstance(alt, str) and alt.strip():
                 raw_image_pairs.update((url, alt) for url in element_image_urls)
 
-        form_field_parts: list[str] = []
+        form_control_labels: list[str] = []
         for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):
             if (
                 control.name == "input"
@@ -689,29 +699,38 @@ class SourceEvidence:
                 in _NON_DATA_INPUT_TYPES
             ):
                 continue
-            labels = []
-            wrapping_label = control.find_parent("label")
-            if wrapping_label is not None:
-                labels.append(wrapping_label.get_text(" ", strip=True))
-            control_id = control.get("id")
-            if isinstance(control_id, str) and control_id.strip():
-                labels.extend(
-                    label.get_text(" ", strip=True)
-                    for label in soup.find_all(
-                        "label", attrs={"for": control_id}, limit=MAX_ITEMS
-                    )
-                )
+            accessible_label = ""
             labelled_by = control.get("aria-labelledby")
             if isinstance(labelled_by, str):
+                labelled_parts = []
                 for target_id in labelled_by.split()[:MAX_ITEMS]:
                     target = soup.find(id=target_id)
                     if target is not None:
-                        labels.append(target.get_text(" ", strip=True))
-            labels.extend(
-                str(control.get(attribute) or "")
-                for attribute in ("aria-label", "placeholder", "title")
-            )
-            form_field_parts.extend(label for label in labels if label.strip())
+                        labelled_parts.append(target.get_text(" ", strip=True))
+                accessible_label = " ".join(part for part in labelled_parts if part)
+            if not accessible_label:
+                accessible_label = str(control.get("aria-label") or "").strip()
+            if not accessible_label:
+                labels = []
+                wrapping_label = control.find_parent("label")
+                if wrapping_label is not None:
+                    labels.append(wrapping_label.get_text(" ", strip=True))
+                control_id = control.get("id")
+                if isinstance(control_id, str) and control_id.strip():
+                    labels.extend(
+                        label.get_text(" ", strip=True)
+                        for label in soup.find_all(
+                            "label", attrs={"for": control_id}, limit=MAX_ITEMS
+                        )
+                    )
+                accessible_label = " ".join(label for label in labels if label)
+            if not accessible_label:
+                accessible_label = str(
+                    control.get("placeholder") or control.get("title") or ""
+                ).strip()
+            normalized_label = _normalize_text(accessible_label)
+            if normalized_label:
+                form_control_labels.append(normalized_label)
 
         for style in soup.find_all("style"):
             raw_image_urls.update(_CSS_URL_PATTERN.findall(style.get_text(" ")))
@@ -741,13 +760,6 @@ class SourceEvidence:
             dict.fromkeys(
                 segment
                 for part in attribute_parts
-                if (segment := _normalize_text(part))
-            )
-        )
-        form_field_segments = tuple(
-            dict.fromkeys(
-                segment
-                for part in form_field_parts
                 if (segment := _normalize_text(part))
             )
         )
@@ -797,7 +809,7 @@ class SourceEvidence:
                 for raw_url, alt in raw_image_pairs
                 for destination in resolved((raw_url,))
             ),
-            form_field_segments=form_field_segments,
+            form_control_labels=tuple(form_control_labels),
             emails=frozenset(emails),
             phones=frozenset(phones),
             records=records,
@@ -844,6 +856,16 @@ class SourceEvidence:
                 f"{path}.url and label are not grounded in one source action."
             )
 
+    def admit_social_platform(self, path: str, platform: Any, url: Any) -> str:
+        self.require_url(f"{path}.url", url)
+        normalized_url = html.unescape(url).strip() if isinstance(url, str) else ""
+        hostname = (urlsplit(normalized_url).hostname or "").casefold()
+        for domain, canonical in _SOCIAL_HOST_PLATFORMS:
+            if hostname == domain or hostname.endswith(f".{domain}"):
+                return canonical
+        self.require_action(path, platform, url)
+        return platform
+
     def require_section_target(self, path: str, anchor: Any) -> "SourceEvidence":
         normalized = html.unescape(anchor).strip() if isinstance(anchor, str) else ""
         fragment = unquote(urlsplit(normalized).fragment).strip()
@@ -883,15 +905,16 @@ class SourceEvidence:
                 f"{path}.alt is not grounded on the same source image as its URL."
             )
 
-    def require_form_field(self, path: str, value: Any) -> None:
-        normalized = _normalize_text(value) if isinstance(value, str) else ""
-        if not normalized or not any(
-            any(True for _ in _phrase_occurrences(segment, normalized))
-            for segment in self.form_field_segments
-        ):
-            raise SiteExtractionError(
-                f"{path} is not grounded in an actual source form control."
-            )
+    def require_form_fields(self, path: str, values: Any) -> None:
+        remaining_labels = list(self.form_control_labels)
+        for index, value in enumerate(values or []):
+            normalized = _normalize_text(value) if isinstance(value, str) else ""
+            if not normalized or normalized not in remaining_labels:
+                raise SiteExtractionError(
+                    f"{path}[{index}] is not the complete label of a distinct "
+                    "source form control."
+                )
+            remaining_labels.remove(normalized)
 
 
 def _validation_error(validator: Draft202012Validator, document: Any) -> str | None:
@@ -986,7 +1009,7 @@ def _require_site_facts(
     document: dict, evidence: SourceEvidence, source_url: str | None
 ) -> None:
     site = document["site"]
-    evidence.require_text("site.name", site["name"])
+    evidence.require_text("site.name", site["name"], asserted=True)
     evidence.require_text("site.tagline", site.get("tagline"), asserted=True)
     evidence.require_text("site.location", site.get("location"), asserted=True)
     _require_contact(evidence, "site.contact", site.get("contact"))
@@ -1020,7 +1043,9 @@ def _require_site_facts(
     for index, image in enumerate(document.get("images") or []):
         evidence.require_image(f"images[{index}]", image["url"], image.get("alt"))
     for index, social in enumerate(document.get("social") or []):
-        evidence.require_url(f"social[{index}].url", social["url"])
+        social["platform"] = evidence.admit_social_platform(
+            f"social[{index}]", social["platform"], social["url"]
+        )
     for index, item in enumerate(document.get("footer_links") or []):
         evidence.require_action(f"footer_links[{index}]", item["label"], item["url"])
     for index, page in enumerate(document.get("pages_to_fetch") or []):
@@ -1049,10 +1074,9 @@ def _require_site_facts(
             content.get("items"),
             allow_nonassertive_title=section.get("page_type") == "faq",
         )
-        for field_index, field in enumerate(content.get("form_fields") or []):
-            section_evidence.require_form_field(
-                f"{path}.content.form_fields[{field_index}]", field
-            )
+        section_evidence.require_form_fields(
+            f"{path}.content.form_fields", content.get("form_fields")
+        )
         _require_contact(
             section_evidence,
             f"{path}.content.contact_info",
@@ -1116,8 +1140,7 @@ def validate_enrichment_result(
     evidence = SourceEvidence.from_html(source_html, source_url)
 
     if page_type == "contact":
-        for index, field in enumerate(admitted.get("form_fields") or []):
-            evidence.require_form_field(f"form_fields[{index}]", field)
+        evidence.require_form_fields("form_fields", admitted.get("form_fields"))
         _require_contact(evidence, "contact_info", admitted.get("contact_info"))
         contact_info = admitted.get("contact_info") or {}
         has_contact_info = any(

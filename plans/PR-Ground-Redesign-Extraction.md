@@ -105,6 +105,11 @@ source image URL rather than being recombined from page-wide values. Fetchabilit
 is overwritten by code from the admitted destination and effective source URL:
 same-document anchors and same-page URLs are not queued, while a distinct HTTP(S)
 page remains fetchable even if the model says otherwise.
+Business identity uses assertion evidence. Nested content containers prevent a
+broad article from recombining separate cards. Form labels must match a complete
+accessible label and are assigned one-to-one to distinct controls. Social platform
+names are derived from recognized destination hosts; otherwise the name and URL
+must belong to the same source action.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
 button, and text inputs cannot promote their values into published CTA copy.
 Classifications, layout choices, color selections, and image-generation guidance
@@ -156,9 +161,9 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 40 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 43 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests -q`: 325 tests passed with 34 skipped on
+- `python -m unittest discover -s tests -q`: 328 tests passed with 34 skipped on
   the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
@@ -177,7 +182,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 2,817 insertions and 72 deletions across seven files. This
+The reviewed diff is 2,944 insertions and 72 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource
