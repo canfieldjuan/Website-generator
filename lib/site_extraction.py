@@ -410,6 +410,7 @@ def _attribute_values(value: Any) -> Iterable[str]:
 
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
 _ATOMIC_RECORD_TAGS = {"address", "blockquote", "details", "li", "p", "td", "th", "tr"}
+_RECORD_CONTAINER_TAGS = {"article", "details", "div", "li", "section", "table", "tr"}
 
 
 def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
@@ -446,6 +447,8 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
         parts = [str(heading)]
         for sibling in heading.next_siblings:
             sibling_name = getattr(sibling, "name", None)
+            if sibling_name in _RECORD_CONTAINER_TAGS:
+                break
             sibling_heading = (
                 _HEADING_TAG_PATTERN.fullmatch(sibling_name)
                 if isinstance(sibling_name, str)

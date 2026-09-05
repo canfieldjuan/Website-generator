@@ -540,6 +540,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                         "source_url": "/services",
                     }
                 ],
+                "contact_form": {"source_url": "/contact-source"},
                 "images": [{"url": "/hero.jpg", "context": "hero"}],
                 "social": [{"platform": "Facebook", "url": "/facebook"}],
                 "footer_links": [{"label": "Privacy", "url": "/privacy"}],
@@ -564,7 +565,9 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             (
                 "/contact",
                 "/book",
+                "/services",
                 "/services/office",
+                "/contact-source",
                 "/facebook",
                 "/privacy",
                 "/about",
@@ -774,6 +777,34 @@ class EnrichmentGroundingTests(unittest.TestCase):
         html = """
         <h1>Frequently Asked Questions</h1>
         <div class="faq-item"><h2>Do you offer free estimates?</h2><p>No.</p></div>
+        <div class="faq-item"><h3>Do you offer recurring service?</h3><p>Yes.</p></div>
+        """
+
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_enrichment_result(
+                document,
+                page_type="faq",
+                source_html=html,
+                source_url="https://acme.test/questions",
+            )
+
+    def test_section_heading_record_cannot_span_sibling_cards(self):
+        document = {
+            "type": "misc",
+            "headline": "FAQ",
+            "items": [
+                {
+                    "title": "Do you offer free estimates?",
+                    "url": None,
+                    "image_url": None,
+                    "tag": "faq",
+                    "meta": "Yes.",
+                }
+            ],
+        }
+        html = """
+        <h2>Frequently Asked Questions</h2>
+        <div class="faq-item"><h3>Do you offer free estimates?</h3><p>No.</p></div>
         <div class="faq-item"><h3>Do you offer recurring service?</h3><p>Yes.</p></div>
         """
 

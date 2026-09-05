@@ -151,7 +151,9 @@ def _redesign_action_url_contract(
     append_field(site_json.get("cta") or {})
     for section in site_json.get("sections") or ():
         if isinstance(section, dict):
+            append_field(section, "source_url")
             append_item_urls(section.get("items"))
+    append_field(site_json.get("contact_form") or {}, "source_url")
     for item in site_json.get("social") or ():
         append_field(item)
     for item in site_json.get("footer_links") or ():
