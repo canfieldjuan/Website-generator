@@ -311,6 +311,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 {"trust_signals": {"certifications": ["BBB Accredited"]}},
             ),
             (
+                ('<h1>Acme Cleaning</h1><p>Not <a href="/bbb">BBB Accredited</a></p>'),
+                {"trust_signals": {"certifications": ["BBB Accredited"]}},
+            ),
+            (
                 "<h1>Acme Cleaning</h1><p>Unlicensed subcontractors prohibited</p>",
                 {"trust_signals": {"certifications": ["Licensed"]}},
             ),
@@ -527,6 +531,64 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             document,
         )
+
+    def test_claim_bearing_service_item_rejects_question_only_evidence(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [
+                {
+                    "type": "services",
+                    "items": [{"title": "Free Estimates"}],
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(
+                document,
+                "<h1>Acme Cleaning</h1><p>Do you offer Free Estimates?</p>",
+            )
+
+    def test_single_page_section_binds_navigation_and_scopes_content(self):
+        source = (
+            "<h1>Acme Cleaning</h1><nav>"
+            '<a href="#about">About</a><a href="#contact">Contact</a></nav>'
+            '<section id="about"><h2>About Us</h2><p>Family owned.</p></section>'
+            '<section id="contact"><h2>Contact Us</h2><p>Call today.</p></section>'
+        )
+        valid = {
+            "site": {"name": "Acme Cleaning"},
+            "single_page_sections": [
+                {
+                    "nav_label": "About",
+                    "anchor": "#about",
+                    "page_type": "about",
+                    "content": {"headline": "About Us", "body_text": "Family owned."},
+                }
+            ],
+        }
+        self.assertEqual(validate_site_analysis(valid, source), valid)
+
+        swapped_target = {
+            **valid,
+            "single_page_sections": [
+                {**valid["single_page_sections"][0], "anchor": "#contact"}
+            ],
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "one source action"):
+            validate_site_analysis(swapped_target, source)
+
+        cross_section_content = {
+            **valid,
+            "single_page_sections": [
+                {
+                    **valid["single_page_sections"][0],
+                    "content": {"headline": "Contact Us", "body_text": "Call today."},
+                }
+            ],
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "source text"):
+            validate_site_analysis(cross_section_content, source)
 
     def test_contact_uri_parameters_do_not_become_contact_evidence(self):
         cases = (
@@ -1046,6 +1108,34 @@ class FetchEvidenceTests(unittest.TestCase):
 
         self.assertIn("Source page", cleaned)
         self.assertEqual(effective_url, "https://www.acme.test/home")
+
+    def test_late_image_inventory_is_shared_by_prompt_and_validation(self):
+        image_url = "https://cdn.acme.test/late-hero.jpg"
+        response = SimpleNamespace(
+            text=(
+                "<html><body><h1>Acme Cleaning</h1>"
+                + ("x" * pipeline.ANALYSIS_HTML_TRUNCATE)
+                + f'<img src="{image_url}"></body></html>'
+            ),
+            url="https://acme.test/",
+            raise_for_status=lambda: None,
+        )
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "images": [{"url": image_url, "alt": None, "context": "hero"}],
+        }
+
+        with patch.object(pipeline.requests, "get", return_value=response):
+            cleaned = pipeline.fetch_and_clean_html("https://acme.test/")
+
+        client = _ExtractionClient(document)
+        with patch.object(pipeline, "get_openrouter_client", return_value=client):
+            admitted = pipeline.analyze_site(cleaned, source_url="https://acme.test/")
+
+        self.assertEqual(admitted, document)
+        prompt = client.calls[0]["messages"][1]["content"]
+        self.assertIn("data-code-owned-image-inventory", prompt)
+        self.assertIn(image_url, prompt)
 
 
 class RedesignPromptAuthorityTests(unittest.TestCase):

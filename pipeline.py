@@ -417,8 +417,9 @@ def fetch_and_clean_html(url, *, include_source_url=False):
     for element in soup(["script", "svg", "noscript", "iframe"]):
         element.decompose()
 
-    # Aggressively extract ALL image src URLs (including lazy-loaded data-src)
-    # and embed as a comment at the top so the LLM can always find them.
+    # Aggressively extract image URLs (including lazy-loaded data-src) and place
+    # the bounded code-owned inventory at the top. The same real img attributes
+    # are therefore visible to both the model and SourceEvidence after truncation.
     image_urls = set()
     for img in soup.find_all("img"):
         for attr in ["src", "data-src", "data-lazy-src", "data-original"]:
@@ -429,12 +430,14 @@ def fetch_and_clean_html(url, *, include_source_url=False):
         found = re.findall(r'url\(["\']?(https://[^"\')\s]+)["\']?\)', style.string or "")
         image_urls.update(found)
 
-    image_comment = "\n<!-- EXTRACTED IMAGE URLS (use these in the redesign):\n"
-    for img_url in list(image_urls)[:20]:
-        image_comment += f"  {img_url}\n"
-    image_comment += "-->"
+    inventory = BeautifulSoup("", "html.parser")
+    inventory_root = inventory.new_tag("template")
+    inventory_root["data-code-owned-image-inventory"] = "true"
+    for img_url in sorted(image_urls)[:20]:
+        inventory_root.append(inventory.new_tag("img", src=img_url))
+    inventory.append(inventory_root)
 
-    cleaned_html = image_comment + "\n" + str(soup)
+    cleaned_html = str(inventory) + "\n" + str(soup)
     if include_source_url:
         return cleaned_html, effective_url
     return cleaned_html

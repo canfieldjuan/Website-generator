@@ -239,7 +239,6 @@ _TEXT_ATTRIBUTES = {
 _ACTION_URL_ATTRIBUTES = {"href"}
 _IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
 _ASSERTION_CONTEXT_TAGS = {
-    "a",
     "address",
     "article",
     "aside",
@@ -270,15 +269,18 @@ _ASSERTION_CONTEXT_TAGS = {
     "td",
     "th",
 }
-_CONTACT_CONTEXT_TAGS = _ASSERTION_CONTEXT_TAGS - {
-    "aside",
-    "body",
-    "footer",
-    "header",
-    "main",
-    "nav",
-    "section",
-}
+_CONTACT_CONTEXT_TAGS = (
+    _ASSERTION_CONTEXT_TAGS
+    - {
+        "aside",
+        "body",
+        "footer",
+        "header",
+        "main",
+        "nav",
+        "section",
+    }
+) | {"a"}
 _IGNORED_TEXT_TAGS = {"noscript", "script", "style", "template"}
 _EMAIL_PATTERN = re.compile(
     r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@"
@@ -510,6 +512,7 @@ class SourceEvidence:
     emails: frozenset[str]
     phones: frozenset[str]
     records: tuple[SourceEvidence, ...]
+    section_targets: tuple[tuple[str, SourceEvidence], ...]
 
     @classmethod
     def from_html(
@@ -518,6 +521,7 @@ class SourceEvidence:
         source_url: str | None,
         *,
         _include_records: bool = True,
+        _include_section_targets: bool = True,
     ) -> "SourceEvidence":
         if not isinstance(source_html, str) or not source_html.strip():
             raise SiteExtractionError("Source HTML must be non-empty text.")
@@ -667,10 +671,32 @@ class SourceEvidence:
         )
         records = (
             tuple(
-                cls.from_html(fragment, source_url, _include_records=False)
+                cls.from_html(
+                    fragment,
+                    source_url,
+                    _include_records=False,
+                    _include_section_targets=False,
+                )
                 for fragment in _record_fragments(soup)
             )
             if _include_records
+            else ()
+        )
+        section_targets = (
+            tuple(
+                (
+                    f"#{element_id.strip()}",
+                    cls.from_html(
+                        str(element),
+                        source_url,
+                        _include_section_targets=False,
+                    ),
+                )
+                for element in soup.find_all(id=True, limit=MAX_ITEMS)
+                if isinstance((element_id := element.get("id")), str)
+                and element_id.strip()
+            )
+            if _include_section_targets
             else ()
         )
         return cls(
@@ -687,6 +713,7 @@ class SourceEvidence:
             emails=frozenset(emails),
             phones=frozenset(phones),
             records=records,
+            section_targets=section_targets,
         )
 
     def require_text(self, path: str, value: Any, *, asserted: bool = False) -> None:
@@ -728,6 +755,15 @@ class SourceEvidence:
             raise SiteExtractionError(
                 f"{path}.url and label are not grounded in one source action."
             )
+
+    def require_section_target(self, path: str, anchor: Any) -> "SourceEvidence":
+        normalized = html.unescape(anchor).strip() if isinstance(anchor, str) else ""
+        fragment = unquote(urlsplit(normalized).fragment).strip()
+        target_anchor = f"#{fragment}" if fragment else normalized
+        for candidate, target_evidence in self.section_targets:
+            if candidate == target_anchor:
+                return target_evidence
+        raise SiteExtractionError(f"{path} is not grounded in a source section target.")
 
     def require_email(self, path: str, value: Any) -> None:
         if value is None:
@@ -784,6 +820,7 @@ def _require_content_items(
     items: Any,
     *,
     verify_tag: bool = True,
+    allow_nonassertive_title: bool = False,
 ) -> None:
     for index, item in enumerate(items or []):
         item_path = f"{path}[{index}]"
@@ -803,16 +840,24 @@ def _require_content_items(
             raise SiteExtractionError(f"{item_path} contains no source-owned content.")
 
         def require_fields(container: SourceEvidence) -> None:
-            container.require_text(f"{item_path}.title", item.get("title"))
-            container.require_text(f"{item_path}.description", item.get("description"))
+            container.require_text(
+                f"{item_path}.title",
+                item.get("title"),
+                asserted=not allow_nonassertive_title,
+            )
+            container.require_text(
+                f"{item_path}.description", item.get("description"), asserted=True
+            )
             container.require_url(f"{item_path}.url", item.get("url"))
             container.require_url(
                 f"{item_path}.image_url", item.get("image_url"), image=True
             )
             if verify_tag:
-                container.require_text(f"{item_path}.tag", item.get("tag"))
-            container.require_text(f"{item_path}.date", item.get("date"))
-            container.require_text(f"{item_path}.meta", item.get("meta"))
+                container.require_text(
+                    f"{item_path}.tag", item.get("tag"), asserted=True
+                )
+            container.require_text(f"{item_path}.date", item.get("date"), asserted=True)
+            container.require_text(f"{item_path}.meta", item.get("meta"), asserted=True)
 
         if len(present_fields) == 1:
             require_fields(evidence)
@@ -853,7 +898,12 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
     for index, section in enumerate(document.get("sections") or []):
         path = f"sections[{index}]"
         evidence.require_text(f"{path}.headline", section.get("headline"))
-        _require_content_items(evidence, f"{path}.items", section.get("items"))
+        _require_content_items(
+            evidence,
+            f"{path}.items",
+            section.get("items"),
+            allow_nonassertive_title=section.get("type") == "faq",
+        )
 
     for index, image in enumerate(document.get("images") or []):
         evidence.require_url(f"images[{index}].url", image["url"], image=True)
@@ -867,16 +917,34 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
 
     for index, section in enumerate(document.get("single_page_sections") or []):
         path = f"single_page_sections[{index}]"
-        evidence.require_text(f"{path}.nav_label", section["nav_label"])
-        evidence.require_url(f"{path}.anchor", section.get("anchor"))
+        anchor = section.get("anchor")
+        section_evidence = evidence
+        if anchor is not None:
+            evidence.require_action(path, section["nav_label"], anchor)
+            section_evidence = evidence.require_section_target(f"{path}.anchor", anchor)
+        else:
+            evidence.require_text(f"{path}.nav_label", section["nav_label"])
         content = section.get("content") or {}
-        evidence.require_text(f"{path}.content.headline", content.get("headline"))
-        evidence.require_text(f"{path}.content.body_text", content.get("body_text"))
-        _require_content_items(evidence, f"{path}.content.items", content.get("items"))
+        section_evidence.require_text(
+            f"{path}.content.headline", content.get("headline")
+        )
+        section_evidence.require_text(
+            f"{path}.content.body_text", content.get("body_text")
+        )
+        _require_content_items(
+            section_evidence,
+            f"{path}.content.items",
+            content.get("items"),
+            allow_nonassertive_title=section.get("page_type") == "faq",
+        )
         for field_index, field in enumerate(content.get("form_fields") or []):
-            evidence.require_text(f"{path}.content.form_fields[{field_index}]", field)
+            section_evidence.require_text(
+                f"{path}.content.form_fields[{field_index}]", field
+            )
         _require_contact(
-            evidence, f"{path}.content.contact_info", content.get("contact_info")
+            section_evidence,
+            f"{path}.content.contact_info",
+            content.get("contact_info"),
         )
 
     conversion = document.get("conversion_profile") or {}
@@ -979,5 +1047,6 @@ def validate_enrichment_result(
         "items",
         admitted["items"],
         verify_tag=derived_tag is None,
+        allow_nonassertive_title=page_type == "faq",
     )
     return admitted

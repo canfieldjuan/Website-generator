@@ -89,7 +89,13 @@ Navigation, CTA, footer, and fetch-page labels remain paired with the destinatio
 of the same interactive source element. Phone and email scans operate per local
 DOM context rather than concatenating unrelated page nodes. Assertion context
 survives commas, parenthetical contrast modifiers, and colons until a real
-sentence or contrast boundary.
+sentence or contrast boundary; inline links inherit their surrounding prose for
+assertion checks while retaining a link-local contact context. Claim-bearing
+content fields require assertive evidence, except FAQ questions. Single-page
+navigation labels bind to their own anchors, and the section content is validated
+inside that exact target container. The code-owned image inventory is emitted as
+real prompt-visible image attributes, so the same bounded URLs remain available
+to validation even when their original elements fall after HTML truncation.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
 button, and text inputs cannot promote their values into published CTA copy.
 Classifications, layout choices, color selections, and image-generation guidance
@@ -141,7 +147,7 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 32 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 35 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
 - `python -m unittest discover -s tests -q`: passed on the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
@@ -161,7 +167,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 2,369 insertions and 66 deletions across seven files. This
+The reviewed diff is 2,543 insertions and 72 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource
