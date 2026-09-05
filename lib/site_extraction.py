@@ -235,10 +235,9 @@ _TEXT_ATTRIBUTES = {
     "value",
     "content",
 }
-_ACTION_URL_ATTRIBUTES = {"href", "action", "formaction"}
+_ACTION_URL_ATTRIBUTES = {"href"}
 _IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
 _ASSERTION_CONTEXT_TAGS = {
-    "a",
     "address",
     "article",
     "aside",
@@ -460,7 +459,12 @@ class SourceEvidence:
 
         for element in soup.find_all(True):
             role = str(element.get("role") or "").casefold()
-            if element.name in {"a", "button"} or role == "button":
+            if (
+                element.name == "a"
+                and element.has_attr("href")
+                or element.name == "button"
+                or role == "button"
+            ):
                 label = _normalize_text(element.get_text(" ", strip=True))
                 if not label:
                     label = _normalize_text(str(element.get("aria-label") or ""))
@@ -478,13 +482,7 @@ class SourceEvidence:
                 for value in _attribute_values(raw_value):
                     if name in _TEXT_ATTRIBUTES:
                         attribute_parts.append(value)
-                    is_action_url = (
-                        (name == "href" and element.name in {"a", "area"})
-                        or (name == "action" and element.name == "form")
-                        or (
-                            name == "formaction" and element.name in {"button", "input"}
-                        )
-                    )
+                    is_action_url = name == "href" and element.name in {"a", "area"}
                     if name in _ACTION_URL_ATTRIBUTES and is_action_url:
                         raw_action_urls.add(value)
                         contact = _contact_destination(value)

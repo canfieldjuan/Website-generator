@@ -356,7 +356,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 positive_claim,
                 (
                     "<h1>Acme Cleaning</h1><p>No Free Estimates for repairs.</p>"
-                    "<a>Free Estimates</a>"
+                    '<a href="/estimates">Free Estimates</a>'
                 ),
             ),
             positive_claim,
@@ -491,6 +491,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     '<a href="/contact">Contact</a>'
                     '<link rel="preload" as="image" href="/hero.jpg">'
                     '<img src="/hero.jpg" alt="Crew">'
+                ),
+                "https://acme.test/",
+            )
+
+    def test_form_endpoint_cannot_be_repurposed_as_link_destination(self):
+        with self.assertRaisesRegex(SiteExtractionError, r"cta\.url"):
+            validate_site_analysis(
+                {
+                    "site": {"name": "Acme Cleaning"},
+                    "cta": {"label": "Contact", "url": "https://acme.test/submit"},
+                },
+                (
+                    "<h1>Acme Cleaning</h1><button>Contact</button>"
+                    '<form action="/submit"><input name="email"></form>'
                 ),
                 "https://acme.test/",
             )
