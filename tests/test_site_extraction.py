@@ -78,7 +78,6 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "footer_layout": "footer-2col",
                 "notes": "Derived layout observation",
             },
-            "platform": {"detected": "WordPress"},
         }
         html = """
         <html><head><meta property="og:image" content="/logo.png"></head><body>
@@ -183,6 +182,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             },
             {"site": {"name": "   "}},
             {"site": {"name": "Acme Cleaning"}, "sections": 1},
+            {
+                "site": {"name": "Acme Cleaning"},
+                "platform": {"detected": "WordPress"},
+            },
             {
                 "site": {"name": "Acme Cleaning"},
                 "pages_to_fetch": [

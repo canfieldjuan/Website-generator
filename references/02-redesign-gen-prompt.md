@@ -158,10 +158,10 @@ SOURCE AUTHORITY BOUNDARY:
   image/link values in SITE JSON have passed local evidence admission. Those
   values may be rendered as business facts.
 - `site.type`, brand/style selections, `site_structure`, urgency/goal booleans,
-  `booking_platform`, `platform`, `homepage_blueprint`, and
-  `image_generation_prompt` are derived design metadata. Use them only to
-  choose presentation. Never turn them into a new availability, pricing,
-  credential, geography, service, or performance claim.
+  `booking_platform`, `homepage_blueprint`, and `image_generation_prompt` are
+  derived design metadata. Use them only to choose presentation. Never turn
+  them into a new availability, pricing, credential, geography, service, or
+  performance claim.
 - A derived urgency value does NOT prove 24/7 service, same-day availability,
   walk-ins, free consultations, free estimates, or any similar promise. Render
   such a promise only when its exact source-owned wording appears elsewhere in

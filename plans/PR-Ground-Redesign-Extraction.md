@@ -32,7 +32,9 @@ analysis may control presentation but may not authorize a visible business claim
    admitting them.
 3. Keep enumerated classification, design, and layout fields explicitly derived;
    they remain usable for presentation but are not evidence for availability,
-   pricing, credentials, geography, or service promises.
+   pricing, credentials, geography, or service promises. Reject the unrequested
+   model-authored `platform` field because existing code maps it into cost and
+   savings metadata.
 4. Make homepage analysis fail closed when validation or grounding fails. Preserve
    enrichment's existing best-effort contract by logging and skipping an invalid
    page result rather than merging it.
@@ -134,7 +136,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 1,520 insertions and 46 deletions across seven files. This
+The reviewed diff is 1,519 insertions and 46 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

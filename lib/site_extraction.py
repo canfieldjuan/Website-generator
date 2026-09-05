@@ -190,12 +190,6 @@ SITE_ANALYSIS_SCHEMA = _object(
                 "notes": NULLABLE_TEXT,
             }
         ),
-        "platform": {
-            "anyOf": [
-                TEXT,
-                _object({"detected": TEXT}, required=("detected",)),
-            ]
-        },
     },
     required=("site",),
 )
