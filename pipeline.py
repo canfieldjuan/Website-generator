@@ -394,7 +394,7 @@ def _fetch_with_playwright(url):
         print(f"[!] Playwright fetch failed: {e}")
         return None
 
-def fetch_and_clean_html(url, *, include_source_url=False):
+def fetch_and_clean_html(url, *, include_source_url=False, required_origin=None):
     print(f"[*] Fetching URL: {url}")
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -438,6 +438,11 @@ def fetch_and_clean_html(url, *, include_source_url=False):
             effective_url = playwright_url
         else:
             print("[*] Falling back to static fetch.")
+
+    if required_origin is not None and not same_site_origin(
+        required_origin, effective_url
+    ):
+        raise ValueError("Fetched page left the required source origin.")
 
     soup = BeautifulSoup(raw_html, 'html.parser')
 
@@ -573,7 +578,11 @@ def enrich_site_json(site_json):
     for page_type, url in deduped:
         print(f"[*] Enriching {page_type} from {url}...")
         try:
-            page_html, fetched_url = fetch_and_clean_html(url, include_source_url=True)
+            page_html, fetched_url = fetch_and_clean_html(
+                url,
+                include_source_url=True,
+                required_origin=url,
+            )
         except Exception as e:
             print(f"[!] Enrichment fetch failed for {url}: {e}")
             continue
@@ -770,7 +779,10 @@ def generate_interior_page(
         content_source = "fetched-page" if page_url else "provided-source"
     elif page_url:
         print(f"[*] Fetching interior page content from {page_url}...")
-        source_content = fetch_and_clean_html(page_url)
+        source_content = fetch_and_clean_html(
+            page_url,
+            required_origin=page_url,
+        )
         content_source = "fetched-page"
     else:
         # Try to find a matching single_page_sections entry
@@ -856,7 +868,10 @@ def _generate_contact_page(site_json, contact_page, theme, generation_config):
     contact_url = contact_page.get("url")
     if contact_page.get("fetchable") is True and contact_url:
         try:
-            contact_source = fetch_and_clean_html(contact_url)
+            contact_source = fetch_and_clean_html(
+                contact_url,
+                required_origin=contact_url,
+            )
         except Exception as error:
             print(f"[!] Contact page fetch failed for {contact_url}: {error}")
             print("[*] Falling back to homepage-section content for contact page.")

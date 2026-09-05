@@ -687,6 +687,30 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 page_title_source,
             )
 
+        ambiguous_page_title_source = (
+            "<title>Residential Plumbing | Acme Plumbing</title>"
+            "<h1>Residential Plumbing</h1>"
+        )
+        for unverified_name in ("Residential Plumbing", "Acme Plumbing"):
+            with (
+                self.subTest(unverified_name=unverified_name),
+                self.assertRaisesRegex(SiteExtractionError, "identity"),
+            ):
+                validate_site_analysis(
+                    {"site": {"name": unverified_name}},
+                    ambiguous_page_title_source,
+                )
+
+        explicit_identity_source = (
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            + ambiguous_page_title_source
+        )
+        verified_identity = {"site": {"name": "Acme Plumbing"}}
+        self.assertEqual(
+            validate_site_analysis(verified_identity, explicit_identity_source),
+            verified_identity,
+        )
+
     def test_pages_to_fetch_derives_fetchability_from_destination(self):
         self.assertTrue(
             same_site_origin("https://acme.test/", "https://www.acme.test/services")
@@ -973,6 +997,29 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SiteExtractionError, "one source container"):
             validate_site_analysis(document, source)
+
+    def test_parent_list_item_does_not_span_nested_list_records(self):
+        source = (
+            "<h1>Acme Cleaning</h1><ul><li><ul>"
+            "<li><strong>Plumbing</strong><p>Pipe repairs</p></li>"
+            "<li><strong>Electrical</strong><p>Electrical repairs</p></li>"
+            "</ul></li></ul>"
+        )
+        valid = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [
+                {
+                    "type": "services",
+                    "items": [{"title": "Plumbing", "description": "Pipe repairs"}],
+                }
+            ],
+        }
+        self.assertEqual(validate_site_analysis(valid, source), valid)
+
+        mixed = copy.deepcopy(valid)
+        mixed["sections"][0]["items"][0]["description"] = "Electrical repairs"
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_site_analysis(mixed, source)
 
     def test_definition_list_records_do_not_span_terms(self):
         source = (
@@ -1790,6 +1837,34 @@ class FetchEvidenceTests(unittest.TestCase):
 
         self.assertIn("Source page", cleaned)
         self.assertEqual(effective_url, "https://www.acme.test/home")
+
+    def test_fetch_enforces_secondary_page_redirect_origin(self):
+        response = SimpleNamespace(
+            text="<html><body><p>Partner page</p></body></html>",
+            url="https://partner.test/contact",
+            raise_for_status=lambda: None,
+        )
+
+        with (
+            patch.object(pipeline.requests, "get", return_value=response),
+            patch.object(pipeline, "_fetch_with_playwright", return_value=None),
+            self.assertRaisesRegex(ValueError, "required source origin"),
+        ):
+            pipeline.fetch_and_clean_html(
+                "https://acme.test/contact",
+                required_origin="https://acme.test/contact",
+            )
+
+        response.url = "https://www.acme.test/contact"
+        with (
+            patch.object(pipeline.requests, "get", return_value=response),
+            patch.object(pipeline, "_fetch_with_playwright", return_value=None),
+        ):
+            cleaned = pipeline.fetch_and_clean_html(
+                "https://acme.test/contact",
+                required_origin="https://acme.test/contact",
+            )
+        self.assertIn("Partner page", cleaned)
 
     def test_late_image_inventory_is_shared_by_prompt_and_validation(self):
         image_url = "https://cdn.acme.test/late-hero.jpg"

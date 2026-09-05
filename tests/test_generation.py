@@ -1262,6 +1262,8 @@ class BodyAssemblyTests(unittest.TestCase):
             "Book My Appointment",
             "Order Online",
             "Buy Now",
+            "Pay Now",
+            "Add to Cart",
         ):
             with (
                 self.subTest(fabricated_label=fabricated_label),
@@ -4346,7 +4348,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         with patch(
             "pipeline.fetch_and_clean_html",
             return_value="<main>Verified contact source</main>",
-        ), patch(
+        ) as fetcher, patch(
             "pipeline.generate_interior_page",
             side_effect=GenerationResponseError("rejected generated body"),
         ) as generator:
@@ -4361,6 +4363,10 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     config(),
                 )
         self.assertEqual(generator.call_count, 1)
+        fetcher.assert_called_once_with(
+            "https://current.test/contact",
+            required_origin="https://current.test/contact",
+        )
         self.assertEqual(
             generator.call_args.kwargs["source_content"],
             "<main>Verified contact source</main>",

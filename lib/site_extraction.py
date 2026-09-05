@@ -642,6 +642,8 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
 
     for element in soup.find_all(True):
         if element.name in _ATOMIC_RECORD_TAGS:
+            if element.name == "li" and element.find("li") is not None:
+                continue
             append(str(element))
             continue
         if element.name in {"article", "div", "section"}:
@@ -898,10 +900,8 @@ class SourceEvidence:
         explicit_identity_seeds = tuple(
             segment for part in identity_parts if (segment := _normalize_text(part))
         )
-        h1_seeds = tuple(
-            segment for part in h1_parts if (segment := _normalize_text(part))
-        )
         title_identity_parts: list[str] = []
+        has_ambiguous_title_identity = False
         for title in title_parts:
             components = tuple(
                 component
@@ -918,11 +918,13 @@ class SourceEvidence:
                 if any(
                     next(_phrase_occurrences(seed, component), None) is not None
                     or next(_phrase_occurrences(component, seed), None) is not None
-                    for seed in explicit_identity_seeds + h1_seeds
+                    for seed in explicit_identity_seeds
                 )
             )
             if len(corroborated) == 1:
                 title_identity_parts.extend(corroborated)
+            else:
+                has_ambiguous_title_identity = True
 
         candidate_h1_parts = [
             part
@@ -946,7 +948,9 @@ class SourceEvidence:
                 )
             ]
             identity_parts.extend(
-                corroborated_h1_parts if identity_seeds else candidate_h1_parts[:1]
+                corroborated_h1_parts
+                if identity_seeds
+                else ([] if has_ambiguous_title_identity else candidate_h1_parts[:1])
             )
 
         form_control_labels: list[str] = []

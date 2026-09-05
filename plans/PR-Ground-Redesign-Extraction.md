@@ -41,6 +41,8 @@ analysis may control presentation but may not authorize a visible business claim
 5. Overwrite enrichment `source_url` with the effective URL selected and fetched
    by code; never accept model-authored provenance. Keep homepage sections free of
    that field because generation uses it as the interior-enrichment discriminator.
+   Every secondary page fetch must remain on the requested source-site origin after
+   redirects before its body can reach extraction or page generation.
 6. Remove redesign-prompt instructions that synthesize availability promises from
    urgency classification or require trust claims when no source-owned signal
    exists, and state the derived-versus-source authority boundary at the
@@ -87,8 +89,11 @@ schema's action-owned fields plus code-owned enrichment and contact-page source
 destinations, preserving these separations after extraction. Capability-bearing
 generated CTA labels must also exactly match a source-owned action label; generic
 source actions remain generic instead of being rewritten as booking, scheduling,
-estimate, quote, appointment, reservation, or consultation promises. Flat heading
-records
+estimate, quote, appointment, reservation, or consultation promises. The same
+exact-label boundary covers ordering, purchasing, buying, shopping,
+checkout, payment/pay, and cart language rather than allowing fabricated commerce
+capabilities on an otherwise admitted destination.
+Flat heading records
 stop before sibling structural containers, including list wrappers, so a section
 heading cannot turn a collection of independent cards into one evidence record.
 Definition-list terms and their owned definitions form individual records.
@@ -123,7 +128,10 @@ Fetchability is overwritten by code from the admitted destination and effective
 source URL: same-document anchors, same-page URLs, and external origins are not
 queued, while a distinct same-origin HTTP(S) page remains fetchable even if the
 model says otherwise. The same source-site boundary is rechecked after fetch
-redirects and before any enrichment model call.
+redirects in the shared fetch primitive used by enrichment and interior/contact
+page generation, before a secondary page body can reach a model. The enrichment
+caller retains an independent effective-URL check as defense against an injected
+or substituted fetch result.
 Business identity uses assertion evidence. Nested content containers prevent a
 broad article from recombining separate cards. Form labels must match a complete
 accessible label, duplicate references to the same source label are collapsed,
@@ -138,12 +146,17 @@ subsection
 headings and arbitrary footer or body attribution cannot become the prospect
 name. Generic page-title components are excluded, and isolated title identity
 components require an exact match rather than lending every phrase in the full
-document title to business identity. Negation and conditional qualifiers are
+document title to business identity. When a title retains multiple non-generic
+components, an independent site-name or logo seed must select exactly one; the
+page H1 cannot select its own title descriptor, and ambiguity disables the H1
+fallback. Negation and conditional qualifiers are
 retained across the complete
 owning clause rather than a fixed word window. Figures are atomic content
 records. Heading-delimited section fallback stops at sibling `article` and
 `section` containers, and an article wrapping nested sections cannot become a
-broad content scope. When a homepage section
+broad content scope. A list item that contains nested list items is likewise not
+an atomic record; only its leaf items can authorize a composite extracted item.
+When a homepage section
 contains both a headline and items, both must validate inside one semantic or
 heading-delimited source section before admission.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
@@ -199,6 +212,12 @@ business-specific claims.
   acceptance before implementation; the same case now fails closed.
 - `python -m unittest -q tests.test_site_extraction`: 51 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
+- Latest review-boundary pass: `python -m unittest -q
+  tests.test_site_extraction` passed 53 tests, and the two targeted generation
+  action/contact tests brought the focused total to 55. These prove redirect
+  rejection and apex/www acceptance, ambiguous title rejection with explicit
+  site-name recovery, leaf-only nested-list records, `Pay`/`Cart` label rejection,
+  and contact fetch-origin wiring.
 - `python -m unittest tests.test_generation -q`: 143 tests passed, including
   source-owned capability labels, neutral CTA wording, and destination-first
   rejection behavior.
@@ -221,7 +240,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 3,980 insertions and 80 deletions across ten files. This
+The reviewed diff is 4,102 insertions and 83 deletions across ten files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource
