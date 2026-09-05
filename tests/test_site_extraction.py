@@ -314,6 +314,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "<h1>Acme Cleaning</h1><p>Unlicensed subcontractors prohibited</p>",
                 {"trust_signals": {"certifications": ["Licensed"]}},
             ),
+            (
+                "<h1>Acme Cleaning</h1><p>Free Estimates are not available</p>",
+                {"existing_ctas": ["Free Estimates"]},
+            ),
         )
         for html, conversion_profile in cases:
             with (
@@ -372,6 +376,57 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             rhetorical_positive,
         )
+
+        postposed_positive = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {"existing_ctas": ["Free Estimates"]},
+        }
+        for source_text in (
+            "Free Estimates are not only available but easy to request",
+            "Free Estimates are available without obligation",
+        ):
+            with self.subTest(source_text=source_text):
+                self.assertEqual(
+                    validate_site_analysis(
+                        postposed_positive,
+                        f"<h1>Acme Cleaning</h1><p>{source_text}</p>",
+                    ),
+                    postposed_positive,
+                )
+
+    def test_resource_urls_do_not_become_contact_evidence(self):
+        cases = (
+            (
+                {"phone": "217-555-0100"},
+                '<img src="/images/217-555-0100.jpg" alt="Crew">',
+                "source phone",
+            ),
+            (
+                {"email": "billing@acme.test"},
+                '<form action="/route/billing@acme.test"><button>Send</button></form>',
+                "source email",
+            ),
+            (
+                {"phone": "217-555-0100"},
+                '<img src="/crew.jpg" alt="217-555-0100">',
+                "source phone",
+            ),
+            (
+                {"email": "billing@acme.test"},
+                '<input placeholder="billing@acme.test">',
+                "source email",
+            ),
+        )
+        for contact, resource, error in cases:
+            with (
+                self.subTest(contact=contact),
+                self.assertRaisesRegex(SiteExtractionError, error),
+            ):
+                validate_site_analysis(
+                    {"site": {"name": "Acme Cleaning", "contact": contact}},
+                    f"<h1>Acme Cleaning</h1>{resource}",
+                    "https://acme.test/",
+                )
 
 
 class EnrichmentGroundingTests(unittest.TestCase):

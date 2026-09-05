@@ -264,6 +264,24 @@ _WORD_PATTERN = re.compile(r"[a-z0-9]+(?:['’][a-z]+)?", re.I)
 _NEGATION_TERMS = frozenset(
     {"no", "not", "never", "without", "neither", "nor", "cannot", "non"}
 )
+_POSTPOSED_NEGATION_TERMS = frozenset(
+    {
+        "no",
+        "not",
+        "never",
+        "neither",
+        "nor",
+        "cannot",
+        "unavailable",
+        "prohibited",
+        "excluded",
+        "denied",
+        "disallowed",
+        "revoked",
+        "expired",
+        "suspended",
+    }
+)
 
 
 def _normalize_text(value: str) -> str:
@@ -294,24 +312,37 @@ def _phrase_occurrences(text: str, phrase: str) -> Iterable[int]:
         start = index + max(len(phrase), 1)
 
 
-def _occurrence_is_negated(text: str, start: int) -> bool:
-    preceding_clause = _CLAUSE_BREAK_PATTERN.split(text[:start])[-1]
-    words = [word.replace("’", "'") for word in _WORD_PATTERN.findall(preceding_clause)]
-    nearby = words[-6:]
-    for index, word in enumerate(nearby):
+def _words_contain_negation(words: list[str], *, postposed: bool = False) -> bool:
+    terms = _POSTPOSED_NEGATION_TERMS if postposed else _NEGATION_TERMS
+    for index, word in enumerate(words):
         if (
             word == "not"
-            and index + 1 < len(nearby)
-            and nearby[index + 1]
+            and index + 1 < len(words)
+            and words[index + 1]
             in {
                 "only",
                 "just",
             }
         ):
             continue
-        if word in _NEGATION_TERMS or word.endswith("n't"):
+        if word in terms or word.endswith("n't"):
             return True
     return False
+
+
+def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
+    preceding_clause = _CLAUSE_BREAK_PATTERN.split(text[:start])[-1]
+    preceding_words = [
+        word.replace("’", "'") for word in _WORD_PATTERN.findall(preceding_clause)
+    ][-6:]
+    if _words_contain_negation(preceding_words):
+        return True
+
+    following_clause = _CLAUSE_BREAK_PATTERN.split(text[start + length :])[0]
+    following_words = [
+        word.replace("’", "'") for word in _WORD_PATTERN.findall(following_clause)
+    ][:6]
+    return _words_contain_negation(following_words, postposed=True)
 
 
 def _attribute_values(value: Any) -> Iterable[str]:
@@ -352,10 +383,10 @@ class SourceEvidence:
                 for value in _attribute_values(raw_value):
                     if name in _TEXT_ATTRIBUTES:
                         text_parts.append(value)
-                        contact_values.append(value)
                     if name in _URL_ATTRIBUTES:
                         raw_urls.add(value)
-                        contact_values.append(value)
+                        if value.strip().casefold().startswith(("tel:", "mailto:")):
+                            contact_values.append(value)
                     if name in _IMAGE_ATTRIBUTES:
                         raw_image_urls.add(value)
                     if name == "srcset":
@@ -431,12 +462,12 @@ class SourceEvidence:
         for segment in self.text_segments:
             for index in _phrase_occurrences(segment, normalized):
                 found = True
-                if not _occurrence_is_negated(segment, index):
+                if not _occurrence_is_negated(segment, index, len(normalized)):
                     return
         if not found:
             for index in _phrase_occurrences(self.text, normalized):
                 found = True
-                if not _occurrence_is_negated(self.text, index):
+                if not _occurrence_is_negated(self.text, index, len(normalized)):
                     return
         if found:
             raise SiteExtractionError(f"{path} drops or reverses source negation.")
