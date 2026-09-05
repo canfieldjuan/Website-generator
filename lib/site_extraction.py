@@ -259,6 +259,10 @@ _SOCIAL_HOST_PLATFORMS = (
     ("youtu.be", "YouTube"),
     ("yelp.com", "Yelp"),
 )
+_LOGO_ROLE_PATTERN = re.compile(r"(?:^|[^a-z0-9])logo(?:[^a-z0-9]|$)", re.I)
+_LOGO_CONTAINER_MARKERS = frozenset(
+    {"brand-logo", "custom-logo-link", "navbar-brand", "site-brand"}
+)
 _ASSERTION_CONTEXT_TAGS = {
     "address",
     "article",
@@ -473,6 +477,39 @@ def _attribute_values(value: Any) -> Iterable[str]:
         yield from (item for item in value if isinstance(item, str))
 
 
+def _srcset_urls(value: str) -> set[str]:
+    return {
+        candidate.strip().split()[0]
+        for candidate in value.split(",")
+        if candidate.strip()
+    }
+
+
+def _is_source_logo(image: Any) -> bool:
+    """Return whether source semantics identify this image as the site's logo."""
+    candidates = [image]
+    for ancestor in image.parents:
+        candidates.append(ancestor)
+        if ancestor.name not in {"a", "picture", "span"}:
+            break
+    for element in candidates:
+        for attribute in (
+            element.get("alt"),
+            element.get("title"),
+            element.get("id"),
+            element.get("class"),
+            element.get("itemprop"),
+            element.get("data-role"),
+        ):
+            for value in _attribute_values(attribute):
+                marker = value.strip().casefold()
+                if _LOGO_ROLE_PATTERN.search(marker):
+                    return True
+                if any(token in _LOGO_CONTAINER_MARKERS for token in marker.split()):
+                    return True
+    return False
+
+
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
 _ATOMIC_RECORD_TAGS = {"address", "blockquote", "details", "li", "p", "td", "th", "tr"}
 _RECORD_CONTAINER_TAGS = {
@@ -506,7 +543,7 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
             continue
         if element.name in {"article", "div", "section"}:
             nested_record = element.find(
-                ["article", "details", "div", "li", "section", "tr"]
+                ["article", "details", "div", "dl", "dt", "li", "section", "tr"]
             )
             if (
                 nested_record is None
@@ -554,6 +591,7 @@ class SourceEvidence:
     action_urls: frozenset[str]
     image_urls: frozenset[str]
     image_pairs: frozenset[tuple[str, str]]
+    logo_urls: frozenset[str]
     form_control_labels: tuple[str, ...]
     emails: frozenset[str]
     phones: frozenset[str]
@@ -622,6 +660,7 @@ class SourceEvidence:
         raw_action_pairs: set[tuple[str, str]] = set()
         raw_image_urls: set[str] = set()
         raw_image_pairs: set[tuple[str, str]] = set()
+        raw_logo_urls: set[str] = set()
         email_values: list[str] = list(contact_segments)
         phone_values: list[str] = list(contact_segments)
         action_labels: set[str] = set()
@@ -671,11 +710,7 @@ class SourceEvidence:
                         raw_image_urls.add(value)
                         element_image_urls.add(value)
                     if name == "srcset":
-                        srcset_urls = {
-                            candidate.strip().split()[0]
-                            for candidate in value.split(",")
-                            if candidate.strip()
-                        }
+                        srcset_urls = _srcset_urls(value)
                         raw_image_urls.update(srcset_urls)
                         element_image_urls.update(srcset_urls)
                     if name == "content":
@@ -689,7 +724,14 @@ class SourceEvidence:
                 raw_image_urls.update(_CSS_URL_PATTERN.findall(style))
             alt = element.get("alt")
             if element.name == "img" and isinstance(alt, str) and alt.strip():
+                picture = element.find_parent("picture")
+                if picture is not None:
+                    for source in picture.find_all("source", recursive=False):
+                        for raw_srcset in _attribute_values(source.get("srcset")):
+                            element_image_urls.update(_srcset_urls(raw_srcset))
                 raw_image_pairs.update((url, alt) for url in element_image_urls)
+            if element.name == "img" and _is_source_logo(element):
+                raw_logo_urls.update(element_image_urls)
 
         form_control_labels: list[str] = []
         for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):
@@ -712,17 +754,23 @@ class SourceEvidence:
                 accessible_label = str(control.get("aria-label") or "").strip()
             if not accessible_label:
                 labels = []
+                seen_labels: set[int] = set()
+
+                def append_label(label: Any) -> None:
+                    identity = id(label)
+                    if identity not in seen_labels:
+                        seen_labels.add(identity)
+                        labels.append(label.get_text(" ", strip=True))
+
                 wrapping_label = control.find_parent("label")
                 if wrapping_label is not None:
-                    labels.append(wrapping_label.get_text(" ", strip=True))
+                    append_label(wrapping_label)
                 control_id = control.get("id")
                 if isinstance(control_id, str) and control_id.strip():
-                    labels.extend(
-                        label.get_text(" ", strip=True)
-                        for label in soup.find_all(
-                            "label", attrs={"for": control_id}, limit=MAX_ITEMS
-                        )
-                    )
+                    for label in soup.find_all(
+                        "label", attrs={"for": control_id}, limit=MAX_ITEMS
+                    ):
+                        append_label(label)
                 accessible_label = " ".join(label for label in labels if label)
             if not accessible_label:
                 accessible_label = str(
@@ -809,6 +857,7 @@ class SourceEvidence:
                 for raw_url, alt in raw_image_pairs
                 for destination in resolved((raw_url,))
             ),
+            logo_urls=resolved(raw_logo_urls),
             form_control_labels=tuple(form_control_labels),
             emails=frozenset(emails),
             phones=frozenset(phones),
@@ -903,6 +952,14 @@ class SourceEvidence:
         if pair not in self.image_pairs:
             raise SiteExtractionError(
                 f"{path}.alt is not grounded on the same source image as its URL."
+            )
+
+    def require_logo(self, path: str, value: Any) -> None:
+        if value is None:
+            return
+        if html.unescape(value).strip() not in self.logo_urls:
+            raise SiteExtractionError(
+                f"{path} is not grounded in a source image identified as a logo."
             )
 
     def require_form_fields(self, path: str, values: Any) -> None:
@@ -1015,7 +1072,7 @@ def _require_site_facts(
     _require_contact(evidence, "site.contact", site.get("contact"))
 
     brand = document.get("brand") or {}
-    evidence.require_url("brand.logo_url", brand.get("logo_url"), image=True)
+    evidence.require_logo("brand.logo_url", brand.get("logo_url"))
 
     for index, item in enumerate(document.get("nav") or []):
         evidence.require_action(f"nav[{index}]", item["label"], item["url"])

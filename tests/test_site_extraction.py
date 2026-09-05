@@ -1,3 +1,4 @@
+import copy
 import json
 import unittest
 from pathlib import Path
@@ -87,6 +88,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
           <a href="mailto:hello@acme.test">hello@acme.test</a>
           <address>100 Main Street, Effingham, IL</address>
           <button>Request a Quote</button>
+          <img src="/logo.png" alt="Acme Cleaning logo">
           <img src="/hero.jpg" alt="Acme cleaning crew">
         </body></html>
         """
@@ -674,6 +676,53 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "same source image"):
             validate_site_analysis(swapped, source, "https://acme.test/")
 
+    def test_picture_source_candidate_uses_its_owned_image_alt(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "images": [
+                {
+                    "url": "https://acme.test/crew-large.jpg",
+                    "alt": "Acme crew",
+                    "context": "team",
+                }
+            ],
+        }
+        source = (
+            "<h1>Acme Cleaning</h1><picture>"
+            '<source srcset="/crew-large.jpg 2x">'
+            '<img src="/crew-small.jpg" alt="Acme crew">'
+            "</picture>"
+        )
+
+        self.assertEqual(
+            validate_site_analysis(document, source, "https://acme.test/"),
+            document,
+        )
+
+    def test_brand_logo_requires_logo_role_on_the_owning_image(self):
+        source = (
+            "<h1>Acme Cleaning</h1>"
+            '<img src="/hero.jpg" alt="Cleaning crew">'
+            '<a class="navbar-brand"><picture>'
+            '<source srcset="/logo-large.png 2x">'
+            '<img src="/logo.png" alt="Acme Cleaning">'
+            "</picture></a>"
+        )
+        valid = {
+            "site": {"name": "Acme Cleaning"},
+            "brand": {"logo_url": "https://acme.test/logo-large.png"},
+        }
+        self.assertEqual(
+            validate_site_analysis(valid, source, "https://acme.test/"), valid
+        )
+
+        invalid = {
+            "site": {"name": "Acme Cleaning"},
+            "brand": {"logo_url": "https://acme.test/hero.jpg"},
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "identified as a logo"):
+            validate_site_analysis(invalid, source, "https://acme.test/")
+
     def test_social_platform_is_bound_to_its_destination(self):
         document = {
             "site": {"name": "Acme Cleaning"},
@@ -732,6 +781,19 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 source_url="https://acme.test/contact",
             )["form_fields"],
             valid["form_fields"],
+        )
+
+        dual_association = {"form_fields": ["Email"]}
+        self.assertEqual(
+            validate_enrichment_result(
+                dual_association,
+                page_type="contact",
+                source_html=(
+                    '<label for="email">Email<input id="email" type="email"></label>'
+                ),
+                source_url="https://acme.test/contact",
+            )["form_fields"],
+            dual_association["form_fields"],
         )
 
         unsupported = {"form_fields": ["Name", "Email"]}
@@ -799,6 +861,36 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SiteExtractionError, "one source container"):
             validate_site_analysis(document, source)
+
+    def test_definition_list_records_do_not_span_terms(self):
+        source = (
+            "<h1>Acme Cleaning</h1><article><h1>FAQ</h1><dl>"
+            "<dt>Do you offer weekend service?</dt><dd>No weekend service.</dd>"
+            "<dt>Do you offer evening service?</dt><dd>Evening service is available.</dd>"
+            "</dl></article>"
+        )
+        valid = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [
+                {
+                    "type": "faq",
+                    "items": [
+                        {
+                            "title": "Do you offer weekend service?",
+                            "description": "No weekend service.",
+                        }
+                    ],
+                }
+            ],
+        }
+        self.assertEqual(validate_site_analysis(valid, source), valid)
+
+        mixed = copy.deepcopy(valid)
+        mixed["sections"][0]["items"][0]["description"] = (
+            "Evening service is available."
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_site_analysis(mixed, source)
 
     def test_single_page_section_binds_navigation_and_scopes_content(self):
         source = (

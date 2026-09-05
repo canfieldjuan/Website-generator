@@ -85,6 +85,8 @@ destinations, preserving these separations after extraction. Flat heading record
 stop before sibling structural containers, including list wrappers, so a section
 heading cannot turn a collection of independent cards into one evidence record.
 Definition-list terms and their owned definitions form individual records.
+Definition-list wrappers are also record boundaries, so an enclosing article or
+section cannot recombine a term with another term's definition.
 Navigation, CTA, footer, and fetch-page labels remain paired with the destination
 of the same interactive source element. Phone and email scans operate per local
 DOM context rather than concatenating unrelated page nodes. Assertion context
@@ -101,15 +103,19 @@ hours preserve the same assertion context instead of treating an unanswered
 question or conditional as an affirmative fact. Form-field evidence comes only
 from labels and accessible names attached to actual non-action
 `input`/`select`/`textarea` controls. Image alt text remains paired with the exact
-source image URL rather than being recombined from page-wide values. Fetchability
-is overwritten by code from the admitted destination and effective source URL:
+source image URL rather than being recombined from page-wide values, including
+responsive `<picture><source>` candidates owned by the same fallback image. A
+logo URL additionally requires explicit logo semantics on its source image or
+owning brand container; merely appearing elsewhere on the page is insufficient.
+Fetchability is overwritten by code from the admitted destination and effective source URL:
 same-document anchors and same-page URLs are not queued, while a distinct HTTP(S)
 page remains fetchable even if the model says otherwise.
 Business identity uses assertion evidence. Nested content containers prevent a
 broad article from recombining separate cards. Form labels must match a complete
-accessible label and are assigned one-to-one to distinct controls. Social platform
-names are derived from recognized destination hosts; otherwise the name and URL
-must belong to the same source action.
+accessible label, duplicate references to the same source label are collapsed,
+and labels are assigned one-to-one to distinct controls. Social platform names
+are derived from recognized destination hosts; otherwise the name and URL must
+belong to the same source action.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
 button, and text inputs cannot promote their values into published CTA copy.
 Classifications, layout choices, color selections, and image-generation guidance
@@ -161,9 +167,9 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 43 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 46 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests -q`: 328 tests passed with 34 skipped on
+- `python -m unittest discover -s tests -q`: 331 tests passed with 34 skipped on
   the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
@@ -182,7 +188,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 2,944 insertions and 72 deletions across seven files. This
+The reviewed diff is 3,099 insertions and 72 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource
