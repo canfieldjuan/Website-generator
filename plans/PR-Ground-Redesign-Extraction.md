@@ -96,6 +96,15 @@ navigation labels bind to their own anchors, and the section content is validate
 inside that exact target container. The code-owned image inventory is emitted as
 real prompt-visible image attributes, so the same bounded URLs remain available
 to validation even when their original elements fall after HTML truncation.
+Claim-bearing section headings, body text, taglines, locations, addresses, and
+hours preserve the same assertion context instead of treating an unanswered
+question or conditional as an affirmative fact. Form-field evidence comes only
+from labels and accessible names attached to actual non-action
+`input`/`select`/`textarea` controls. Image alt text remains paired with the exact
+source image URL rather than being recombined from page-wide values. Fetchability
+is overwritten by code from the admitted destination and effective source URL:
+same-document anchors and same-page URLs are not queued, while a distinct HTTP(S)
+page remains fetchable even if the model says otherwise.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
 button, and text inputs cannot promote their values into published CTA copy.
 Classifications, layout choices, color selections, and image-generation guidance
@@ -147,9 +156,10 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 35 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 40 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests -q`: passed on the current working tree.
+- `python -m unittest discover -s tests -q`: 325 tests passed with 34 skipped on
+  the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.
@@ -167,7 +177,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 2,543 insertions and 72 deletions across seven files. This
+The reviewed diff is 2,817 insertions and 72 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

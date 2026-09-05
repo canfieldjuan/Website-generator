@@ -549,6 +549,158 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "<h1>Acme Cleaning</h1><p>Do you offer Free Estimates?</p>",
             )
 
+    def test_claim_bearing_headline_rejects_question_only_evidence(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [{"type": "services", "headline": "Free Estimates"}],
+        }
+
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(
+                document,
+                "<h1>Acme Cleaning</h1><p>Do you offer Free Estimates?</p>",
+            )
+
+        full_question = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [
+                {"type": "services", "headline": "Do you offer Free Estimates?"}
+            ],
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                full_question,
+                "<h1>Acme Cleaning</h1><p>Do you offer Free Estimates?</p>",
+            ),
+            full_question,
+        )
+
+    def test_source_claim_fields_preserve_nonassertive_context(self):
+        cases = (
+            (
+                {"site": {"name": "Acme Cleaning", "tagline": "Free Estimates"}},
+                "<p>Do you offer Free Estimates?</p>",
+            ),
+            (
+                {"site": {"name": "Acme Cleaning", "location": "Effingham"}},
+                "<p>Do you serve Effingham?</p>",
+            ),
+            (
+                {
+                    "site": {
+                        "name": "Acme Cleaning",
+                        "contact": {"hours": "Open weekends"},
+                    }
+                },
+                "<p>Are you Open weekends?</p>",
+            ),
+        )
+        for document, source in cases:
+            with (
+                self.subTest(document=document),
+                self.assertRaisesRegex(SiteExtractionError, "assertion context"),
+            ):
+                validate_site_analysis(
+                    document,
+                    f"<h1>Acme Cleaning</h1>{source}",
+                )
+
+    def test_pages_to_fetch_derives_fetchability_from_destination(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "pages_to_fetch": [
+                {
+                    "label": "Contact",
+                    "url": "https://acme.test/#contact",
+                    "page_type": "contact",
+                    "priority": 1,
+                    "fetchable": True,
+                },
+                {
+                    "label": "Services",
+                    "url": "https://acme.test/services",
+                    "page_type": "services",
+                    "priority": 2,
+                    "fetchable": False,
+                },
+            ],
+        }
+        source = (
+            "<h1>Acme Cleaning</h1>"
+            '<a href="#contact">Contact</a>'
+            '<a href="/services">Services</a>'
+        )
+
+        admitted = validate_site_analysis(
+            document, source, source_url="https://acme.test/"
+        )
+
+        self.assertTrue(document["pages_to_fetch"][0]["fetchable"])
+        self.assertFalse(document["pages_to_fetch"][1]["fetchable"])
+        self.assertFalse(admitted["pages_to_fetch"][0]["fetchable"])
+        self.assertTrue(admitted["pages_to_fetch"][1]["fetchable"])
+
+    def test_image_alt_must_belong_to_the_same_image(self):
+        source = (
+            "<h1>Acme Cleaning</h1>"
+            '<img src="/jane.jpg" alt="Jane Doe">'
+            '<img src="/john.jpg" alt="John Doe">'
+        )
+        valid = {
+            "site": {"name": "Acme Cleaning"},
+            "images": [
+                {
+                    "url": "https://acme.test/jane.jpg",
+                    "alt": "Jane Doe",
+                    "context": "team",
+                }
+            ],
+        }
+        self.assertEqual(
+            validate_site_analysis(valid, source, "https://acme.test/"), valid
+        )
+
+        swapped = {
+            **valid,
+            "images": [{**valid["images"][0], "alt": "John Doe"}],
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "same source image"):
+            validate_site_analysis(swapped, source, "https://acme.test/")
+
+    def test_form_fields_require_actual_labeled_controls(self):
+        valid = {"form_fields": ["Name", "Email", "Project Type", "Message"]}
+        source = """
+        <form>
+          <label for="name">Your Name *</label><input id="name">
+          <label>Email <input type="email"></label>
+          <span id="project-label">Project Type</span>
+          <select aria-labelledby="project-label"><option>Office</option></select>
+          <textarea aria-label="Message"></textarea>
+        </form>
+        """
+        self.assertEqual(
+            validate_enrichment_result(
+                valid,
+                page_type="contact",
+                source_html=source,
+                source_url="https://acme.test/contact",
+            )["form_fields"],
+            valid["form_fields"],
+        )
+
+        unsupported = {"form_fields": ["Name", "Email"]}
+        with self.assertRaisesRegex(SiteExtractionError, "actual source form control"):
+            validate_enrichment_result(
+                unsupported,
+                page_type="contact",
+                source_html=(
+                    "<p>Name your project</p><h2>Email</h2>"
+                    '<input type="submit" value="Name">'
+                    '<input type="hidden" aria-label="Email">'
+                ),
+                source_url="https://acme.test/contact",
+            )
+
     def test_single_page_section_binds_navigation_and_scopes_content(self):
         source = (
             "<h1>Acme Cleaning</h1><nav>"

@@ -238,6 +238,13 @@ _TEXT_ATTRIBUTES = {
 }
 _ACTION_URL_ATTRIBUTES = {"href"}
 _IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
+_NON_DATA_INPUT_TYPES = {
+    "button",
+    "hidden",
+    "image",
+    "reset",
+    "submit",
+}
 _ASSERTION_CONTEXT_TAGS = {
     "address",
     "article",
@@ -418,6 +425,33 @@ def _contact_destination(value: str) -> tuple[str, str] | None:
     return (scheme, destination) if destination else None
 
 
+def _is_distinct_fetchable_page(value: Any, source_url: str | None) -> bool:
+    if not isinstance(value, str) or not value.strip() or not source_url:
+        return False
+    source = urlsplit(source_url)
+    destination = urlsplit(urljoin(source_url, html.unescape(value).strip()))
+    if (
+        source.scheme.casefold() not in {"http", "https"}
+        or destination.scheme.casefold() not in {"http", "https"}
+        or not source.hostname
+        or not destination.hostname
+    ):
+        return False
+
+    def page_identity(parsed: Any) -> tuple[str, str, int | None, str, str]:
+        scheme = parsed.scheme.casefold()
+        default_port = 443 if scheme == "https" else 80
+        return (
+            scheme,
+            (parsed.hostname or "").casefold(),
+            parsed.port or default_port,
+            parsed.path or "/",
+            parsed.query,
+        )
+
+    return page_identity(destination) != page_identity(source)
+
+
 def _attribute_values(value: Any) -> Iterable[str]:
     if isinstance(value, str):
         yield value
@@ -509,6 +543,8 @@ class SourceEvidence:
     action_pairs: frozenset[tuple[str, str]]
     action_urls: frozenset[str]
     image_urls: frozenset[str]
+    image_pairs: frozenset[tuple[str, str]]
+    form_field_segments: tuple[str, ...]
     emails: frozenset[str]
     phones: frozenset[str]
     records: tuple[SourceEvidence, ...]
@@ -575,6 +611,7 @@ class SourceEvidence:
         raw_action_urls: set[str] = set()
         raw_action_pairs: set[tuple[str, str]] = set()
         raw_image_urls: set[str] = set()
+        raw_image_pairs: set[tuple[str, str]] = set()
         email_values: list[str] = list(contact_segments)
         phone_values: list[str] = list(contact_segments)
         action_labels: set[str] = set()
@@ -582,6 +619,7 @@ class SourceEvidence:
         for element in soup.find_all(True):
             role = str(element.get("role") or "").casefold()
             action_label = ""
+            element_image_urls: set[str] = set()
             if (
                 element.name in {"a", "area"}
                 and element.has_attr("href")
@@ -621,6 +659,7 @@ class SourceEvidence:
                                 phone_values.append(destination)
                     if name in _IMAGE_ATTRIBUTES:
                         raw_image_urls.add(value)
+                        element_image_urls.add(value)
                     if name == "srcset":
                         srcset_urls = {
                             candidate.strip().split()[0]
@@ -628,15 +667,51 @@ class SourceEvidence:
                             if candidate.strip()
                         }
                         raw_image_urls.update(srcset_urls)
+                        element_image_urls.update(srcset_urls)
                     if name == "content":
                         property_name = str(
                             element.get("property") or element.get("name") or ""
                         ).casefold()
                         if "image" in property_name:
                             raw_image_urls.add(value)
-                style = element.get("style")
-                if isinstance(style, str):
-                    raw_image_urls.update(_CSS_URL_PATTERN.findall(style))
+            style = element.get("style")
+            if isinstance(style, str):
+                raw_image_urls.update(_CSS_URL_PATTERN.findall(style))
+            alt = element.get("alt")
+            if element.name == "img" and isinstance(alt, str) and alt.strip():
+                raw_image_pairs.update((url, alt) for url in element_image_urls)
+
+        form_field_parts: list[str] = []
+        for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):
+            if (
+                control.name == "input"
+                and str(control.get("type") or "text").casefold()
+                in _NON_DATA_INPUT_TYPES
+            ):
+                continue
+            labels = []
+            wrapping_label = control.find_parent("label")
+            if wrapping_label is not None:
+                labels.append(wrapping_label.get_text(" ", strip=True))
+            control_id = control.get("id")
+            if isinstance(control_id, str) and control_id.strip():
+                labels.extend(
+                    label.get_text(" ", strip=True)
+                    for label in soup.find_all(
+                        "label", attrs={"for": control_id}, limit=MAX_ITEMS
+                    )
+                )
+            labelled_by = control.get("aria-labelledby")
+            if isinstance(labelled_by, str):
+                for target_id in labelled_by.split()[:MAX_ITEMS]:
+                    target = soup.find(id=target_id)
+                    if target is not None:
+                        labels.append(target.get_text(" ", strip=True))
+            labels.extend(
+                str(control.get(attribute) or "")
+                for attribute in ("aria-label", "placeholder", "title")
+            )
+            form_field_parts.extend(label for label in labels if label.strip())
 
         for style in soup.find_all("style"):
             raw_image_urls.update(_CSS_URL_PATTERN.findall(style.get_text(" ")))
@@ -666,6 +741,13 @@ class SourceEvidence:
             dict.fromkeys(
                 segment
                 for part in attribute_parts
+                if (segment := _normalize_text(part))
+            )
+        )
+        form_field_segments = tuple(
+            dict.fromkeys(
+                segment
+                for part in form_field_parts
                 if (segment := _normalize_text(part))
             )
         )
@@ -710,6 +792,12 @@ class SourceEvidence:
             ),
             action_urls=resolved(raw_action_urls),
             image_urls=resolved(raw_image_urls),
+            image_pairs=frozenset(
+                (destination, _normalize_text(alt))
+                for raw_url, alt in raw_image_pairs
+                for destination in resolved((raw_url,))
+            ),
+            form_field_segments=form_field_segments,
             emails=frozenset(emails),
             phones=frozenset(phones),
             records=records,
@@ -785,6 +873,26 @@ class SourceEvidence:
             kind = "image URL" if image else "URL"
             raise SiteExtractionError(f"{path} is not grounded in a source {kind}.")
 
+    def require_image(self, path: str, url: Any, alt: Any) -> None:
+        self.require_url(f"{path}.url", url, image=True)
+        if alt is None:
+            return
+        pair = (html.unescape(url).strip(), _normalize_text(alt))
+        if pair not in self.image_pairs:
+            raise SiteExtractionError(
+                f"{path}.alt is not grounded on the same source image as its URL."
+            )
+
+    def require_form_field(self, path: str, value: Any) -> None:
+        normalized = _normalize_text(value) if isinstance(value, str) else ""
+        if not normalized or not any(
+            any(True for _ in _phrase_occurrences(segment, normalized))
+            for segment in self.form_field_segments
+        ):
+            raise SiteExtractionError(
+                f"{path} is not grounded in an actual source form control."
+            )
+
 
 def _validation_error(validator: Draft202012Validator, document: Any) -> str | None:
     try:
@@ -808,10 +916,10 @@ def _require_contact(evidence: SourceEvidence, path: str, contact: Any) -> None:
         return
     evidence.require_phone(f"{path}.phone", contact.get("phone"))
     evidence.require_email(f"{path}.email", contact.get("email"))
-    evidence.require_text(f"{path}.address", contact.get("address"))
+    evidence.require_text(f"{path}.address", contact.get("address"), asserted=True)
     for index, address in enumerate(contact.get("addresses") or []):
-        evidence.require_text(f"{path}.addresses[{index}]", address)
-    evidence.require_text(f"{path}.hours", contact.get("hours"))
+        evidence.require_text(f"{path}.addresses[{index}]", address, asserted=True)
+    evidence.require_text(f"{path}.hours", contact.get("hours"), asserted=True)
 
 
 def _require_content_items(
@@ -874,11 +982,13 @@ def _require_content_items(
             )
 
 
-def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
+def _require_site_facts(
+    document: dict, evidence: SourceEvidence, source_url: str | None
+) -> None:
     site = document["site"]
     evidence.require_text("site.name", site["name"])
-    evidence.require_text("site.tagline", site.get("tagline"))
-    evidence.require_text("site.location", site.get("location"))
+    evidence.require_text("site.tagline", site.get("tagline"), asserted=True)
+    evidence.require_text("site.location", site.get("location"), asserted=True)
     _require_contact(evidence, "site.contact", site.get("contact"))
 
     brand = document.get("brand") or {}
@@ -897,7 +1007,9 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
 
     for index, section in enumerate(document.get("sections") or []):
         path = f"sections[{index}]"
-        evidence.require_text(f"{path}.headline", section.get("headline"))
+        evidence.require_text(
+            f"{path}.headline", section.get("headline"), asserted=True
+        )
         _require_content_items(
             evidence,
             f"{path}.items",
@@ -906,14 +1018,14 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
         )
 
     for index, image in enumerate(document.get("images") or []):
-        evidence.require_url(f"images[{index}].url", image["url"], image=True)
-        evidence.require_text(f"images[{index}].alt", image.get("alt"))
+        evidence.require_image(f"images[{index}]", image["url"], image.get("alt"))
     for index, social in enumerate(document.get("social") or []):
         evidence.require_url(f"social[{index}].url", social["url"])
     for index, item in enumerate(document.get("footer_links") or []):
         evidence.require_action(f"footer_links[{index}]", item["label"], item["url"])
     for index, page in enumerate(document.get("pages_to_fetch") or []):
         evidence.require_action(f"pages_to_fetch[{index}]", page["label"], page["url"])
+        page["fetchable"] = _is_distinct_fetchable_page(page["url"], source_url)
 
     for index, section in enumerate(document.get("single_page_sections") or []):
         path = f"single_page_sections[{index}]"
@@ -926,10 +1038,10 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
             evidence.require_text(f"{path}.nav_label", section["nav_label"])
         content = section.get("content") or {}
         section_evidence.require_text(
-            f"{path}.content.headline", content.get("headline")
+            f"{path}.content.headline", content.get("headline"), asserted=True
         )
         section_evidence.require_text(
-            f"{path}.content.body_text", content.get("body_text")
+            f"{path}.content.body_text", content.get("body_text"), asserted=True
         )
         _require_content_items(
             section_evidence,
@@ -938,7 +1050,7 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
             allow_nonassertive_title=section.get("page_type") == "faq",
         )
         for field_index, field in enumerate(content.get("form_fields") or []):
-            section_evidence.require_text(
+            section_evidence.require_form_field(
                 f"{path}.content.form_fields[{field_index}]", field
             )
         _require_contact(
@@ -977,7 +1089,7 @@ def validate_site_analysis(
     if error:
         raise SiteExtractionError(error)
     evidence = SourceEvidence.from_html(source_html, source_url)
-    _require_site_facts(admitted, evidence)
+    _require_site_facts(admitted, evidence, source_url)
     return admitted
 
 
@@ -1005,7 +1117,7 @@ def validate_enrichment_result(
 
     if page_type == "contact":
         for index, field in enumerate(admitted.get("form_fields") or []):
-            evidence.require_text(f"form_fields[{index}]", field)
+            evidence.require_form_field(f"form_fields[{index}]", field)
         _require_contact(evidence, "contact_info", admitted.get("contact_info"))
         contact_info = admitted.get("contact_info") or {}
         has_contact_info = any(
@@ -1032,7 +1144,7 @@ def validate_enrichment_result(
     if page_type == "faq":
         admitted["headline"] = "FAQ"
     else:
-        evidence.require_text("headline", admitted.get("headline"))
+        evidence.require_text("headline", admitted.get("headline"), asserted=True)
     derived_tag = (
         "about" if page_type == "about" else "faq" if page_type == "faq" else None
     )
