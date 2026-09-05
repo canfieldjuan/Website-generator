@@ -355,7 +355,11 @@ def expected_build_action_url_contract(prospect, review_contract):
     allowed_labels = []
     if review_contract.reviews_url:
         allowed_urls.append(review_contract.reviews_url)
-        allowed_labels.append("Read All Reviews on Google")
+        allowed_labels.append(
+            "Read All on Google"
+            if review_contract.mode == "cards"
+            else "Read All Reviews on Google"
+        )
     phone = prospect.get("phone")
     email = prospect.get("owner_email")
     return ActionUrlAdmissionContract(

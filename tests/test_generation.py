@@ -3094,6 +3094,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         admitted_body = build_body_with_review_section(
             review_card_section(reviews, "4.8", "31")
         )
+        review_contract = build.expected_review_contract(prospect)
+        self.assertEqual(
+            build.expected_build_action_url_contract(
+                prospect, review_contract
+            ).allowed_labels,
+            ("Read All on Google",),
+        )
         html = build.generate_build_html(
             prospect,
             config(),
