@@ -445,6 +445,32 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             document,
         )
 
+    def test_existing_cta_accepts_submit_input_but_not_other_input_types(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {"existing_ctas": ["Free Estimates"]},
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                document,
+                '<h1>Acme Cleaning</h1><input type="submit" value="Free Estimates">',
+            ),
+            document,
+        )
+
+        for input_type in ("button", "image", "reset", "text"):
+            with (
+                self.subTest(input_type=input_type),
+                self.assertRaisesRegex(SiteExtractionError, "action label"),
+            ):
+                validate_site_analysis(
+                    document,
+                    (
+                        "<h1>Acme Cleaning</h1>"
+                        f'<input type="{input_type}" value="Free Estimates">'
+                    ),
+                )
+
     def test_contact_uri_parameters_do_not_become_contact_evidence(self):
         cases = (
             (

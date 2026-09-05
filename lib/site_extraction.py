@@ -530,9 +530,10 @@ class SourceEvidence:
                     label = _normalize_text(str(element.get("aria-label") or ""))
                 if label:
                     action_labels.add(label)
-            if element.name == "input" and str(
-                element.get("type") or ""
-            ).casefold() in {"button", "image", "reset", "submit"}:
+            if (
+                element.name == "input"
+                and str(element.get("type") or "").casefold() == "submit"
+            ):
                 label = _normalize_text(
                     str(element.get("value") or element.get("aria-label") or "")
                 )

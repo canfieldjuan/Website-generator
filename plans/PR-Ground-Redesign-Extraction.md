@@ -81,6 +81,8 @@ DOM-local record container; independently present values elsewhere on the page
 cannot be recombined. HTML comments are excluded from visible text and contact
 evidence. The downstream generation action contract is assembled only from the
 schema's action-owned fields, preserving these separations after extraction.
+Only actual submit inputs contribute input-value CTA evidence; reset, image,
+button, and text inputs cannot promote their values into published CTA copy.
 Classifications, layout choices, color selections, and image-generation guidance
 are admitted as typed derived metadata, not source facts.
 
@@ -130,9 +132,9 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 27 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 28 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests -q`: 312 tests passed; 34 skipped.
+- `python -m unittest discover -s tests -q`: 313 tests passed; 34 skipped.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.
