@@ -152,6 +152,20 @@ NOTES: [INSERT OR none]
 SITE JSON:
 [PASTE JSON HERE]
 
+SOURCE AUTHORITY BOUNDARY:
+- Source-owned identity, contact, navigation, CTA, section, trust-signal, and
+  image/link values in SITE JSON have passed local evidence admission. Those
+  values may be rendered as business facts.
+- `site.type`, brand/style selections, `site_structure`, urgency/goal booleans,
+  `booking_platform`, `platform`, `homepage_blueprint`, and
+  `image_generation_prompt` are derived design metadata. Use them only to
+  choose presentation. Never turn them into a new availability, pricing,
+  credential, geography, service, or performance claim.
+- A derived urgency value does NOT prove 24/7 service, same-day availability,
+  walk-ins, free consultations, free estimates, or any similar promise. Render
+  such a promise only when its exact source-owned wording appears elsewhere in
+  SITE JSON.
+
 ALLOWED BODY CLASSES:
 [PASTE THE CLASS CATALOG FROM 03-BASE-TEMPLATE.HTML HERE]
 
@@ -169,28 +183,34 @@ does, where it operates, and what to do next without scrolling.
 Hero section structure (always in this order):
 1. **Full-bleed hero image section** — If the JSON contains ANY image with context='hero' or 'background', you MUST render it using BOTH the `dual-cta-hero` AND `hero-fullbleed` CSS classes on the section element, with the image as an inline `style="background-image: url('[URL]')"`. The `hero-fullbleed` class handles the overlay and min-height automatically — all text will be white. This is NON-NEGOTIABLE — the hero must be a visual, image-driven section.
 2. Headline = [Primary Service or Value] + [Location]. Keep it under 8 words.
-   Example: "Emergency HVAC Repair in Effingham, IL" or "Effingham's Classic Hits & Local News"
+   Example: "Drain Cleaning in Effingham, IL" when "Drain Cleaning" is a
+   source-owned service, or "Acme Plumbing — Effingham, IL" from the grounded
+   business name and location.
    The headline is derived. Do NOT use `site.tagline` verbatim as the headline if
-   the tagline is a mission statement. Build the headline from `site.type` +
-   `site.location` plus the most specific service you can find in `sections[]`
-   or `conversion_profile.existing_ctas`. The tagline rarely makes a good headline.
+   the tagline is a mission statement. Build the headline from the most specific
+   grounded service in `sections[]` plus `site.location`. If no grounded service
+   exists, use `site.name` plus `site.location`; do not substitute `site.type` as
+   a claimed service. The tagline rarely makes a good headline.
 3. Subheadline = one concrete outcome statement -- what the visitor GETS, not what
    the business BELIEVES. Must NOT echo the headline's key phrase.
-   - CORRECT: "Full-service civil, criminal, and family law in Effingham -- call for a same-day consultation."
-   - CORRECT: "We answer 24/7. Same-day HVAC service anywhere in Madison County."
+   - CORRECT: Join exact service names and a source-owned location without adding
+     a response-time, price, outcome, or availability promise.
+   - CORRECT: Reuse one complete source-owned outcome or coverage line verbatim.
    - WRONG: "Working together as a team to provide dedicated advocacy." (this is a mission statement, not a benefit)
    - WRONG: Any tagline that starts with "We believe", "Our mission", or "Committed to"
    - WRONG: Repeating the headline's primary noun phrase. If the headline says
      "Dedicated Advocacy" the subhead must NOT also say "dedicated advocacy".
-     Pick a different angle: response time, geographic coverage, free consultation,
-     years in business, or specific service scope.
+     Pick a different source-owned angle: outcome, geographic coverage, tenure,
+     or specific service scope.
 
    SUBHEAD SOURCE PRIORITY -- pick the first available:
    a. A specific outcome line found in `conversion_profile.trust_signals.social_proof_lines` that names a service or coverage area.
-   b. A concrete service-scope line you can synthesize from `sections[]` items: "Criminal, family, and civil litigation -- free 15-minute consultations."
-   c. A response-time / availability promise tied to `conversion_profile.urgency_type`: "Same-day appointments. We answer 24/7." or "Walk-ins welcome. No appointment needed."
-   d. A geographic coverage statement: "Serving Effingham, Mattoon, and Vandalia, IL."
-   e. ONLY if none of the above are extractable, the existing `site.tagline` -- but ONLY if it does not match the mission-statement patterns above.
+   b. A concrete service-scope line assembled only from the exact service names
+      in `sections[]` items. Add no availability, price, consultation, outcome,
+      or geographic qualifier that is absent from those source-owned values.
+   c. An exact source-owned availability or geographic coverage line already
+      present in `sections[]`, `existing_ctas`, or `social_proof_lines`.
+   d. ONLY if none of the above are extractable, the existing `site.tagline` -- but ONLY if it does not match the mission-statement patterns above.
    If nothing usable exists, output NO subhead element rather than a mission statement.
 4. Dual CTAs (see below)
 5. Trust strip (see below)
@@ -206,8 +226,14 @@ Every local business has two visitor types. The design must serve both.
 
 Read conversion_profile.urgency_type from the JSON and apply the matching pattern:
 
+Urgency controls CTA layout and relative emphasis only. It is not evidence of
+hours, response time, same-day service, walk-in availability, or any other
+business promise.
+
 **urgency_type = "emergency"**
-- Primary CTA: large click-to-call button -- phone number visible in the button, accent color, "24/7" or "Same-Day" badge if applicable
+- Primary CTA: large click-to-call button -- phone number visible in the button,
+  accent color. Add a "24/7" or "Same-Day" badge only when that exact promise is
+  present in a source-owned field.
 - Secondary CTA: form or booking button, lower visual weight
 - Sticky header: phone number always visible on scroll
 
@@ -220,12 +246,13 @@ Read conversion_profile.urgency_type from the JSON and apply the matching patter
 - Two equal-weight CTAs side by side
 - Left: call button (emergency path)
 - Right: form/booking button (planned path)
-- Label the distinction: "Emergency? Call Now" vs "Schedule a Visit"
+- Label the distinction without inventing urgency copy: "Call Now" vs
+  "Schedule a Visit"
 
 CTA COPY RULE: Always use first-person or action-specific labels.
-"Get My Free Quote" not "Submit"
+"Request My Quote" not "Submit"
 "Book My Appointment" not "Book Appointment"
-"Call Now -- We Answer 24/7" not "Contact Us"
+"Call Now" not "Contact Us"
 
 ---
 

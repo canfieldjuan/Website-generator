@@ -14,6 +14,11 @@ from lib.clients import (
 from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
+from lib.site_extraction import (
+    SiteExtractionError,
+    validate_enrichment_result,
+    validate_site_analysis,
+)
 from lib.generation import (
     ActionUrlAdmissionContract,
     DEFAULT_DOCUMENT_ACCENT,
@@ -45,6 +50,7 @@ from lib.generation import (
 # the homepage redesign has real content (practice areas, team, contact
 # form) to inject -- not just a hero with nothing under it.
 ENRICHMENT_TEMPERATURE = 0.1
+ANALYSIS_HTML_TRUNCATE = 120000
 ENRICHMENT_HTML_TRUNCATE = 120000
 ENRICHMENT_PRIORITY_THRESHOLD = 2
 ENRICHABLE_PAGE_TYPES = {"services", "single-service", "team", "about", "faq", "contact"}
@@ -341,13 +347,14 @@ def _fetch_with_playwright(url):
             page = browser.new_page()
             page.goto(url, wait_until="networkidle", timeout=30000)
             content = page.content()
+            effective_url = page.url
             browser.close()
-            return content
+            return content, effective_url
     except Exception as e:
         print(f"[!] Playwright fetch failed: {e}")
         return None
 
-def fetch_and_clean_html(url):
+def fetch_and_clean_html(url, *, include_source_url=False):
     print(f"[*] Fetching URL: {url}")
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -372,6 +379,7 @@ def fetch_and_clean_html(url):
             url = alt_url
         else:
             raise
+    effective_url = getattr(response, "url", None) or url
     raw_html = response.text
 
     # Thin content detection: JS-rendered sites return < 8000 chars of visible text.
@@ -379,10 +387,15 @@ def fetch_and_clean_html(url):
     visible_text = BeautifulSoup(raw_html, "html.parser").get_text(separator=" ", strip=True)
     if len(visible_text) < 8000:
         print(f"[*] Thin content ({len(visible_text)} chars). Upgrading to headless browser fetch...")
-        playwright_html = _fetch_with_playwright(url)
+        playwright_result = _fetch_with_playwright(effective_url)
+        if isinstance(playwright_result, tuple):
+            playwright_html, playwright_url = playwright_result
+        else:
+            playwright_html, playwright_url = playwright_result, effective_url
         if playwright_html and len(playwright_html) > len(raw_html):
             print("[*] Playwright fetch succeeded -- using richer content.")
             raw_html = playwright_html
+            effective_url = playwright_url
         else:
             print("[*] Falling back to static fetch.")
 
@@ -410,7 +423,10 @@ def fetch_and_clean_html(url):
         image_comment += f"  {img_url}\n"
     image_comment += "-->"
 
-    return image_comment + "\n" + str(soup)
+    cleaned_html = image_comment + "\n" + str(soup)
+    if include_source_url:
+        return cleaned_html, effective_url
+    return cleaned_html
 
 def mirror_images_locally(site_json, output_dir):
     """Download CDN images to the output folder so they travel with the Vercel deploy.
@@ -439,22 +455,30 @@ def mirror_images_locally(site_json, output_dir):
         print(f"[*] Mirrored {mirrored} image(s) locally to {img_dir}/")
     return site_json
 
-def analyze_site(html_content):
+def analyze_site(html_content, source_url=None):
     print(f"[*] Analyzing site content with {EXTRACTION_MODEL}...")
     with open("references/01-site-analysis-prompt.md", "r") as f:
         system_prompt = f.read()
+    prompt_html = html_content[:ANALYSIS_HTML_TRUNCATE]
 
     response = get_openrouter_client().chat.completions.create(
         model=EXTRACTION_MODEL,
         response_format={ "type": "json_object" },
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": html_content[:120000]} # Truncate to avoid context window limits
+            {
+                "role": "user",
+                "content": (
+                    f"SOURCE_URL: {source_url or 'not supplied'}\n\n"
+                    f"HTML:\n{prompt_html}"
+                ),
+            },
         ],
         temperature=0.1
     )
 
-    return _extract_json_object(response.choices[0].message.content)
+    document = _extract_json_object(response.choices[0].message.content)
+    return validate_site_analysis(document, prompt_html, source_url)
 
 def enrich_site_json(site_json):
     """Fetch high-priority interior pages and merge extracted JSON chunks
@@ -506,15 +530,16 @@ def enrich_site_json(site_json):
     for page_type, url in deduped:
         print(f"[*] Enriching {page_type} from {url}...")
         try:
-            page_html = fetch_and_clean_html(url)
+            page_html, fetched_url = fetch_and_clean_html(url, include_source_url=True)
         except Exception as e:
             print(f"[!] Enrichment fetch failed for {url}: {e}")
             continue
 
+        prompt_html = page_html[:ENRICHMENT_HTML_TRUNCATE]
         user_prompt = (
             f"PAGE_TYPE: {page_type}\n"
-            f"SOURCE_URL: {url}\n\n"
-            f"HTML:\n{page_html[:ENRICHMENT_HTML_TRUNCATE]}"
+            f"SOURCE_URL: {fetched_url}\n\n"
+            f"HTML:\n{prompt_html}"
         )
 
         try:
@@ -532,6 +557,19 @@ def enrich_site_json(site_json):
             print(f"[!] Enrichment LLM call failed for {page_type} at {url}: {e}")
             continue
 
+        try:
+            result = validate_enrichment_result(
+                result,
+                page_type=page_type,
+                source_html=prompt_html,
+                source_url=fetched_url,
+            )
+        except SiteExtractionError as e:
+            print(
+                f"[!] Enrichment source validation failed for {page_type} at {url}: {e}"
+            )
+            continue
+
         if not isinstance(result, dict) or not result:
             print(f"[*] Enrichment for {page_type} returned empty; skipping.")
             continue
@@ -540,11 +578,10 @@ def enrich_site_json(site_json):
             form_fields = result.get("form_fields")
             contact_info = result.get("contact_info") or {}
             has_form = isinstance(form_fields, list) and len(form_fields) > 0
-            has_info = any(contact_info.get(k) for k in ("phone", "email", "address", "hours"))
+            has_info = any(contact_info.get(k) for k in ("phone", "email", "address", "addresses", "hours"))
             if not (has_form or has_info):
                 print(f"[*] Enrichment for contact at {url} had no form or contact info; skipping.")
                 continue
-            result.setdefault("source_url", url)
             if "contact_form" not in site_json:
                 site_json["contact_form"] = result
                 summary = f"{len(form_fields) if has_form else 0} form field(s)"
@@ -557,7 +594,6 @@ def enrich_site_json(site_json):
             if not isinstance(section_type, str) or not isinstance(items, list) or len(items) == 0:
                 print(f"[*] Enrichment for {page_type} at {url} had no usable items; skipping.")
                 continue
-            result.setdefault("source_url", url)
             site_json.setdefault("sections", []).append(result)
             print(f"[*] Enriched {page_type} from {url}: {len(items)} item(s)")
 
@@ -814,10 +850,10 @@ def main(
     site_slug = domain.replace(".", "-")
     
     # 1. Fetch & Clean
-    html_content = fetch_and_clean_html(url)
+    html_content, fetched_url = fetch_and_clean_html(url, include_source_url=True)
     
     # 2. Analyze (Extract Info & JSON)
-    site_json = analyze_site(html_content)
+    site_json = analyze_site(html_content, source_url=fetched_url)
 
     # 2.1 Enrich with interior page content so the homepage redesign has
     # real services / team / contact data, not just whatever was on the

@@ -1,0 +1,605 @@
+"""Local structure and source-evidence admission for URL redesign extraction."""
+
+from __future__ import annotations
+
+import copy
+import html
+import json
+import re
+import unicodedata
+from dataclasses import dataclass
+from typing import Any, Iterable
+from urllib.parse import urljoin
+
+from bs4 import BeautifulSoup
+from jsonschema import Draft202012Validator
+
+
+MAX_ANALYSIS_BYTES = 200_000
+MAX_TEXT_LENGTH = 20_000
+MAX_ITEMS = 200
+
+
+class SiteExtractionError(ValueError):
+    """Raised when model extraction is not structurally and evidentially safe."""
+
+
+def _string(*, nullable: bool = False, max_length: int = MAX_TEXT_LENGTH) -> dict:
+    value = {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": max_length,
+        "pattern": r"\S",
+    }
+    return {"anyOf": [value, {"type": "null"}]} if nullable else value
+
+
+def _array(items: dict, *, max_items: int = MAX_ITEMS) -> dict:
+    return {"type": "array", "items": items, "maxItems": max_items}
+
+
+def _object(properties: dict[str, dict], *, required: Iterable[str] = ()) -> dict:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(required),
+        "additionalProperties": False,
+    }
+
+
+TEXT = _string()
+NULLABLE_TEXT = _string(nullable=True)
+URL = _string(max_length=8_192)
+NULLABLE_URL = _string(nullable=True, max_length=8_192)
+
+CONTACT_SCHEMA = _object(
+    {
+        "phone": NULLABLE_TEXT,
+        "email": NULLABLE_TEXT,
+        "address": NULLABLE_TEXT,
+        "addresses": _array(TEXT),
+        "hours": NULLABLE_TEXT,
+    }
+)
+
+CONTENT_ITEM_SCHEMA = _object(
+    {
+        "title": NULLABLE_TEXT,
+        "description": NULLABLE_TEXT,
+        "url": NULLABLE_URL,
+        "image_url": NULLABLE_URL,
+        "tag": NULLABLE_TEXT,
+        "date": NULLABLE_TEXT,
+        "meta": NULLABLE_TEXT,
+    }
+)
+
+SITE_ANALYSIS_SCHEMA = _object(
+    {
+        "site": _object(
+            {
+                "name": TEXT,
+                "tagline": NULLABLE_TEXT,
+                "type": TEXT,
+                "location": NULLABLE_TEXT,
+                "contact": CONTACT_SCHEMA,
+            },
+            required=("name",),
+        ),
+        "brand": _object(
+            {
+                "logo_url": NULLABLE_URL,
+                "colors": _object(
+                    {
+                        "raw": _array(TEXT),
+                        "background": NULLABLE_TEXT,
+                        "primary": NULLABLE_TEXT,
+                        "secondary": NULLABLE_TEXT,
+                        "text": NULLABLE_TEXT,
+                        "link": NULLABLE_TEXT,
+                        "nav_bg": NULLABLE_TEXT,
+                        "button_bg": NULLABLE_TEXT,
+                    }
+                ),
+                "color_mode": TEXT,
+                "fonts": _object({"display": NULLABLE_TEXT, "body": NULLABLE_TEXT}),
+                "style_notes": _array(TEXT),
+            }
+        ),
+        "nav": _array(_object({"label": TEXT, "url": URL}, required=("label", "url"))),
+        "cta": _object({"label": NULLABLE_TEXT, "url": NULLABLE_URL}),
+        "sections": _array(
+            _object(
+                {
+                    "type": TEXT,
+                    "headline": NULLABLE_TEXT,
+                    "items": _array(CONTENT_ITEM_SCHEMA),
+                    "source_url": URL,
+                },
+                required=("type",),
+            )
+        ),
+        "images": _array(
+            _object(
+                {"url": URL, "alt": NULLABLE_TEXT, "context": TEXT},
+                required=("url", "context"),
+            )
+        ),
+        "image_generation_prompt": NULLABLE_TEXT,
+        "social": _array(
+            _object({"platform": TEXT, "url": URL}, required=("platform", "url"))
+        ),
+        "footer_links": _array(
+            _object({"label": TEXT, "url": URL}, required=("label", "url"))
+        ),
+        "pages_to_fetch": _array(
+            _object(
+                {
+                    "label": TEXT,
+                    "url": URL,
+                    "page_type": TEXT,
+                    "priority": {"type": "integer", "minimum": 1, "maximum": 3},
+                    "fetchable": {"type": "boolean"},
+                },
+                required=("label", "url", "page_type", "priority", "fetchable"),
+            )
+        ),
+        "site_structure": TEXT,
+        "single_page_sections": _array(
+            _object(
+                {
+                    "nav_label": TEXT,
+                    "anchor": NULLABLE_URL,
+                    "page_type": TEXT,
+                    "content": _object(
+                        {
+                            "headline": NULLABLE_TEXT,
+                            "body_text": NULLABLE_TEXT,
+                            "items": _array(CONTENT_ITEM_SCHEMA),
+                            "form_fields": _array(TEXT),
+                            "contact_info": CONTACT_SCHEMA,
+                        }
+                    ),
+                },
+                required=("nav_label", "page_type"),
+            )
+        ),
+        "conversion_profile": _object(
+            {
+                "urgency_type": TEXT,
+                "primary_goal": TEXT,
+                "has_emergency_service": {"type": "boolean"},
+                "phone": NULLABLE_TEXT,
+                "booking_platform": NULLABLE_TEXT,
+                "existing_ctas": _array(TEXT),
+                "trust_signals": _object(
+                    {
+                        "review_summary": NULLABLE_TEXT,
+                        "certifications": _array(TEXT),
+                        "awards": _array(TEXT),
+                        "social_proof_lines": _array(TEXT),
+                    }
+                ),
+            }
+        ),
+        "homepage_blueprint": _object(
+            {
+                "hero_type": TEXT,
+                "above_fold_form": {"type": "boolean"},
+                "section_sequence": _array(TEXT),
+                "footer_layout": TEXT,
+                "notes": NULLABLE_TEXT,
+            }
+        ),
+        "platform": {
+            "anyOf": [
+                TEXT,
+                _object({"detected": TEXT}, required=("detected",)),
+            ]
+        },
+    },
+    required=("site",),
+)
+
+ENRICHMENT_ITEM_SCHEMA = _object(
+    {
+        "title": NULLABLE_TEXT,
+        "url": NULLABLE_URL,
+        "image_url": NULLABLE_URL,
+        "tag": NULLABLE_TEXT,
+        "meta": NULLABLE_TEXT,
+    }
+)
+
+CONTENT_ENRICHMENT_SCHEMA = _object(
+    {
+        "type": TEXT,
+        "headline": NULLABLE_TEXT,
+        "items": _array(ENRICHMENT_ITEM_SCHEMA),
+        "source_url": URL,
+    },
+    required=("type", "items", "source_url"),
+)
+
+CONTACT_ENRICHMENT_SCHEMA = _object(
+    {
+        "form_fields": _array(TEXT),
+        "contact_info": CONTACT_SCHEMA,
+        "source_url": URL,
+    },
+    required=("source_url",),
+)
+
+_ANALYSIS_VALIDATOR = Draft202012Validator(SITE_ANALYSIS_SCHEMA)
+_CONTENT_ENRICHMENT_VALIDATOR = Draft202012Validator(CONTENT_ENRICHMENT_SCHEMA)
+_CONTACT_ENRICHMENT_VALIDATOR = Draft202012Validator(CONTACT_ENRICHMENT_SCHEMA)
+
+_TEXT_ATTRIBUTES = {
+    "alt",
+    "title",
+    "aria-label",
+    "placeholder",
+    "value",
+    "content",
+}
+_URL_ATTRIBUTES = {
+    "href",
+    "src",
+    "data-src",
+    "data-lazy-src",
+    "data-original",
+    "action",
+    "formaction",
+}
+_IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
+_EMAIL_PATTERN = re.compile(
+    r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@"
+    r"(?:[A-Z0-9-]{1,63}\.)+[A-Z]{2,63}(?![A-Z0-9-])",
+    re.I,
+)
+_PHONE_PATTERN = re.compile(
+    r"(?<!\d)(?:\+?1[\s.()-]*)?(?:\(?\d{3}\)?[\s.()-]*)"
+    r"\d{3}[\s.-]*\d{4}(?:\s*(?:x|ext\.?)[\s]*\d+)?(?!\d)",
+    re.I,
+)
+_CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
+
+
+def _normalize_text(value: str) -> str:
+    decoded = html.unescape(value)
+    normalized = unicodedata.normalize("NFKC", decoded)
+    return " ".join(normalized.split()).casefold()
+
+
+def _phone_variants(value: str) -> set[str]:
+    digits = "".join(character for character in value if character.isdigit())
+    variants = {digits} if len(digits) >= 7 else set()
+    if len(digits) == 11 and digits.startswith("1"):
+        variants.add(digits[1:])
+    return variants
+
+
+def _attribute_values(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        yield from (item for item in value if isinstance(item, str))
+
+
+@dataclass(frozen=True)
+class SourceEvidence:
+    text: str
+    urls: frozenset[str]
+    image_urls: frozenset[str]
+    emails: frozenset[str]
+    phones: frozenset[str]
+
+    @classmethod
+    def from_html(cls, source_html: str, source_url: str | None) -> "SourceEvidence":
+        if not isinstance(source_html, str) or not source_html.strip():
+            raise SiteExtractionError("Source HTML must be non-empty text.")
+        if source_url is not None and (
+            not isinstance(source_url, str) or not source_url.strip()
+        ):
+            raise SiteExtractionError(
+                "Source URL must be non-empty text when supplied."
+            )
+
+        soup = BeautifulSoup(source_html, "html.parser")
+        text_parts = list(soup.stripped_strings)
+        raw_urls: set[str] = set()
+        raw_image_urls: set[str] = set()
+        contact_values: list[str] = list(text_parts)
+
+        for element in soup.find_all(True):
+            for name, raw_value in element.attrs.items():
+                for value in _attribute_values(raw_value):
+                    if name in _TEXT_ATTRIBUTES:
+                        text_parts.append(value)
+                        contact_values.append(value)
+                    if name in _URL_ATTRIBUTES:
+                        raw_urls.add(value)
+                        contact_values.append(value)
+                    if name in _IMAGE_ATTRIBUTES:
+                        raw_image_urls.add(value)
+                    if name == "srcset":
+                        srcset_urls = {
+                            candidate.strip().split()[0]
+                            for candidate in value.split(",")
+                            if candidate.strip()
+                        }
+                        raw_urls.update(srcset_urls)
+                        raw_image_urls.update(srcset_urls)
+                    if name == "content":
+                        property_name = str(
+                            element.get("property") or element.get("name") or ""
+                        ).casefold()
+                        if "image" in property_name:
+                            raw_urls.add(value)
+                            raw_image_urls.add(value)
+                        elif (
+                            value.strip()
+                            .lower()
+                            .startswith(("http://", "https://", "//"))
+                        ):
+                            raw_urls.add(value)
+                style = element.get("style")
+                if isinstance(style, str):
+                    raw_image_urls.update(_CSS_URL_PATTERN.findall(style))
+
+        for style in soup.find_all("style"):
+            raw_image_urls.update(_CSS_URL_PATTERN.findall(style.get_text(" ")))
+        raw_urls.update(raw_image_urls)
+
+        def resolved(values: Iterable[str]) -> frozenset[str]:
+            admitted: set[str] = set()
+            for raw in values:
+                candidate = html.unescape(raw).strip()
+                if not candidate:
+                    continue
+                admitted.add(candidate)
+                if source_url:
+                    admitted.add(urljoin(source_url, candidate))
+            return frozenset(admitted)
+
+        normalized_contacts = " ".join(contact_values)
+        emails = {
+            match.group(0).casefold()
+            for match in _EMAIL_PATTERN.finditer(normalized_contacts)
+        }
+        phones: set[str] = set()
+        for match in _PHONE_PATTERN.finditer(normalized_contacts):
+            phones.update(_phone_variants(match.group(0)))
+
+        return cls(
+            text=_normalize_text(" ".join(text_parts)),
+            urls=resolved(raw_urls),
+            image_urls=resolved(raw_image_urls),
+            emails=frozenset(emails),
+            phones=frozenset(phones),
+        )
+
+    def require_text(self, path: str, value: Any) -> None:
+        if value is None:
+            return
+        normalized = _normalize_text(value)
+        if not normalized or normalized not in self.text:
+            raise SiteExtractionError(f"{path} is not grounded in source text.")
+
+    def require_email(self, path: str, value: Any) -> None:
+        if value is None:
+            return
+        if value.strip().casefold() not in self.emails:
+            raise SiteExtractionError(f"{path} is not grounded in a source email.")
+
+    def require_phone(self, path: str, value: Any) -> None:
+        if value is None:
+            return
+        if not (_phone_variants(value) & self.phones):
+            raise SiteExtractionError(f"{path} is not grounded in a source phone.")
+
+    def require_url(self, path: str, value: Any, *, image: bool = False) -> None:
+        if value is None:
+            return
+        allowed = self.image_urls if image else self.urls
+        if html.unescape(value).strip() not in allowed:
+            kind = "image URL" if image else "URL"
+            raise SiteExtractionError(f"{path} is not grounded in a source {kind}.")
+
+
+def _validation_error(validator: Draft202012Validator, document: Any) -> str | None:
+    try:
+        encoded = json.dumps(
+            document, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as exc:
+        return f"Extraction is not bounded JSON: {exc}"
+    if len(encoded) > MAX_ANALYSIS_BYTES:
+        return "Extraction exceeds the local analysis size limit."
+    errors = sorted(validator.iter_errors(document), key=lambda error: list(error.path))
+    if not errors:
+        return None
+    error = errors[0]
+    path = ".".join(str(part) for part in error.absolute_path) or "root"
+    return f"Extraction schema rejected {path}: {error.message}"
+
+
+def _require_contact(evidence: SourceEvidence, path: str, contact: Any) -> None:
+    if not isinstance(contact, dict):
+        return
+    evidence.require_phone(f"{path}.phone", contact.get("phone"))
+    evidence.require_email(f"{path}.email", contact.get("email"))
+    evidence.require_text(f"{path}.address", contact.get("address"))
+    for index, address in enumerate(contact.get("addresses") or []):
+        evidence.require_text(f"{path}.addresses[{index}]", address)
+    evidence.require_text(f"{path}.hours", contact.get("hours"))
+
+
+def _require_content_items(
+    evidence: SourceEvidence,
+    path: str,
+    items: Any,
+    *,
+    verify_tag: bool = True,
+) -> None:
+    for index, item in enumerate(items or []):
+        item_path = f"{path}[{index}]"
+        evidence.require_text(f"{item_path}.title", item.get("title"))
+        evidence.require_text(f"{item_path}.description", item.get("description"))
+        evidence.require_url(f"{item_path}.url", item.get("url"))
+        evidence.require_url(
+            f"{item_path}.image_url", item.get("image_url"), image=True
+        )
+        if verify_tag:
+            evidence.require_text(f"{item_path}.tag", item.get("tag"))
+        evidence.require_text(f"{item_path}.date", item.get("date"))
+        evidence.require_text(f"{item_path}.meta", item.get("meta"))
+
+
+def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
+    site = document["site"]
+    evidence.require_text("site.name", site["name"])
+    evidence.require_text("site.tagline", site.get("tagline"))
+    evidence.require_text("site.location", site.get("location"))
+    _require_contact(evidence, "site.contact", site.get("contact"))
+
+    brand = document.get("brand") or {}
+    evidence.require_url("brand.logo_url", brand.get("logo_url"), image=True)
+
+    for index, item in enumerate(document.get("nav") or []):
+        evidence.require_text(f"nav[{index}].label", item["label"])
+        evidence.require_url(f"nav[{index}].url", item["url"])
+    cta = document.get("cta") or {}
+    evidence.require_text("cta.label", cta.get("label"))
+    evidence.require_url("cta.url", cta.get("url"))
+
+    for index, section in enumerate(document.get("sections") or []):
+        path = f"sections[{index}]"
+        evidence.require_text(f"{path}.headline", section.get("headline"))
+        _require_content_items(evidence, f"{path}.items", section.get("items"))
+
+    for index, image in enumerate(document.get("images") or []):
+        evidence.require_url(f"images[{index}].url", image["url"], image=True)
+        evidence.require_text(f"images[{index}].alt", image.get("alt"))
+    for index, social in enumerate(document.get("social") or []):
+        evidence.require_url(f"social[{index}].url", social["url"])
+    for index, item in enumerate(document.get("footer_links") or []):
+        evidence.require_text(f"footer_links[{index}].label", item["label"])
+        evidence.require_url(f"footer_links[{index}].url", item["url"])
+    for index, page in enumerate(document.get("pages_to_fetch") or []):
+        evidence.require_text(f"pages_to_fetch[{index}].label", page["label"])
+        evidence.require_url(f"pages_to_fetch[{index}].url", page["url"])
+
+    for index, section in enumerate(document.get("single_page_sections") or []):
+        path = f"single_page_sections[{index}]"
+        evidence.require_text(f"{path}.nav_label", section["nav_label"])
+        evidence.require_url(f"{path}.anchor", section.get("anchor"))
+        content = section.get("content") or {}
+        evidence.require_text(f"{path}.content.headline", content.get("headline"))
+        evidence.require_text(f"{path}.content.body_text", content.get("body_text"))
+        _require_content_items(evidence, f"{path}.content.items", content.get("items"))
+        for field_index, field in enumerate(content.get("form_fields") or []):
+            evidence.require_text(f"{path}.content.form_fields[{field_index}]", field)
+        _require_contact(
+            evidence, f"{path}.content.contact_info", content.get("contact_info")
+        )
+
+    conversion = document.get("conversion_profile") or {}
+    evidence.require_phone("conversion_profile.phone", conversion.get("phone"))
+    for index, label in enumerate(conversion.get("existing_ctas") or []):
+        evidence.require_text(f"conversion_profile.existing_ctas[{index}]", label)
+    trust = conversion.get("trust_signals") or {}
+    evidence.require_text(
+        "conversion_profile.trust_signals.review_summary",
+        trust.get("review_summary"),
+    )
+    for field in ("certifications", "awards", "social_proof_lines"):
+        for index, value in enumerate(trust.get(field) or []):
+            evidence.require_text(
+                f"conversion_profile.trust_signals.{field}[{index}]", value
+            )
+
+
+def validate_site_analysis(
+    document: Any, source_html: str, source_url: str | None = None
+) -> dict:
+    """Admit one homepage analysis only when its source-owned facts are grounded."""
+    admitted = copy.deepcopy(document)
+    sections = admitted.get("sections") if isinstance(admitted, dict) else None
+    if isinstance(sections, list) and source_url:
+        for section in sections:
+            if isinstance(section, dict):
+                section["source_url"] = source_url
+    error = _validation_error(_ANALYSIS_VALIDATOR, admitted)
+    if error:
+        raise SiteExtractionError(error)
+    evidence = SourceEvidence.from_html(source_html, source_url)
+    _require_site_facts(admitted, evidence)
+    return admitted
+
+
+def validate_enrichment_result(
+    document: Any,
+    *,
+    page_type: str,
+    source_html: str,
+    source_url: str,
+) -> dict:
+    """Admit one optional enrichment chunk and assign code-owned provenance."""
+    if not isinstance(document, dict):
+        raise SiteExtractionError("Enrichment must contain one object.")
+    admitted = copy.deepcopy(document)
+    admitted["source_url"] = source_url
+    validator = (
+        _CONTACT_ENRICHMENT_VALIDATOR
+        if page_type == "contact"
+        else _CONTENT_ENRICHMENT_VALIDATOR
+    )
+    error = _validation_error(validator, admitted)
+    if error:
+        raise SiteExtractionError(error)
+    evidence = SourceEvidence.from_html(source_html, source_url)
+
+    if page_type == "contact":
+        for index, field in enumerate(admitted.get("form_fields") or []):
+            evidence.require_text(f"form_fields[{index}]", field)
+        _require_contact(evidence, "contact_info", admitted.get("contact_info"))
+        contact_info = admitted.get("contact_info") or {}
+        has_contact_info = any(
+            contact_info.get(field)
+            for field in ("phone", "email", "address", "addresses", "hours")
+        )
+        if not (admitted.get("form_fields") or has_contact_info):
+            raise SiteExtractionError("Contact enrichment contains no source content.")
+        return admitted
+
+    expected_type = {
+        "services": "services",
+        "single-service": "services",
+        "team": "team",
+        "about": "misc",
+        "faq": "misc",
+    }.get(page_type)
+    if expected_type is None or admitted["type"] != expected_type:
+        raise SiteExtractionError(
+            "Enrichment type does not match the page type selected by code."
+        )
+    if not admitted["items"]:
+        raise SiteExtractionError("Content enrichment contains no source items.")
+    evidence.require_text("headline", admitted.get("headline"))
+    derived_tag = (
+        "about" if page_type == "about" else "faq" if page_type == "faq" else None
+    )
+    if derived_tag is not None:
+        for item in admitted["items"]:
+            if item.get("tag") != derived_tag:
+                raise SiteExtractionError(
+                    "Enrichment item tag does not match the page type selected by code."
+                )
+    _require_content_items(
+        evidence,
+        "items",
+        admitted["items"],
+        verify_tag=derived_tag is None,
+    )
+    return admitted
