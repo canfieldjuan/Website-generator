@@ -322,7 +322,9 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for html, conversion_profile in cases:
             with (
                 self.subTest(html=html),
-                self.assertRaisesRegex(SiteExtractionError, "grounded|negation"),
+                self.assertRaisesRegex(
+                    SiteExtractionError, "grounded|assertion context"
+                ),
             ):
                 validate_site_analysis(
                     {
@@ -340,7 +342,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             validate_site_analysis(
                 complete_claim,
-                "<h1>Acme Cleaning</h1><p>No Surprise Fees</p>",
+                "<h1>Acme Cleaning</h1><button>No Surprise Fees</button>",
             ),
             complete_claim,
         )
@@ -379,7 +381,9 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
 
         postposed_positive = {
             "site": {"name": "Acme Cleaning"},
-            "conversion_profile": {"existing_ctas": ["Free Estimates"]},
+            "conversion_profile": {
+                "trust_signals": {"social_proof_lines": ["Free Estimates"]}
+            },
         }
         for source_text in (
             "Free Estimates are not only available but easy to request",
@@ -393,6 +397,103 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     ),
                     postposed_positive,
                 )
+
+    def test_claim_text_rejects_questions_conditionals_and_inline_negation(self):
+        cases = (
+            (
+                "<p>Do you offer <strong>Free Estimates</strong>?</p>",
+                {"existing_ctas": ["Free Estimates"]},
+            ),
+            (
+                "<p>If eligible, <strong>Free Estimates</strong> are available.</p>",
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
+            (
+                "<p><span>No</span> <strong>Free Estimates</strong></p>",
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
+            (
+                "<p><strong>Free Estimates</strong> <span>are not available</span></p>",
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
+        )
+        for source, conversion_profile in cases:
+            with (
+                self.subTest(source=source),
+                self.assertRaisesRegex(
+                    SiteExtractionError, "action label|assertion context"
+                ),
+            ):
+                validate_site_analysis(
+                    {
+                        "site": {"name": "Acme Cleaning"},
+                        "conversion_profile": conversion_profile,
+                    },
+                    f"<h1>Acme Cleaning</h1>{source}",
+                )
+
+    def test_existing_cta_requires_an_exact_source_action_label(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {"existing_ctas": ["Free Estimates"]},
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                document,
+                "<h1>Acme Cleaning</h1><button><strong>Free Estimates</strong></button>",
+            ),
+            document,
+        )
+
+    def test_contact_uri_parameters_do_not_become_contact_evidence(self):
+        cases = (
+            (
+                {"phone": "217-555-0100"},
+                '<a href="mailto:real@acme.test?body=Call%20217-555-0100">Email</a>',
+                "source phone",
+            ),
+            (
+                {"email": "billing@acme.test"},
+                '<a href="tel:217-555-0100?note=billing@acme.test">Call</a>',
+                "source email",
+            ),
+            (
+                {"phone": "217-555-0100"},
+                '<a href="mailto:2175550100@acme.test">Email</a>',
+                "source phone",
+            ),
+            (
+                {"email": "billing@acme.test"},
+                '<a href="tel:billing@acme.test">Call</a>',
+                "source email",
+            ),
+        )
+        for contact, link, error in cases:
+            with (
+                self.subTest(contact=contact),
+                self.assertRaisesRegex(SiteExtractionError, error),
+            ):
+                validate_site_analysis(
+                    {"site": {"name": "Acme Cleaning", "contact": contact}},
+                    f"<h1>Acme Cleaning</h1>{link}",
+                    "https://acme.test/",
+                )
+
+    def test_image_resources_cannot_be_repurposed_as_action_urls(self):
+        with self.assertRaisesRegex(SiteExtractionError, r"cta\.url"):
+            validate_site_analysis(
+                {
+                    "site": {"name": "Acme Cleaning"},
+                    "cta": {"label": "Contact", "url": "https://acme.test/hero.jpg"},
+                },
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    '<a href="/contact">Contact</a>'
+                    '<link rel="preload" as="image" href="/hero.jpg">'
+                    '<img src="/hero.jpg" alt="Crew">'
+                ),
+                "https://acme.test/",
+            )
 
     def test_resource_urls_do_not_become_contact_evidence(self):
         cases = (
@@ -521,6 +622,34 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 ),
                 source_url="https://acme.test/about",
             )
+
+    def test_faq_enrichment_uses_code_owned_derived_headline(self):
+        document = {
+            "type": "misc",
+            "headline": "FAQ",
+            "items": [
+                {
+                    "title": "Do you offer recurring cleaning?",
+                    "url": None,
+                    "image_url": None,
+                    "tag": "faq",
+                    "meta": "Yes, weekly and biweekly service is available.",
+                }
+            ],
+        }
+
+        admitted = validate_enrichment_result(
+            document,
+            page_type="faq",
+            source_html=(
+                "<h1>Frequently Asked Questions</h1>"
+                "<h2>Do you offer recurring cleaning?</h2>"
+                "<p>Yes, weekly and biweekly service is available.</p>"
+            ),
+            source_url="https://acme.test/questions",
+        )
+
+        self.assertEqual(admitted["headline"], "FAQ")
 
     def test_pipeline_skips_invalid_enrichment_without_mutating_site_json(self):
         site_json = {

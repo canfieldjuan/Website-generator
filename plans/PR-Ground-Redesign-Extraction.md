@@ -67,10 +67,14 @@ bounded JSON Schema accepts only the analysis shape consumed by the pipeline.
 Before source admission, the verifier parses the exact cleaned HTML slice supplied
 to the extraction model, normalizes browser-equivalent text, gathers link/image
 attributes and their source-relative absolute forms, and checks every
-source-owned leaf through a field-specific evidence rule. Phone and email fields
-use canonical comparison against visible text or explicit `tel:`/`mailto:`
-destinations rather than arbitrary resource URLs; URL and image fields must match
-an observed attribute or its deterministic source-relative resolution.
+source-owned leaf through a field-specific evidence rule. Claim-bearing text uses
+DOM-local assertion contexts so inline markup cannot hide negation while separate
+elements cannot alter one another's meaning. CTA labels must exactly match an
+interactive element. Phone and email fields use canonical comparison against
+visible text or the scheme-specific `tel:`/`mailto:` destination, excluding URI
+parameters and cross-scheme tokens. Action destinations and image resources are
+separate evidence sets and must match an observed attribute or its deterministic
+source-relative resolution.
 Classifications, layout choices, color selections, and image-generation guidance
 are admitted as typed derived metadata, not source facts.
 
@@ -98,6 +102,8 @@ business-specific claims.
   a page-wide compact substring for URLs or contacts, and shortened text cannot
   drop nearby source negation before or after the phrase or match inside a larger
   word.
+- The enrichment page type selected by code owns the generic `FAQ` presentation
+  heading; FAQ questions and answers remain verbatim source-owned content.
 - Derived fields remain in the established document shape for design continuity,
   but generation instructions explicitly prevent them from authorizing factual
   copy.
@@ -118,9 +124,9 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 19 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 24 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests`: 304 tests passed; 34 skipped.
+- `python -m unittest discover -s tests -q`: 309 tests passed; 34 skipped.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.
@@ -138,7 +144,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 1,607 insertions and 46 deletions across seven files. This
+The reviewed diff is 1,863 insertions and 46 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

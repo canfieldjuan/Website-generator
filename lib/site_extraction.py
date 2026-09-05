@@ -9,7 +9,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Iterable
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 from jsonschema import Draft202012Validator
@@ -235,16 +235,41 @@ _TEXT_ATTRIBUTES = {
     "value",
     "content",
 }
-_URL_ATTRIBUTES = {
-    "href",
-    "src",
-    "data-src",
-    "data-lazy-src",
-    "data-original",
-    "action",
-    "formaction",
-}
+_ACTION_URL_ATTRIBUTES = {"href", "action", "formaction"}
 _IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
+_ASSERTION_CONTEXT_TAGS = {
+    "a",
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "body",
+    "button",
+    "dd",
+    "details",
+    "div",
+    "dt",
+    "figcaption",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "label",
+    "li",
+    "main",
+    "nav",
+    "p",
+    "section",
+    "summary",
+    "td",
+    "th",
+}
+_IGNORED_TEXT_TAGS = {"noscript", "script", "style", "template"}
 _EMAIL_PATTERN = re.compile(
     r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@"
     r"(?:[A-Z0-9-]{1,63}\.)+[A-Z]{2,63}(?![A-Z0-9-])",
@@ -281,6 +306,9 @@ _POSTPOSED_NEGATION_TERMS = frozenset(
         "expired",
         "suspended",
     }
+)
+_CONDITIONAL_TERMS = frozenset(
+    {"if", "unless", "whether", "assuming", "depending", "might", "may", "subject"}
 )
 
 
@@ -345,6 +373,34 @@ def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     return _words_contain_negation(following_words, postposed=True)
 
 
+def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
+    before = text[:start]
+    after = text[start + length :]
+    preceding_clause = re.split(r"[.!?;:]", before)[-1]
+    following_match = re.search(r"[.!?;:]", after)
+    following_clause = after[: following_match.start()] if following_match else after
+    following_boundary = following_match.group(0) if following_match else ""
+    if following_boundary == "?":
+        return True
+    surrounding_words = [
+        word.replace("’", "'")
+        for word in (
+            _WORD_PATTERN.findall(preceding_clause)[-8:]
+            + _WORD_PATTERN.findall(following_clause)[:8]
+        )
+    ]
+    return any(word in _CONDITIONAL_TERMS for word in surrounding_words)
+
+
+def _contact_destination(value: str) -> tuple[str, str] | None:
+    parsed = urlsplit(html.unescape(value).strip())
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"tel", "mailto"}:
+        return None
+    destination = unquote(parsed.path).strip()
+    return (scheme, destination) if destination else None
+
+
 def _attribute_values(value: Any) -> Iterable[str]:
     if isinstance(value, str):
         yield value
@@ -354,9 +410,10 @@ def _attribute_values(value: Any) -> Iterable[str]:
 
 @dataclass(frozen=True)
 class SourceEvidence:
-    text: str
     text_segments: tuple[str, ...]
-    urls: frozenset[str]
+    assertion_segments: tuple[str, ...]
+    action_labels: frozenset[str]
+    action_urls: frozenset[str]
     image_urls: frozenset[str]
     emails: frozenset[str]
     phones: frozenset[str]
@@ -373,20 +430,70 @@ class SourceEvidence:
             )
 
         soup = BeautifulSoup(source_html, "html.parser")
-        text_parts = list(soup.stripped_strings)
-        raw_urls: set[str] = set()
+        context_parts: dict[int, list[str]] = {}
+        visible_parts: list[str] = []
+        for node in soup.find_all(string=True):
+            value = str(node).strip()
+            if not value:
+                continue
+            parent = node.parent
+            if parent is not None and parent.name in _IGNORED_TEXT_TAGS:
+                continue
+            visible_parts.append(value)
+            context = parent
+            while context is not None and context.name not in _ASSERTION_CONTEXT_TAGS:
+                context = context.parent
+            context_parts.setdefault(id(context or node), []).append(value)
+        assertion_segments = tuple(
+            dict.fromkeys(
+                segment
+                for parts in context_parts.values()
+                if (segment := _normalize_text(" ".join(parts)))
+            )
+        )
+        attribute_parts: list[str] = []
+        raw_action_urls: set[str] = set()
         raw_image_urls: set[str] = set()
-        contact_values: list[str] = list(text_parts)
+        email_values: list[str] = list(visible_parts)
+        phone_values: list[str] = list(visible_parts)
+        action_labels: set[str] = set()
 
         for element in soup.find_all(True):
+            role = str(element.get("role") or "").casefold()
+            if element.name in {"a", "button"} or role == "button":
+                label = _normalize_text(element.get_text(" ", strip=True))
+                if not label:
+                    label = _normalize_text(str(element.get("aria-label") or ""))
+                if label:
+                    action_labels.add(label)
+            if element.name == "input" and str(
+                element.get("type") or ""
+            ).casefold() in {"button", "image", "reset", "submit"}:
+                label = _normalize_text(
+                    str(element.get("value") or element.get("aria-label") or "")
+                )
+                if label:
+                    action_labels.add(label)
             for name, raw_value in element.attrs.items():
                 for value in _attribute_values(raw_value):
                     if name in _TEXT_ATTRIBUTES:
-                        text_parts.append(value)
-                    if name in _URL_ATTRIBUTES:
-                        raw_urls.add(value)
-                        if value.strip().casefold().startswith(("tel:", "mailto:")):
-                            contact_values.append(value)
+                        attribute_parts.append(value)
+                    is_action_url = (
+                        (name == "href" and element.name in {"a", "area"})
+                        or (name == "action" and element.name == "form")
+                        or (
+                            name == "formaction" and element.name in {"button", "input"}
+                        )
+                    )
+                    if name in _ACTION_URL_ATTRIBUTES and is_action_url:
+                        raw_action_urls.add(value)
+                        contact = _contact_destination(value)
+                        if contact is not None:
+                            scheme, destination = contact
+                            if scheme == "mailto":
+                                email_values.append(destination)
+                            else:
+                                phone_values.append(destination)
                     if name in _IMAGE_ATTRIBUTES:
                         raw_image_urls.add(value)
                     if name == "srcset":
@@ -395,28 +502,19 @@ class SourceEvidence:
                             for candidate in value.split(",")
                             if candidate.strip()
                         }
-                        raw_urls.update(srcset_urls)
                         raw_image_urls.update(srcset_urls)
                     if name == "content":
                         property_name = str(
                             element.get("property") or element.get("name") or ""
                         ).casefold()
                         if "image" in property_name:
-                            raw_urls.add(value)
                             raw_image_urls.add(value)
-                        elif (
-                            value.strip()
-                            .lower()
-                            .startswith(("http://", "https://", "//"))
-                        ):
-                            raw_urls.add(value)
                 style = element.get("style")
                 if isinstance(style, str):
                     raw_image_urls.update(_CSS_URL_PATTERN.findall(style))
 
         for style in soup.find_all("style"):
             raw_image_urls.update(_CSS_URL_PATTERN.findall(style.get_text(" ")))
-        raw_urls.update(raw_image_urls)
 
         def resolved(values: Iterable[str]) -> frozenset[str]:
             admitted: set[str] = set()
@@ -429,49 +527,64 @@ class SourceEvidence:
                     admitted.add(urljoin(source_url, candidate))
             return frozenset(admitted)
 
-        normalized_contacts = " ".join(contact_values)
+        normalized_emails = " ".join(email_values)
         emails = {
             match.group(0).casefold()
-            for match in _EMAIL_PATTERN.finditer(normalized_contacts)
+            for match in _EMAIL_PATTERN.finditer(normalized_emails)
         }
+        normalized_phones = " ".join(phone_values)
         phones: set[str] = set()
-        for match in _PHONE_PATTERN.finditer(normalized_contacts):
+        for match in _PHONE_PATTERN.finditer(normalized_phones):
             phones.update(_phone_variants(match.group(0)))
 
-        normalized_segments = tuple(
+        attribute_segments = tuple(
             dict.fromkeys(
-                segment for part in text_parts if (segment := _normalize_text(part))
+                segment
+                for part in attribute_parts
+                if (segment := _normalize_text(part))
             )
         )
         return cls(
-            text=_normalize_text(" ".join(text_parts)),
-            text_segments=normalized_segments,
-            urls=resolved(raw_urls),
+            text_segments=tuple(dict.fromkeys(assertion_segments + attribute_segments)),
+            assertion_segments=assertion_segments,
+            action_labels=frozenset(action_labels),
+            action_urls=resolved(raw_action_urls),
             image_urls=resolved(raw_image_urls),
             emails=frozenset(emails),
             phones=frozenset(phones),
         )
 
-    def require_text(self, path: str, value: Any) -> None:
+    def require_text(self, path: str, value: Any, *, asserted: bool = False) -> None:
         if value is None:
             return
         normalized = _normalize_text(value)
         if not normalized:
             raise SiteExtractionError(f"{path} is not grounded in source text.")
         found = False
-        for segment in self.text_segments:
-            for index in _phrase_occurrences(segment, normalized):
+        source_segments = self.assertion_segments if asserted else self.text_segments
+        for source_text in source_segments:
+            for index in _phrase_occurrences(source_text, normalized):
                 found = True
-                if not _occurrence_is_negated(segment, index, len(normalized)):
-                    return
-        if not found:
-            for index in _phrase_occurrences(self.text, normalized):
-                found = True
-                if not _occurrence_is_negated(self.text, index, len(normalized)):
-                    return
+                if _occurrence_is_negated(source_text, index, len(normalized)):
+                    continue
+                if asserted and _occurrence_is_nonassertive(
+                    source_text, index, len(normalized)
+                ):
+                    continue
+                return
         if found:
-            raise SiteExtractionError(f"{path} drops or reverses source negation.")
+            raise SiteExtractionError(
+                f"{path} drops or reverses source assertion context."
+            )
         raise SiteExtractionError(f"{path} is not grounded in source text.")
+
+    def require_action_label(self, path: str, value: Any) -> None:
+        if value is None:
+            return
+        if _normalize_text(value) not in self.action_labels:
+            raise SiteExtractionError(
+                f"{path} is not grounded in a source action label."
+            )
 
     def require_email(self, path: str, value: Any) -> None:
         if value is None:
@@ -488,7 +601,7 @@ class SourceEvidence:
     def require_url(self, path: str, value: Any, *, image: bool = False) -> None:
         if value is None:
             return
-        allowed = self.image_urls if image else self.urls
+        allowed = self.image_urls if image else self.action_urls
         if html.unescape(value).strip() not in allowed:
             kind = "image URL" if image else "URL"
             raise SiteExtractionError(f"{path} is not grounded in a source {kind}.")
@@ -557,7 +670,7 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
         evidence.require_text(f"nav[{index}].label", item["label"])
         evidence.require_url(f"nav[{index}].url", item["url"])
     cta = document.get("cta") or {}
-    evidence.require_text("cta.label", cta.get("label"))
+    evidence.require_action_label("cta.label", cta.get("label"))
     evidence.require_url("cta.url", cta.get("url"))
 
     for index, section in enumerate(document.get("sections") or []):
@@ -594,16 +707,21 @@ def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:
     conversion = document.get("conversion_profile") or {}
     evidence.require_phone("conversion_profile.phone", conversion.get("phone"))
     for index, label in enumerate(conversion.get("existing_ctas") or []):
-        evidence.require_text(f"conversion_profile.existing_ctas[{index}]", label)
+        evidence.require_action_label(
+            f"conversion_profile.existing_ctas[{index}]", label
+        )
     trust = conversion.get("trust_signals") or {}
     evidence.require_text(
         "conversion_profile.trust_signals.review_summary",
         trust.get("review_summary"),
+        asserted=True,
     )
     for field in ("certifications", "awards", "social_proof_lines"):
         for index, value in enumerate(trust.get(field) or []):
             evidence.require_text(
-                f"conversion_profile.trust_signals.{field}[{index}]", value
+                f"conversion_profile.trust_signals.{field}[{index}]",
+                value,
+                asserted=True,
             )
 
 
@@ -668,7 +786,10 @@ def validate_enrichment_result(
         )
     if not admitted["items"]:
         raise SiteExtractionError("Content enrichment contains no source items.")
-    evidence.require_text("headline", admitted.get("headline"))
+    if page_type == "faq":
+        admitted["headline"] = "FAQ"
+    else:
+        evidence.require_text("headline", admitted.get("headline"))
     derived_tag = (
         "about" if page_type == "about" else "faq" if page_type == "faq" else None
     )
