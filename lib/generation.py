@@ -400,6 +400,7 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     phones = _contract_text_values(contract.phones, "Action phone")
     emails = _contract_text_values(contract.emails, "Action email")
     allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
+    neutral_terms = sorted(_NEUTRAL_ACTION_LABEL_TERMS)
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
         "are allowed. Every other generated anchor, form action, or submit "
@@ -409,11 +410,11 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
         "a `mailto:` target matching one of "
         f"{json.dumps(emails, ensure_ascii=False)}. Do not invent, shorten, or "
         "substitute a booking, social, navigation, or form destination. "
-        "A label that promises booking, scheduling, a quote, an estimate, an "
-        "appointment, a reservation, or a consultation must exactly copy one "
-        "source label from "
-        f"{json.dumps(allowed_labels, ensure_ascii=False)}. Otherwise use "
-        "capability-neutral source wording such as Contact Us or Submit."
+        "Every generated action label must exactly copy one source label from "
+        f"{json.dumps(allowed_labels, ensure_ascii=False)}, display an admitted "
+        "phone/email value, or use plainly navigational/contact wording composed "
+        "only from these neutral terms: "
+        f"{json.dumps(neutral_terms, ensure_ascii=False)}."
     )
 
 
@@ -2074,12 +2075,72 @@ def _contract_text_values(values: object, label: str) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-_CAPABILITY_ACTION_LABEL_PATTERN = re.compile(
-    r"\b(?:book(?:ing)?|schedul(?:e|ing)|quotes?|estimates?|appointments?|"
-    r"reserv(?:e|ations?)|consultations?|orders?|ordering|purchas(?:e|es|ing)|"
-    r"buys?|shop(?:ping)?|checkout|pay(?:ment|ments|ing)?|carts?)\b",
-    re.I,
+_NEUTRAL_ACTION_LABEL_TERMS = frozenset(
+    {
+        "about",
+        "action",
+        "all",
+        "area",
+        "back",
+        "blog",
+        "call",
+        "close",
+        "collapse",
+        "contact",
+        "content",
+        "coverage",
+        "details",
+        "directions",
+        "email",
+        "expand",
+        "explore",
+        "faq",
+        "gallery",
+        "get",
+        "home",
+        "in",
+        "learn",
+        "main",
+        "map",
+        "meet",
+        "menu",
+        "message",
+        "more",
+        "navigation",
+        "next",
+        "on",
+        "open",
+        "our",
+        "previous",
+        "read",
+        "request",
+        "reviews",
+        "see",
+        "send",
+        "services",
+        "service",
+        "show",
+        "site",
+        "skip",
+        "source",
+        "submit",
+        "team",
+        "text",
+        "the",
+        "to",
+        "touch",
+        "us",
+        "view",
+        "visit",
+        "website",
+        "work",
+    }
 )
+
+
+def _is_neutral_action_label(value: str) -> bool:
+    tokens = _alphanumeric_tokens(value)
+    return bool(tokens) and all(token in _NEUTRAL_ACTION_LABEL_TERMS for token in tokens)
 
 
 def _generated_action_label(element: Tag) -> str:
@@ -2186,13 +2247,19 @@ def _validate_action_urls(
         )
 
     for action_label in action_labels:
-        if (
-            _CAPABILITY_ACTION_LABEL_PATTERN.search(action_label)
-            and _normalize_claim_match_text(action_label) not in allowed_labels
-        ):
+        normalized_label = _normalize_claim_match_text(action_label)
+        if normalized_label in allowed_labels or _is_neutral_action_label(action_label):
+            continue
+        phone_values = _phone_like_digit_values(action_label)
+        if len(phone_values) == 1 and not phone_values.isdisjoint(allowed_phone_digits):
+            continue
+        mailbox = _canonical_email_value(action_label)
+        if mailbox is not None and mailbox in allowed_emails:
+            continue
+        if normalized_label:
             raise GeneratedBodyError(
-                "Generated body contains a capability-bearing action label "
-                "that is not an exact source-owned action label."
+                "Generated body contains a non-neutral action label that is not "
+                f"an exact source-owned action label: {action_label!r}."
             )
 
 

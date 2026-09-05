@@ -139,6 +139,10 @@ def _redesign_action_url_contract(
     allowed_urls = []
     allowed_labels = []
 
+    site = site_json.get("site")
+    if isinstance(site, dict):
+        _append_source_value(allowed_labels, site.get("name"))
+
     def append_field(value, field="url"):
         if isinstance(value, dict):
             _append_source_value(allowed_urls, value.get(field))
@@ -151,6 +155,8 @@ def _redesign_action_url_contract(
         if isinstance(items, list):
             for item in items:
                 append_field(item)
+                if isinstance(item, dict) and item.get("url") is not None:
+                    _append_source_value(allowed_labels, item.get("title"))
 
     for item in site_json.get("nav") or ():
         append_field(item)
@@ -165,6 +171,8 @@ def _redesign_action_url_contract(
     append_field(site_json.get("contact_form") or {}, "source_url")
     for item in site_json.get("social") or ():
         append_field(item)
+        if isinstance(item, dict):
+            _append_source_value(allowed_labels, item.get("platform"))
     for item in site_json.get("footer_links") or ():
         append_field(item)
         append_label_field(item)

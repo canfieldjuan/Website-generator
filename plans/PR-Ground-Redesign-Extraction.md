@@ -54,6 +54,7 @@ analysis may control presentation but may not authorize a visible business claim
 
 ### Files touched
 
+- `build.py`
 - `lib/site_extraction.py`
 - `lib/generation.py`
 - `pipeline.py`
@@ -86,13 +87,12 @@ DOM-local record container; independently present values elsewhere on the page
 cannot be recombined. HTML comments are excluded from visible text and contact
 evidence. The downstream generation action contract is assembled only from the
 schema's action-owned fields plus code-owned enrichment and contact-page source
-destinations, preserving these separations after extraction. Capability-bearing
-generated CTA labels must also exactly match a source-owned action label; generic
-source actions remain generic instead of being rewritten as booking, scheduling,
-estimate, quote, appointment, reservation, or consultation promises. The same
-exact-label boundary covers ordering, purchasing, buying, shopping,
-checkout, payment/pay, and cart language rather than allowing fabricated commerce
-capabilities on an otherwise admitted destination.
+destinations, preserving these separations after extraction. Every non-neutral
+generated action label must exactly match a source-owned label; a bounded neutral
+vocabulary permits only presentation, navigation, contact, and the code-owned
+generated service-request form. This allow-by-authority rule prevents booking,
+quote, commerce, donation, registration, subscription, and ticket claims without
+depending on an incomplete capability-verb denylist.
 Flat heading records
 stop before sibling structural containers, including list wrappers, so a section
 heading cannot turn a collection of independent cards into one evidence record.
@@ -100,7 +100,9 @@ Definition-list terms and their owned definitions form individual records.
 Definition-list wrappers are also record boundaries, so an enclosing article or
 section cannot recombine a term with another term's definition.
 Navigation, CTA, footer, and fetch-page labels remain paired with the destination
-of the same interactive source element. Phone and email scans operate per local
+of the same interactive source element. A top-level CTA must contain both its
+source-owned label and URL pair or contain neither; one nullable half cannot be
+admitted from page-wide evidence. Phone and email scans operate per local
 DOM context rather than concatenating unrelated page nodes. Assertion context
 survives commas, parenthetical contrast modifiers, and colons until a real
 sentence or contrast boundary; inline links inherit their surrounding prose for
@@ -120,9 +122,10 @@ from labels and accessible names attached to actual non-action
 `input`/`select`/`textarea` controls. Image alt text remains paired with the exact
 source image URL rather than being recombined from page-wide values, including
 responsive `<picture><source>` candidates owned by the same fallback image. A
-logo URL additionally requires explicit logo semantics on its source image or
-owning brand container; merely appearing elsewhere on the page is insufficient,
-and the same rule applies when `images[].context` would promote an image to the
+logo URL additionally requires a site-brand-specific marker on its image or
+owning brand container; generic `logo` text in an image alt/title is insufficient
+because it may describe payment, partner, certification, or sponsor branding.
+The same rule applies when `images[].context` would promote an image to the
 navigation logo.
 Fetchability is overwritten by code from the admitted destination and effective
 source URL: same-document anchors, same-page URLs, and external origins are not
@@ -213,16 +216,23 @@ business-specific claims.
 - `python -m unittest -q tests.test_site_extraction`: 51 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
 - Latest review-boundary pass: `python -m unittest -q
-  tests.test_site_extraction` passed 53 tests, and the two targeted generation
-  action/contact tests brought the focused total to 55. These prove redirect
+  tests.test_site_extraction` plus the targeted generation action test passed 55
+  tests. These prove redirect
   rejection and apex/www acceptance, ambiguous title rejection with explicit
   site-name recovery, leaf-only nested-list records, `Pay`/`Cart` label rejection,
-  and contact fetch-origin wiring.
+  contact fetch-origin wiring, complete CTA pairs, site-owned logo semantics, and
+  source-owned-or-neutral action labels.
 - `python -m unittest tests.test_generation -q`: 143 tests passed, including
   source-owned capability labels, neutral CTA wording, and destination-first
   rejection behavior.
-- `python -m unittest discover -s tests -q`: 336 tests passed with 34 skipped on
-  the current working tree.
+- `python -m unittest discover -s tests -q`: 339 tests passed with 34 skipped
+  after the source-owned-or-neutral action-label guard replaced the incomplete
+  capability denylist.
+- Final affected-path check after moving the Google review label from neutral
+  vocabulary into its code-owned build contract: four focused action, aggregate
+  review, CTA-pair, and logo-ownership tests passed. A subsequent full-suite run
+  hung during teardown without returning a verdict; the exact-head GitHub unit
+  gate remains the required final full-suite proof.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.
@@ -240,7 +250,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 4,102 insertions and 83 deletions across ten files. This
+The reviewed diff is 4,267 insertions and 83 deletions across eleven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

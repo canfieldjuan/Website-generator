@@ -89,7 +89,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
           <a href="mailto:hello@acme.test">hello@acme.test</a>
           <address>100 Main Street, Effingham, IL</address>
           <button>Request a Quote</button>
-          <img src="/logo.png" alt="Acme Cleaning logo">
+          <a class="navbar-brand"><img src="/logo.png" alt="Acme Cleaning"></a>
           <img src="/hero.jpg" alt="Acme cleaning crew">
         </body></html>
         """
@@ -859,6 +859,25 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "identified as a logo"):
             validate_site_analysis(false_logo, source, "https://acme.test/")
 
+        third_party_logo_source = (
+            '<h1>Acme Cleaning</h1><img src="/visa.png" alt="Visa logo">'
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identified as a logo"):
+            validate_site_analysis(
+                {
+                    "site": {"name": "Acme Cleaning"},
+                    "brand": {"logo_url": "https://acme.test/visa.png"},
+                },
+                third_party_logo_source,
+                "https://acme.test/",
+            )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Visa"}},
+                third_party_logo_source,
+                "https://acme.test/",
+            )
+
     def test_social_platform_is_bound_to_its_destination(self):
         document = {
             "site": {"name": "Acme Cleaning"},
@@ -1298,6 +1317,43 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "https://acme.test/",
             )
 
+    def test_cta_requires_a_complete_source_action_pair(self):
+        source = (
+            "<h1>Acme Cleaning</h1>"
+            '<a href="/contact">Contact Us</a>'
+            '<a href="https://partner.test">Partner</a>'
+        )
+        for partial_cta in (
+            {"label": None, "url": "https://partner.test"},
+            {"label": "Contact Us", "url": None},
+        ):
+            with (
+                self.subTest(partial_cta=partial_cta),
+                self.assertRaisesRegex(SiteExtractionError, "both be source-owned"),
+            ):
+                validate_site_analysis(
+                    {"site": {"name": "Acme Cleaning"}, "cta": partial_cta},
+                    source,
+                    "https://acme.test/",
+                )
+
+        complete = {
+            "site": {"name": "Acme Cleaning"},
+            "cta": {"label": "Contact Us", "url": "https://acme.test/contact"},
+        }
+        self.assertEqual(
+            validate_site_analysis(complete, source, "https://acme.test/"),
+            complete,
+        )
+        empty = {
+            "site": {"name": "Acme Cleaning"},
+            "cta": {"label": None, "url": None},
+        }
+        self.assertEqual(
+            validate_site_analysis(empty, source, "https://acme.test/"),
+            empty,
+        )
+
     def test_generation_action_contract_keeps_only_action_owned_urls(self):
         contract = pipeline._redesign_action_url_contract(
             {
@@ -1359,10 +1415,14 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             contract.allowed_labels,
             (
+                "Acme Cleaning",
                 "Contact",
                 "Book",
+                "Office",
+                "Facebook",
                 "Privacy",
                 "About",
+                "Jane",
                 "Request a Quote",
                 "Source",
                 "Submit",

@@ -259,9 +259,17 @@ _SOCIAL_HOST_PLATFORMS = (
     ("youtu.be", "YouTube"),
     ("yelp.com", "Yelp"),
 )
-_LOGO_ROLE_PATTERN = re.compile(r"(?:^|[^a-z0-9])logo(?:[^a-z0-9]|$)", re.I)
 _LOGO_CONTAINER_MARKERS = frozenset(
-    {"brand-logo", "custom-logo-link", "navbar-brand", "site-brand"}
+    {
+        "brand-logo",
+        "custom-logo-link",
+        "header-logo",
+        "logo-link",
+        "navbar-brand",
+        "site-brand",
+        "site-identity",
+        "site-logo",
+    }
 )
 _ASSERTION_CONTEXT_TAGS = {
     "address",
@@ -525,8 +533,6 @@ def _srcset_urls(value: str) -> set[str]:
 
 def _element_has_logo_marker(element: Any) -> bool:
     for attribute in (
-        element.get("alt"),
-        element.get("title"),
         element.get("id"),
         element.get("class"),
         element.get("itemprop"),
@@ -534,8 +540,6 @@ def _element_has_logo_marker(element: Any) -> bool:
     ):
         for value in _attribute_values(attribute):
             marker = value.strip().casefold()
-            if _LOGO_ROLE_PATTERN.search(marker):
-                return True
             if any(token in _LOGO_CONTAINER_MARKERS for token in marker.split()):
                 return True
     return False
@@ -1365,11 +1369,12 @@ def _require_site_facts(
     cta = document.get("cta") or {}
     cta_label = cta.get("label")
     cta_url = cta.get("url")
-    if cta_label is not None and cta_url is not None:
+    if (cta_label is None) != (cta_url is None):
+        raise SiteExtractionError(
+            "cta.label and cta.url must both be source-owned or both be null."
+        )
+    if cta_label is not None:
         evidence.require_action("cta", cta_label, cta_url)
-    else:
-        evidence.require_action_label("cta.label", cta_label)
-        evidence.require_url("cta.url", cta_url)
 
     for index, section in enumerate(document.get("sections") or []):
         path = f"sections[{index}]"

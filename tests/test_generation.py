@@ -1264,12 +1264,16 @@ class BodyAssemblyTests(unittest.TestCase):
             "Buy Now",
             "Pay Now",
             "Add to Cart",
+            "Donate Now",
+            "Register",
+            "Subscribe",
+            "Get Tickets",
         ):
             with (
                 self.subTest(fabricated_label=fabricated_label),
                 self.assertRaisesRegex(
                     GeneratedBodyError,
-                    "capability-bearing action label",
+                    "non-neutral action label",
                 ),
             ):
                 validate_generated_body(
@@ -1282,7 +1286,7 @@ class BodyAssemblyTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             GeneratedBodyError,
-            "capability-bearing action label",
+            "non-neutral action label",
         ):
             validate_generated_body(
                 body_result(
@@ -1295,7 +1299,8 @@ class BodyAssemblyTests(unittest.TestCase):
 
         neutral_body = (
             '<body><a href="https://source.test/book">Contact Us</a>'
-            '<a href="https://source.test/book">Book</a></body>'
+            '<a href="https://source.test/book">Book</a>'
+            '<a href="#contact">Request Service</a></body>'
         )
         self.assertEqual(
             validate_generated_body(
@@ -2946,6 +2951,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         }
         admitted_body = build_body_with_review_section(
             aggregate_review_section("4.4", "12")
+        )
+        review_contract = build.expected_review_contract(prospect)
+        self.assertEqual(
+            build.expected_build_action_url_contract(
+                prospect, review_contract
+            ).allowed_labels,
+            ("Read All Reviews on Google",),
         )
         html = build.generate_build_html(
             prospect,
