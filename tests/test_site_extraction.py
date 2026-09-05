@@ -608,10 +608,16 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 )
 
     def test_business_name_requires_assertive_identity_evidence(self):
-        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
             validate_site_analysis(
                 {"site": {"name": "Acme Cleaning"}},
                 "<p>Are you Acme Cleaning?</p>",
+            )
+
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Acme Web Design"}},
+                ("<h1>Acme Cleaning</h1><footer>Website by Acme Web Design</footer>"),
             )
 
     def test_pages_to_fetch_derives_fetchability_from_destination(self):
@@ -722,6 +728,30 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(SiteExtractionError, "identified as a logo"):
             validate_site_analysis(invalid, source, "https://acme.test/")
+
+        logo_image = {
+            "site": {"name": "Acme Cleaning"},
+            "images": [
+                {
+                    "url": "https://acme.test/logo-large.png",
+                    "alt": "Acme Cleaning",
+                    "context": "logo",
+                }
+            ],
+        }
+        self.assertEqual(
+            validate_site_analysis(logo_image, source, "https://acme.test/"),
+            logo_image,
+        )
+
+        false_logo = copy.deepcopy(logo_image)
+        false_logo["images"][0] = {
+            "url": "https://acme.test/hero.jpg",
+            "alt": "Cleaning crew",
+            "context": "logo",
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "identified as a logo"):
+            validate_site_analysis(false_logo, source, "https://acme.test/")
 
     def test_social_platform_is_bound_to_its_destination(self):
         document = {
@@ -891,6 +921,68 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(SiteExtractionError, "one source container"):
             validate_site_analysis(mixed, source)
+
+    def test_figure_records_do_not_span_cards(self):
+        source = (
+            "<h1>Acme Cleaning</h1><section><h2>Our Team</h2>"
+            '<figure><img src="/jane.jpg" alt="Jane"><figcaption>Jane</figcaption>'
+            "<p>Operations Manager</p></figure>"
+            '<figure><img src="/john.jpg" alt="John"><figcaption>John</figcaption>'
+            "<p>Field Manager</p></figure></section>"
+        )
+        valid = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [
+                {
+                    "type": "team",
+                    "items": [
+                        {
+                            "title": "Jane",
+                            "description": "Operations Manager",
+                            "image_url": "/jane.jpg",
+                        }
+                    ],
+                }
+            ],
+        }
+        self.assertEqual(validate_site_analysis(valid, source), valid)
+
+        mixed = copy.deepcopy(valid)
+        mixed["sections"][0]["items"][0]["image_url"] = "/john.jpg"
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_site_analysis(mixed, source)
+
+    def test_section_headline_and_items_share_one_source_section(self):
+        source = (
+            "<h1>Acme Cleaning</h1>"
+            "<section><h2>Cleaning Services</h2>"
+            "<article><h3>Office Cleaning</h3><p>Nightly service.</p></article>"
+            "</section>"
+            "<section><h2>Our Team</h2>"
+            "<article><h3>Jane Doe</h3><p>Operations Manager</p></article>"
+            "</section>"
+        )
+        valid = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [
+                {
+                    "type": "services",
+                    "headline": "Cleaning Services",
+                    "items": [
+                        {
+                            "title": "Office Cleaning",
+                            "description": "Nightly service.",
+                        }
+                    ],
+                }
+            ],
+        }
+        self.assertEqual(validate_site_analysis(valid, source), valid)
+
+        mismatched = copy.deepcopy(valid)
+        mismatched["sections"][0]["headline"] = "Our Team"
+        with self.assertRaisesRegex(SiteExtractionError, "one source section"):
+            validate_site_analysis(mismatched, source)
 
     def test_single_page_section_binds_navigation_and_scopes_content(self):
         source = (

@@ -485,6 +485,24 @@ def _srcset_urls(value: str) -> set[str]:
     }
 
 
+def _element_has_logo_marker(element: Any) -> bool:
+    for attribute in (
+        element.get("alt"),
+        element.get("title"),
+        element.get("id"),
+        element.get("class"),
+        element.get("itemprop"),
+        element.get("data-role"),
+    ):
+        for value in _attribute_values(attribute):
+            marker = value.strip().casefold()
+            if _LOGO_ROLE_PATTERN.search(marker):
+                return True
+            if any(token in _LOGO_CONTAINER_MARKERS for token in marker.split()):
+                return True
+    return False
+
+
 def _is_source_logo(image: Any) -> bool:
     """Return whether source semantics identify this image as the site's logo."""
     candidates = [image]
@@ -492,31 +510,27 @@ def _is_source_logo(image: Any) -> bool:
         candidates.append(ancestor)
         if ancestor.name not in {"a", "picture", "span"}:
             break
-    for element in candidates:
-        for attribute in (
-            element.get("alt"),
-            element.get("title"),
-            element.get("id"),
-            element.get("class"),
-            element.get("itemprop"),
-            element.get("data-role"),
-        ):
-            for value in _attribute_values(attribute):
-                marker = value.strip().casefold()
-                if _LOGO_ROLE_PATTERN.search(marker):
-                    return True
-                if any(token in _LOGO_CONTAINER_MARKERS for token in marker.split()):
-                    return True
-    return False
+    return any(_element_has_logo_marker(element) for element in candidates)
 
 
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
-_ATOMIC_RECORD_TAGS = {"address", "blockquote", "details", "li", "p", "td", "th", "tr"}
+_ATOMIC_RECORD_TAGS = {
+    "address",
+    "blockquote",
+    "details",
+    "figure",
+    "li",
+    "p",
+    "td",
+    "th",
+    "tr",
+}
 _RECORD_CONTAINER_TAGS = {
     "article",
     "details",
     "div",
     "dl",
+    "figure",
     "li",
     "menu",
     "ol",
@@ -543,7 +557,17 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
             continue
         if element.name in {"article", "div", "section"}:
             nested_record = element.find(
-                ["article", "details", "div", "dl", "dt", "li", "section", "tr"]
+                [
+                    "article",
+                    "details",
+                    "div",
+                    "dl",
+                    "dt",
+                    "figure",
+                    "li",
+                    "section",
+                    "tr",
+                ]
             )
             if (
                 nested_record is None
@@ -582,10 +606,49 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
     return tuple(fragments)
 
 
+def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
+    fragments: list[str] = []
+    seen: set[str] = set()
+
+    def append(fragment: str) -> None:
+        normalized = fragment.strip()
+        if normalized and normalized not in seen and len(fragments) < MAX_ITEMS:
+            seen.add(normalized)
+            fragments.append(normalized)
+
+    for element in soup.find_all(["article", "section"], limit=MAX_ITEMS):
+        if element.name == "section" and element.find("section") is not None:
+            continue
+        append(str(element))
+
+    for heading in soup.find_all(_HEADING_TAG_PATTERN, limit=MAX_ITEMS):
+        match = _HEADING_TAG_PATTERN.fullmatch(heading.name or "")
+        if match is None:
+            continue
+        heading_level = int(match.group(1))
+        parts = [str(heading)]
+        for sibling in heading.next_siblings:
+            sibling_name = getattr(sibling, "name", None)
+            sibling_heading = (
+                _HEADING_TAG_PATTERN.fullmatch(sibling_name)
+                if isinstance(sibling_name, str)
+                else None
+            )
+            if (
+                sibling_heading is not None
+                and int(sibling_heading.group(1)) <= heading_level
+            ):
+                break
+            parts.append(str(sibling))
+        append("".join(parts))
+    return tuple(fragments)
+
+
 @dataclass(frozen=True)
 class SourceEvidence:
     text_segments: tuple[str, ...]
     assertion_segments: tuple[str, ...]
+    identity_segments: tuple[str, ...]
     action_labels: frozenset[str]
     action_pairs: frozenset[tuple[str, str]]
     action_urls: frozenset[str]
@@ -596,6 +659,7 @@ class SourceEvidence:
     emails: frozenset[str]
     phones: frozenset[str]
     records: tuple[SourceEvidence, ...]
+    content_sections: tuple[SourceEvidence, ...]
     section_targets: tuple[tuple[str, SourceEvidence], ...]
 
     @classmethod
@@ -605,6 +669,7 @@ class SourceEvidence:
         source_url: str | None,
         *,
         _include_records: bool = True,
+        _include_content_sections: bool = True,
         _include_section_targets: bool = True,
     ) -> "SourceEvidence":
         if not isinstance(source_html, str) or not source_html.strip():
@@ -661,9 +726,21 @@ class SourceEvidence:
         raw_image_urls: set[str] = set()
         raw_image_pairs: set[tuple[str, str]] = set()
         raw_logo_urls: set[str] = set()
+        identity_parts: list[str] = []
         email_values: list[str] = list(contact_segments)
         phone_values: list[str] = list(contact_segments)
         action_labels: set[str] = set()
+
+        for element in soup.find_all(
+            ["title", "h1", "h2", "h3", "h4", "h5", "h6"], limit=MAX_ITEMS
+        ):
+            identity_parts.append(element.get_text(" ", strip=True))
+        for meta in soup.find_all("meta", limit=MAX_ITEMS):
+            property_name = str(
+                meta.get("property") or meta.get("name") or ""
+            ).casefold()
+            if property_name in {"application-name", "og:site_name"}:
+                identity_parts.extend(_attribute_values(meta.get("content")))
 
         for element in soup.find_all(True):
             role = str(element.get("role") or "").casefold()
@@ -732,6 +809,10 @@ class SourceEvidence:
                 raw_image_pairs.update((url, alt) for url in element_image_urls)
             if element.name == "img" and _is_source_logo(element):
                 raw_logo_urls.update(element_image_urls)
+                identity_parts.extend(_attribute_values(element.get("alt")))
+                identity_parts.extend(_attribute_values(element.get("title")))
+            if element.name != "img" and _element_has_logo_marker(element):
+                identity_parts.append(element.get_text(" ", strip=True))
 
         form_control_labels: list[str] = []
         for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):
@@ -817,11 +898,25 @@ class SourceEvidence:
                     fragment,
                     source_url,
                     _include_records=False,
+                    _include_content_sections=False,
                     _include_section_targets=False,
                 )
                 for fragment in _record_fragments(soup)
             )
             if _include_records
+            else ()
+        )
+        content_sections = (
+            tuple(
+                cls.from_html(
+                    fragment,
+                    source_url,
+                    _include_content_sections=False,
+                    _include_section_targets=False,
+                )
+                for fragment in _content_section_fragments(soup)
+            )
+            if _include_content_sections
             else ()
         )
         section_targets = (
@@ -844,6 +939,13 @@ class SourceEvidence:
         return cls(
             text_segments=tuple(dict.fromkeys(assertion_segments + attribute_segments)),
             assertion_segments=assertion_segments,
+            identity_segments=tuple(
+                dict.fromkeys(
+                    segment
+                    for part in identity_parts
+                    if (segment := _normalize_text(part))
+                )
+            ),
             action_labels=frozenset(action_labels),
             action_pairs=frozenset(
                 (label, destination)
@@ -862,6 +964,7 @@ class SourceEvidence:
             emails=frozenset(emails),
             phones=frozenset(phones),
             records=records,
+            content_sections=content_sections,
             section_targets=section_targets,
         )
 
@@ -888,6 +991,25 @@ class SourceEvidence:
                 f"{path} drops or reverses source assertion context."
             )
         raise SiteExtractionError(f"{path} is not grounded in source text.")
+
+    def require_identity(self, path: str, value: Any) -> None:
+        if value is None:
+            return
+        normalized = _normalize_text(value)
+        if not normalized:
+            raise SiteExtractionError(f"{path} is not grounded in source identity.")
+        found = False
+        for source_text in self.identity_segments:
+            for index in _phrase_occurrences(source_text, normalized):
+                found = True
+                if _occurrence_is_negated(source_text, index, len(normalized)):
+                    continue
+                if _occurrence_is_nonassertive(source_text, index, len(normalized)):
+                    continue
+                return
+        if found:
+            raise SiteExtractionError(f"{path} drops source identity context.")
+        raise SiteExtractionError(f"{path} is not grounded in source identity.")
 
     def require_action_label(self, path: str, value: Any) -> None:
         if value is None:
@@ -1066,7 +1188,7 @@ def _require_site_facts(
     document: dict, evidence: SourceEvidence, source_url: str | None
 ) -> None:
     site = document["site"]
-    evidence.require_text("site.name", site["name"], asserted=True)
+    evidence.require_identity("site.name", site["name"])
     evidence.require_text("site.tagline", site.get("tagline"), asserted=True)
     evidence.require_text("site.location", site.get("location"), asserted=True)
     _require_contact(evidence, "site.contact", site.get("contact"))
@@ -1087,18 +1209,37 @@ def _require_site_facts(
 
     for index, section in enumerate(document.get("sections") or []):
         path = f"sections[{index}]"
-        evidence.require_text(
-            f"{path}.headline", section.get("headline"), asserted=True
-        )
-        _require_content_items(
-            evidence,
-            f"{path}.items",
-            section.get("items"),
-            allow_nonassertive_title=section.get("type") == "faq",
-        )
+        headline = section.get("headline")
+        items = section.get("items") or []
+
+        def require_section(section_evidence: SourceEvidence) -> None:
+            section_evidence.require_text(f"{path}.headline", headline, asserted=True)
+            _require_content_items(
+                section_evidence,
+                f"{path}.items",
+                items,
+                allow_nonassertive_title=section.get("type") == "faq",
+            )
+
+        if headline is not None and items:
+            for content_section in evidence.content_sections:
+                try:
+                    require_section(content_section)
+                except SiteExtractionError:
+                    continue
+                break
+            else:
+                raise SiteExtractionError(
+                    f"{path} headline and items are not grounded in one source section."
+                )
+        else:
+            require_section(evidence)
 
     for index, image in enumerate(document.get("images") or []):
-        evidence.require_image(f"images[{index}]", image["url"], image.get("alt"))
+        path = f"images[{index}]"
+        evidence.require_image(path, image["url"], image.get("alt"))
+        if _normalize_text(image.get("context") or "") == "logo":
+            evidence.require_logo(f"{path}.url", image["url"])
     for index, social in enumerate(document.get("social") or []):
         social["platform"] = evidence.admit_social_platform(
             f"social[{index}]", social["platform"], social["url"]

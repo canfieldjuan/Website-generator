@@ -106,7 +106,9 @@ from labels and accessible names attached to actual non-action
 source image URL rather than being recombined from page-wide values, including
 responsive `<picture><source>` candidates owned by the same fallback image. A
 logo URL additionally requires explicit logo semantics on its source image or
-owning brand container; merely appearing elsewhere on the page is insufficient.
+owning brand container; merely appearing elsewhere on the page is insufficient,
+and the same rule applies when `images[].context` would promote an image to the
+navigation logo.
 Fetchability is overwritten by code from the admitted destination and effective source URL:
 same-document anchors and same-page URLs are not queued, while a distinct HTTP(S)
 page remains fetchable even if the model says otherwise.
@@ -116,6 +118,11 @@ accessible label, duplicate references to the same source label are collapsed,
 and labels are assigned one-to-one to distinct controls. Social platform names
 are derived from recognized destination hosts; otherwise the name and URL must
 belong to the same source action.
+Business identity is further limited to title, heading, site-name metadata, and
+explicit brand/logo evidence; arbitrary footer or body attribution cannot become
+the prospect name. Figures are atomic content records. When a homepage section
+contains both a headline and items, both must validate inside one semantic or
+heading-delimited source section before admission.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
 button, and text inputs cannot promote their values into published CTA copy.
 Classifications, layout choices, color selections, and image-generation guidance
@@ -167,9 +174,9 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 46 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 48 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests -q`: 331 tests passed with 34 skipped on
+- `python -m unittest discover -s tests -q`: 333 tests passed with 34 skipped on
   the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
@@ -188,7 +195,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 3,099 insertions and 72 deletions across seven files. This
+The reviewed diff is 3,339 insertions and 72 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource
