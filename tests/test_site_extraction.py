@@ -495,6 +495,60 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "https://acme.test/",
             )
 
+    def test_generation_action_contract_keeps_only_action_owned_urls(self):
+        contract = pipeline._redesign_action_url_contract(
+            {
+                "site": {"name": "Acme Cleaning"},
+                "brand": {"logo_url": "/logo.png"},
+                "nav": [{"label": "Contact", "url": "/contact"}],
+                "cta": {"label": "Book", "url": "/book"},
+                "sections": [
+                    {
+                        "items": [
+                            {
+                                "title": "Office",
+                                "url": "/services/office",
+                                "image_url": "/office.jpg",
+                            }
+                        ],
+                        "source_url": "/services",
+                    }
+                ],
+                "images": [{"url": "/hero.jpg", "context": "hero"}],
+                "social": [{"platform": "Facebook", "url": "/facebook"}],
+                "footer_links": [{"label": "Privacy", "url": "/privacy"}],
+                "pages_to_fetch": [{"label": "About", "url": "/about"}],
+                "single_page_sections": [
+                    {
+                        "anchor": "#team",
+                        "content": {"items": [{"title": "Jane", "url": "/jane"}]},
+                    }
+                ],
+            },
+            pipeline._redesign_contact_contract({}),
+            source_content=(
+                '<a href="/source-link">Source</a><form action="/submit"></form>'
+                '<img src="/source-image.jpg">'
+            ),
+            extra_urls=("/current-page",),
+        )
+
+        self.assertEqual(
+            contract.allowed_urls,
+            (
+                "/contact",
+                "/book",
+                "/services/office",
+                "/facebook",
+                "/privacy",
+                "/about",
+                "#team",
+                "/jane",
+                "/current-page",
+                "/source-link",
+            ),
+        )
+
     def test_form_endpoint_cannot_be_repurposed_as_link_destination(self):
         with self.assertRaisesRegex(SiteExtractionError, r"cta\.url"):
             validate_site_analysis(
@@ -529,6 +583,16 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             (
                 {"email": "billing@acme.test"},
                 '<input placeholder="billing@acme.test">',
+                "source email",
+            ),
+            (
+                {"phone": "217-555-0100"},
+                "<!-- https://cdn.test/217-555-0100.jpg -->",
+                "source phone",
+            ),
+            (
+                {"email": "billing@acme.test"},
+                "<!-- billing@acme.test -->",
                 "source email",
             ),
         )
@@ -601,7 +665,9 @@ class EnrichmentGroundingTests(unittest.TestCase):
             ],
         }
 
-        with self.assertRaisesRegex(SiteExtractionError, r"items\[1\]\.title"):
+        with self.assertRaisesRegex(
+            SiteExtractionError, r"items\[1\].*one source container"
+        ):
             validate_enrichment_result(
                 document,
                 page_type="team",
@@ -664,6 +730,34 @@ class EnrichmentGroundingTests(unittest.TestCase):
         )
 
         self.assertEqual(admitted["headline"], "FAQ")
+
+    def test_composite_item_fields_must_share_one_source_container(self):
+        document = {
+            "type": "misc",
+            "headline": "FAQ",
+            "items": [
+                {
+                    "title": "Do you offer free estimates?",
+                    "url": None,
+                    "image_url": None,
+                    "tag": "faq",
+                    "meta": "Yes.",
+                }
+            ],
+        }
+        html = """
+        <h1>Frequently Asked Questions</h1>
+        <div class="faq-item"><h2>Do you offer free estimates?</h2><p>No.</p></div>
+        <div class="faq-item"><h3>Do you offer recurring service?</h3><p>Yes.</p></div>
+        """
+
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_enrichment_result(
+                document,
+                page_type="faq",
+                source_html=html,
+                source_url="https://acme.test/questions",
+            )
 
     def test_pipeline_skips_invalid_enrichment_without_mutating_site_json(self):
         site_json = {

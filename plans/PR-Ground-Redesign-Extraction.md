@@ -76,6 +76,11 @@ parameters and cross-scheme tokens. Link destinations and image resources are
 separate evidence sets: generated links require an observed anchor destination,
 not an image resource or form endpoint, and both URL kinds permit only their
 deterministic source-relative resolution.
+Composite content items must ground all of their populated source fields in one
+DOM-local record container; independently present values elsewhere on the page
+cannot be recombined. HTML comments are excluded from visible text and contact
+evidence. The downstream generation action contract is assembled only from the
+schema's action-owned fields, preserving these separations after extraction.
 Classifications, layout choices, color selections, and image-generation guidance
 are admitted as typed derived metadata, not source facts.
 
@@ -125,27 +130,27 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 25 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 27 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests -q`: 310 tests passed; 34 skipped.
+- `python -m unittest discover -s tests -q`: 312 tests passed; 34 skipped.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.
 - `python -m compileall -q pipeline.py lib tests`: passed.
 - `git diff --check`: passed.
-- Required no-deploy fixture: blocked outside this diff. A one-token Ollama
-  `/api/chat` probe passed after restarting `ollama-local.service`, but the
-  production-shaped build request then stalled waiting for its HTTP status. One
-  bounded run produced a 1200-second read timeout, and the clean-service retry
-  reproduced the same full-request stall before artifact persistence. No
-  placeholder/claim scan is reported because no new artifact was written. This
-  separate runtime defect is tracked in issue #46.
+- `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
+  examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
+  --skip-deploy`: passed against local Ollama with the model fully resident on
+  the RTX 3090; wrote `outputs/builds/drees-plumbing-inc/index.html`.
+- Required placeholder-leak grep: 0 matches.
+- Required `Upfront Flat-Rate|Surprise Fees|Free Estimates|Owner Answers`
+  fabricated-claim grep: 0 matches.
 - `bash scripts/local_pr_review.sh`: passed on the committed diff against
   `origin/main`.
 
 ## Estimated diff size
 
-The reviewed diff is 1,876 insertions and 46 deletions across seven files. This
+The reviewed diff is 2,103 insertions and 66 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

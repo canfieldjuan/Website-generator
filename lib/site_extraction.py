@@ -12,6 +12,7 @@ from typing import Any, Iterable
 from urllib.parse import unquote, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
+from bs4.element import Comment
 from jsonschema import Draft202012Validator
 
 
@@ -407,6 +408,56 @@ def _attribute_values(value: Any) -> Iterable[str]:
         yield from (item for item in value if isinstance(item, str))
 
 
+_HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
+_ATOMIC_RECORD_TAGS = {"address", "blockquote", "details", "li", "p", "td", "th", "tr"}
+
+
+def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
+    fragments: list[str] = []
+    seen: set[str] = set()
+
+    def append(fragment: str) -> None:
+        normalized = fragment.strip()
+        if normalized and normalized not in seen and len(fragments) < MAX_ITEMS:
+            seen.add(normalized)
+            fragments.append(normalized)
+
+    for element in soup.find_all(True):
+        if element.name in _ATOMIC_RECORD_TAGS:
+            append(str(element))
+            continue
+        if element.name == "article":
+            if len(element.find_all(_HEADING_TAG_PATTERN)) <= 1:
+                append(str(element))
+            continue
+        if element.name in {"div", "section"}:
+            nested_record = element.find(
+                ["article", "details", "div", "li", "section", "tr"]
+            )
+            if (
+                nested_record is None
+                and len(element.find_all(_HEADING_TAG_PATTERN)) <= 1
+            ):
+                append(str(element))
+
+    for heading in soup.find_all(_HEADING_TAG_PATTERN):
+        if _HEADING_TAG_PATTERN.fullmatch(heading.name or "") is None:
+            continue
+        parts = [str(heading)]
+        for sibling in heading.next_siblings:
+            sibling_name = getattr(sibling, "name", None)
+            sibling_heading = (
+                _HEADING_TAG_PATTERN.fullmatch(sibling_name)
+                if isinstance(sibling_name, str)
+                else None
+            )
+            if sibling_heading is not None:
+                break
+            parts.append(str(sibling))
+        append("".join(parts))
+    return tuple(fragments)
+
+
 @dataclass(frozen=True)
 class SourceEvidence:
     text_segments: tuple[str, ...]
@@ -416,9 +467,16 @@ class SourceEvidence:
     image_urls: frozenset[str]
     emails: frozenset[str]
     phones: frozenset[str]
+    records: tuple[SourceEvidence, ...]
 
     @classmethod
-    def from_html(cls, source_html: str, source_url: str | None) -> "SourceEvidence":
+    def from_html(
+        cls,
+        source_html: str,
+        source_url: str | None,
+        *,
+        _include_records: bool = True,
+    ) -> "SourceEvidence":
         if not isinstance(source_html, str) or not source_html.strip():
             raise SiteExtractionError("Source HTML must be non-empty text.")
         if source_url is not None and (
@@ -432,6 +490,8 @@ class SourceEvidence:
         context_parts: dict[int, list[str]] = {}
         visible_parts: list[str] = []
         for node in soup.find_all(string=True):
+            if isinstance(node, Comment):
+                continue
             value = str(node).strip()
             if not value:
                 continue
@@ -542,6 +602,14 @@ class SourceEvidence:
                 if (segment := _normalize_text(part))
             )
         )
+        records = (
+            tuple(
+                cls.from_html(fragment, source_url, _include_records=False)
+                for fragment in _record_fragments(soup)
+            )
+            if _include_records
+            else ()
+        )
         return cls(
             text_segments=tuple(dict.fromkeys(assertion_segments + attribute_segments)),
             assertion_segments=assertion_segments,
@@ -550,6 +618,7 @@ class SourceEvidence:
             image_urls=resolved(raw_image_urls),
             emails=frozenset(emails),
             phones=frozenset(phones),
+            records=records,
         )
 
     def require_text(self, path: str, value: Any, *, asserted: bool = False) -> None:
@@ -642,16 +711,46 @@ def _require_content_items(
 ) -> None:
     for index, item in enumerate(items or []):
         item_path = f"{path}[{index}]"
-        evidence.require_text(f"{item_path}.title", item.get("title"))
-        evidence.require_text(f"{item_path}.description", item.get("description"))
-        evidence.require_url(f"{item_path}.url", item.get("url"))
-        evidence.require_url(
-            f"{item_path}.image_url", item.get("image_url"), image=True
+        source_fields = (
+            "title",
+            "description",
+            "url",
+            "image_url",
+            "date",
+            "meta",
+            *(("tag",) if verify_tag else ()),
         )
-        if verify_tag:
-            evidence.require_text(f"{item_path}.tag", item.get("tag"))
-        evidence.require_text(f"{item_path}.date", item.get("date"))
-        evidence.require_text(f"{item_path}.meta", item.get("meta"))
+        present_fields = [
+            field for field in source_fields if item.get(field) is not None
+        ]
+        if not present_fields:
+            raise SiteExtractionError(f"{item_path} contains no source-owned content.")
+
+        def require_fields(container: SourceEvidence) -> None:
+            container.require_text(f"{item_path}.title", item.get("title"))
+            container.require_text(f"{item_path}.description", item.get("description"))
+            container.require_url(f"{item_path}.url", item.get("url"))
+            container.require_url(
+                f"{item_path}.image_url", item.get("image_url"), image=True
+            )
+            if verify_tag:
+                container.require_text(f"{item_path}.tag", item.get("tag"))
+            container.require_text(f"{item_path}.date", item.get("date"))
+            container.require_text(f"{item_path}.meta", item.get("meta"))
+
+        if len(present_fields) == 1:
+            require_fields(evidence)
+            continue
+        for record in evidence.records:
+            try:
+                require_fields(record)
+            except SiteExtractionError:
+                continue
+            break
+        else:
+            raise SiteExtractionError(
+                f"{item_path} fields are not grounded in one source container."
+            )
 
 
 def _require_site_facts(document: dict, evidence: SourceEvidence) -> None:

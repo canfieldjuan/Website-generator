@@ -137,31 +137,40 @@ def _redesign_action_url_contract(
 ):
     allowed_urls = []
 
-    def collect_source_urls(value):
+    def append_field(value, field="url"):
         if isinstance(value, dict):
-            for key, nested in value.items():
-                normalized_key = str(key).casefold()
-                if normalized_key in {
-                    "action",
-                    "anchor",
-                    "formaction",
-                    "href",
-                    "url",
-                } or normalized_key.endswith("_url"):
-                    _append_source_value(allowed_urls, nested)
-                collect_source_urls(nested)
-        elif isinstance(value, list):
-            for nested in value:
-                collect_source_urls(nested)
+            _append_source_value(allowed_urls, value.get(field))
 
-    collect_source_urls(site_json)
+    def append_item_urls(items):
+        if isinstance(items, list):
+            for item in items:
+                append_field(item)
+
+    for item in site_json.get("nav") or ():
+        append_field(item)
+    append_field(site_json.get("cta") or {})
+    for section in site_json.get("sections") or ():
+        if isinstance(section, dict):
+            append_item_urls(section.get("items"))
+    for item in site_json.get("social") or ():
+        append_field(item)
+    for item in site_json.get("footer_links") or ():
+        append_field(item)
+    for item in site_json.get("pages_to_fetch") or ():
+        append_field(item)
+    for section in site_json.get("single_page_sections") or ():
+        if not isinstance(section, dict):
+            continue
+        append_field(section, "anchor")
+        content = section.get("content")
+        if isinstance(content, dict):
+            append_item_urls(content.get("items"))
     for url in extra_urls:
         _append_source_value(allowed_urls, url)
     if isinstance(source_content, str) and "<" in source_content:
         source_root = BeautifulSoup(source_content, "html.parser")
-        for element in source_root.find_all(True):
-            for attribute in ("href", "action", "formaction", "xlink:href"):
-                _append_source_value(allowed_urls, element.get(attribute))
+        for element in source_root.find_all(["a", "area"]):
+            _append_source_value(allowed_urls, element.get("href"))
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
         phones=contact_contract.phones,
