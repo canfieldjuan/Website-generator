@@ -1198,6 +1198,7 @@ class BodyAssemblyTests(unittest.TestCase):
             ),
             phones=("217-555-0100",),
             emails=("office@source.test",),
+            allowed_labels=("Book",),
         )
         valid_body = (
             '<body><a href="#contact">Contact</a>'
@@ -1255,6 +1256,47 @@ class BodyAssemblyTests(unittest.TestCase):
                     body_result(mixed_body),
                     expected_action_urls=contract,
                 )
+
+        for fabricated_label in ("Request My Quote", "Book My Appointment"):
+            with (
+                self.subTest(fabricated_label=fabricated_label),
+                self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "capability-bearing action label",
+                ),
+            ):
+                validate_generated_body(
+                    body_result(
+                        '<body><a href="https://source.test/book">'
+                        f"{fabricated_label}</a></body>"
+                    ),
+                    expected_action_urls=contract,
+                )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "capability-bearing action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><span id="cta-label">Request My Quote</span>'
+                    '<a aria-labelledby="cta-label" '
+                    'href="https://source.test/book"></a></body>'
+                ),
+                expected_action_urls=contract,
+            )
+
+        neutral_body = (
+            '<body><a href="https://source.test/book">Contact Us</a>'
+            '<a href="https://source.test/book">Book</a></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(neutral_body),
+                expected_action_urls=contract,
+            ),
+            neutral_body,
+        )
 
     def test_body_admission_restricts_inline_styles_to_declared_properties(self):
         hiding_styles = (

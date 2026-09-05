@@ -53,8 +53,10 @@ analysis may control presentation but may not authorize a visible business claim
 ### Files touched
 
 - `lib/site_extraction.py`
+- `lib/generation.py`
 - `pipeline.py`
 - `references/02-redesign-gen-prompt.md`
+- `tests/test_generation.py`
 - `tests/test_site_extraction.py`
 - `requirements.txt`
 - `requirements-dev.txt`
@@ -81,7 +83,11 @@ DOM-local record container; independently present values elsewhere on the page
 cannot be recombined. HTML comments are excluded from visible text and contact
 evidence. The downstream generation action contract is assembled only from the
 schema's action-owned fields plus code-owned enrichment and contact-page source
-destinations, preserving these separations after extraction. Flat heading records
+destinations, preserving these separations after extraction. Capability-bearing
+generated CTA labels must also exactly match a source-owned action label; generic
+source actions remain generic instead of being rewritten as booking, scheduling,
+estimate, quote, appointment, reservation, or consultation promises. Flat heading
+records
 stop before sibling structural containers, including list wrappers, so a section
 heading cannot turn a collection of independent cards into one evidence record.
 Definition-list terms and their owned definitions form individual records.
@@ -112,9 +118,10 @@ logo URL additionally requires explicit logo semantics on its source image or
 owning brand container; merely appearing elsewhere on the page is insufficient,
 and the same rule applies when `images[].context` would promote an image to the
 navigation logo.
-Fetchability is overwritten by code from the admitted destination and effective source URL:
-same-document anchors and same-page URLs are not queued, while a distinct HTTP(S)
-page remains fetchable even if the model says otherwise.
+Fetchability is overwritten by code from the admitted destination and effective
+source URL: same-document anchors, same-page URLs, and external origins are not
+queued, while a distinct same-origin HTTP(S) page remains fetchable even if the
+model says otherwise.
 Business identity uses assertion evidence. Nested content containers prevent a
 broad article from recombining separate cards. Form labels must match a complete
 accessible label, duplicate references to the same source label are collapsed,
@@ -184,9 +191,12 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 49 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 50 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests -q`: 334 tests passed with 34 skipped on
+- `python -m unittest tests.test_generation -q`: 143 tests passed, including
+  source-owned capability labels, neutral CTA wording, and destination-first
+  rejection behavior.
+- `python -m unittest discover -s tests -q`: 335 tests passed with 34 skipped on
   the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
@@ -205,7 +215,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 3,509 insertions and 72 deletions across seven files. This
+The reviewed diff is 3,788 insertions and 75 deletions across nine files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

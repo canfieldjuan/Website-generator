@@ -376,6 +376,7 @@ class ActionUrlAdmissionContract:
     allowed_urls: tuple[str, ...] = ()
     phones: tuple[str, ...] = ()
     emails: tuple[str, ...] = ()
+    allowed_labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -398,6 +399,7 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     allowed_urls = _contract_text_values(contract.allowed_urls, "Action URL")
     phones = _contract_text_values(contract.phones, "Action phone")
     emails = _contract_text_values(contract.emails, "Action email")
+    allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
         "are allowed. Every other generated anchor, form action, or submit "
@@ -406,7 +408,12 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
         f"target matching one of {json.dumps(phones, ensure_ascii=False)}, or use "
         "a `mailto:` target matching one of "
         f"{json.dumps(emails, ensure_ascii=False)}. Do not invent, shorten, or "
-        "substitute a booking, social, navigation, or form destination."
+        "substitute a booking, social, navigation, or form destination. "
+        "A label that promises booking, scheduling, a quote, an estimate, an "
+        "appointment, a reservation, or a consultation must exactly copy one "
+        "source label from "
+        f"{json.dumps(allowed_labels, ensure_ascii=False)}. Otherwise use "
+        "capability-neutral source wording such as Contact Us or Submit."
     )
 
 
@@ -2067,6 +2074,40 @@ def _contract_text_values(values: object, label: str) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+_CAPABILITY_ACTION_LABEL_PATTERN = re.compile(
+    r"\b(?:book(?:ing)?|schedul(?:e|ing)|quotes?|estimates?|appointments?|"
+    r"reserv(?:e|ations?)|consultations?)\b",
+    re.I,
+)
+
+
+def _generated_action_label(element: Tag) -> str:
+    labelled_by = element.get("aria-labelledby")
+    if isinstance(labelled_by, str) and labelled_by.strip():
+        root = element.find_parent("body")
+        labelled_parts = []
+        if root is not None:
+            for target_id in labelled_by.split():
+                target = root.find(id=target_id)
+                if target is not None:
+                    labelled_parts.append(target.get_text(" ", strip=True))
+        accessible_label = " ".join(part for part in labelled_parts if part)
+        if accessible_label:
+            return accessible_label
+    aria_label = element.get("aria-label")
+    if isinstance(aria_label, str) and aria_label.strip():
+        return aria_label.strip()
+    if element.name.casefold() == "input":
+        value = element.get("value")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    visible_text = element.get_text(" ", strip=True)
+    if visible_text:
+        return visible_text
+    title = element.get("title")
+    return title.strip() if isinstance(title, str) else ""
+
+
 def _validate_action_urls(
     body_root: Tag,
     contract: ActionUrlAdmissionContract,
@@ -2074,6 +2115,10 @@ def _validate_action_urls(
     if not isinstance(contract, ActionUrlAdmissionContract):
         raise GeneratedBodyError("Action URL admission contract is invalid.")
     allowed_urls = set(_contract_text_values(contract.allowed_urls, "Action URL"))
+    allowed_labels = {
+        _normalize_claim_match_text(label)
+        for label in _contract_text_values(contract.allowed_labels, "Action label")
+    }
     allowed_phone_digits: set[str] = set()
     for phone in _contract_text_values(contract.phones, "Action phone"):
         phone_values = _phone_like_digit_values(phone)
@@ -2088,6 +2133,7 @@ def _validate_action_urls(
         allowed_emails.add(canonical)
 
     action_values: list[str] = []
+    action_labels: list[str] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
         if tag_name in {"a", "area"}:
@@ -2098,6 +2144,15 @@ def _validate_action_urls(
             attributes = ("formaction",)
         else:
             continue
+        is_labelled_action = (
+            tag_name in {"a", "area", "button"}
+            or tag_name == "input"
+            and str(element.get("type") or "").casefold() == "submit"
+        )
+        if is_labelled_action:
+            action_label = _generated_action_label(element)
+            if action_label:
+                action_labels.append(action_label)
         action_values.extend(
             value
             for attribute in attributes
@@ -2128,6 +2183,16 @@ def _validate_action_urls(
         raise GeneratedBodyError(
             "Generated body contains an action URL outside source-owned destinations."
         )
+
+    for action_label in action_labels:
+        if (
+            _CAPABILITY_ACTION_LABEL_PATTERN.search(action_label)
+            and _normalize_claim_match_text(action_label) not in allowed_labels
+        ):
+            raise GeneratedBodyError(
+                "Generated body contains a capability-bearing action label "
+                "that is not an exact source-owned action label."
+            )
 
 
 def _validate_source_contacts(

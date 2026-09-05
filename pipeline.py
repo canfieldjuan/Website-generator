@@ -136,10 +136,15 @@ def _redesign_action_url_contract(
     extra_urls=(),
 ):
     allowed_urls = []
+    allowed_labels = []
 
     def append_field(value, field="url"):
         if isinstance(value, dict):
             _append_source_value(allowed_urls, value.get(field))
+
+    def append_label_field(value, field="label"):
+        if isinstance(value, dict):
+            _append_source_value(allowed_labels, value.get(field))
 
     def append_item_urls(items):
         if isinstance(items, list):
@@ -148,7 +153,10 @@ def _redesign_action_url_contract(
 
     for item in site_json.get("nav") or ():
         append_field(item)
-    append_field(site_json.get("cta") or {})
+        append_label_field(item)
+    cta = site_json.get("cta") or {}
+    append_field(cta)
+    append_label_field(cta)
     for section in site_json.get("sections") or ():
         if isinstance(section, dict):
             append_field(section, "source_url")
@@ -158,25 +166,45 @@ def _redesign_action_url_contract(
         append_field(item)
     for item in site_json.get("footer_links") or ():
         append_field(item)
+        append_label_field(item)
     for item in site_json.get("pages_to_fetch") or ():
         append_field(item)
+        append_label_field(item)
     for section in site_json.get("single_page_sections") or ():
         if not isinstance(section, dict):
             continue
         append_field(section, "anchor")
+        _append_source_value(allowed_labels, section.get("nav_label"))
         content = section.get("content")
         if isinstance(content, dict):
             append_item_urls(content.get("items"))
+    conversion_profile = site_json.get("conversion_profile")
+    if isinstance(conversion_profile, dict):
+        for label in conversion_profile.get("existing_ctas") or ():
+            _append_source_value(allowed_labels, label)
     for url in extra_urls:
         _append_source_value(allowed_urls, url)
     if isinstance(source_content, str) and "<" in source_content:
         source_root = BeautifulSoup(source_content, "html.parser")
-        for element in source_root.find_all(["a", "area"]):
-            _append_source_value(allowed_urls, element.get("href"))
+        for element in source_root.find_all(["a", "area", "button", "input"]):
+            if element.name in {"a", "area"}:
+                _append_source_value(allowed_urls, element.get("href"))
+            if (
+                element.name == "input"
+                and str(element.get("type") or "").casefold() != "submit"
+            ):
+                continue
+            label = element.get_text(" ", strip=True)
+            if element.name == "input":
+                label = str(element.get("value") or "")
+            if not label:
+                label = str(element.get("aria-label") or element.get("title") or "")
+            _append_source_value(allowed_labels, label)
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
         phones=contact_contract.phones,
         emails=contact_contract.emails,
+        allowed_labels=tuple(allowed_labels),
     )
 
 

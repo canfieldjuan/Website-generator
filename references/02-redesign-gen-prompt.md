@@ -240,7 +240,7 @@ business promise.
 - Sticky header: phone number always visible on scroll
 
 **urgency_type = "planned"**
-- Primary CTA: booking, reservation, or form button -- specific label (not "Submit", not "Contact Us")
+- Primary CTA: the strongest source-owned action, using its exact admitted label
 - Secondary CTA: phone number as text link or smaller button
 - No sticky phone required
 
@@ -248,13 +248,14 @@ business promise.
 - Two equal-weight CTAs side by side
 - Left: call button (emergency path)
 - Right: form/booking button (planned path)
-- Label the distinction without inventing urgency copy: "Call Now" vs
-  "Schedule a Visit"
+- Label the distinction without inventing a booking, quote, estimate,
+  appointment, reservation, scheduling, or consultation capability
 
-CTA COPY RULE: Always use first-person or action-specific labels.
-"Request My Quote" not "Submit"
-"Book My Appointment" not "Book Appointment"
-"Call Now" not "Contact Us"
+CTA COPY RULE: Capability-bearing CTA text must exactly copy an admitted source
+action label. Never rewrite a generic source action such as "Contact Us" or
+"Submit" into a promise to book, schedule, quote, estimate, reserve, or arrange
+an appointment or consultation. When no source label proves such a capability,
+use capability-neutral source wording.
 
 ---
 

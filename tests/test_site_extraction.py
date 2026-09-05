@@ -448,6 +448,16 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "<p><strong>Free Estimates</strong>: Are they available?</p>",
                 {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
             ),
+            (
+                "<p><strong>Free Estimates</strong> are available for premium "
+                "members only.</p>",
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
+            (
+                "<p><strong>Free Estimates</strong> are available when you join "
+                "the maintenance plan.</p>",
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
         )
         for source, conversion_profile in cases:
             with (
@@ -644,8 +654,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             )
 
         multiple_h1_source = (
-            "<title>Acme Cleaning | Home</title><h1>Acme Cleaning</h1>"
-            "<article><h1>Premium Maintenance Club</h1></article>"
+            "<title>Acme Cleaning | Home</title><h1>Premium Maintenance Club</h1>"
+            "<article><h1>Welcome to Acme Cleaning</h1></article>"
         )
         valid = {"site": {"name": "Acme Cleaning"}}
         self.assertEqual(validate_site_analysis(valid, multiple_h1_source), valid)
@@ -673,12 +683,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     "priority": 2,
                     "fetchable": False,
                 },
+                {
+                    "label": "Partner Services",
+                    "url": "https://partner.test/services",
+                    "page_type": "services",
+                    "priority": 3,
+                    "fetchable": True,
+                },
             ],
         }
         source = (
             "<h1>Acme Cleaning</h1>"
             '<a href="#contact">Contact</a>'
             '<a href="/services">Services</a>'
+            '<a href="https://partner.test/services">Partner Services</a>'
         )
 
         admitted = validate_site_analysis(
@@ -689,6 +707,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertFalse(document["pages_to_fetch"][1]["fetchable"])
         self.assertFalse(admitted["pages_to_fetch"][0]["fetchable"])
         self.assertTrue(admitted["pages_to_fetch"][1]["fetchable"])
+        self.assertFalse(admitted["pages_to_fetch"][2]["fetchable"])
 
     def test_image_alt_must_belong_to_the_same_image(self):
         source = (
@@ -1082,6 +1101,26 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "source text"):
             validate_site_analysis(cross_section_content, source)
 
+        heading_target_source = (
+            "<h1>Acme Cleaning</h1><nav>"
+            '<a href="#about-heading">About</a>'
+            '<a href="#contact-heading">Contact</a></nav>'
+            '<h2 id="about-heading">About Us</h2><p>Family owned.</p>'
+            '<h2 id="contact-heading">Contact Us</h2><p>Call today.</p>'
+        )
+        heading_target = copy.deepcopy(valid)
+        heading_target["single_page_sections"][0]["anchor"] = "#about-heading"
+        self.assertEqual(
+            validate_site_analysis(heading_target, heading_target_source),
+            heading_target,
+        )
+        heading_target["single_page_sections"][0]["content"] = {
+            "headline": "About Us",
+            "body_text": "Call today.",
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "source text"):
+            validate_site_analysis(heading_target, heading_target_source)
+
     def test_single_page_section_without_anchor_uses_one_heading_owned_scope(self):
         source = (
             "<h1>Acme Cleaning</h1><nav><button>About</button>"
@@ -1195,10 +1234,12 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                         "content": {"items": [{"title": "Jane", "url": "/jane"}]},
                     }
                 ],
+                "conversion_profile": {"existing_ctas": ["Request a Quote"]},
             },
             pipeline._redesign_contact_contract({}),
             source_content=(
-                '<a href="/source-link">Source</a><form action="/submit"></form>'
+                '<a href="/source-link">Source</a><form action="/submit">'
+                '<input type="submit" value="Submit"></form>'
                 '<img src="/source-image.jpg">'
             ),
             extra_urls=("/current-page",),
@@ -1219,6 +1260,18 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "/jane",
                 "/current-page",
                 "/source-link",
+            ),
+        )
+        self.assertEqual(
+            contract.allowed_labels,
+            (
+                "Contact",
+                "Book",
+                "Privacy",
+                "About",
+                "Request a Quote",
+                "Source",
+                "Submit",
             ),
         )
 
@@ -1299,11 +1352,11 @@ class EnrichmentGroundingTests(unittest.TestCase):
         }
         source_url = "https://acme.test/services"
         html = """
-        <h1>Cleaning Services</h1>
+        <section><h1>Cleaning Services</h1>
         <article><h2>Office Cleaning</h2><span>Commercial</span>
         <p>Nightly and weekly office cleaning.</p>
         <a href="/services/office">Learn more</a>
-        <img src="/office.jpg"></article>
+        <img src="/office.jpg"></article></section>
         """
 
         admitted = validate_enrichment_result(
@@ -1315,6 +1368,35 @@ class EnrichmentGroundingTests(unittest.TestCase):
 
         self.assertEqual(admitted["source_url"], source_url)
         self.assertEqual(document["source_url"], "https://attacker.test/spoofed")
+
+    def test_content_enrichment_headline_and_items_share_one_source_section(self):
+        document = {
+            "type": "services",
+            "headline": "Residential Cleaning",
+            "items": [
+                {
+                    "title": "Office Cleaning",
+                    "url": None,
+                    "image_url": None,
+                    "tag": "Commercial",
+                    "meta": "Nightly service.",
+                }
+            ],
+        }
+        source = (
+            "<section><h2>Residential Cleaning</h2><p>Home care.</p></section>"
+            "<section><h2>Commercial Cleaning</h2><article>"
+            "<h3>Office Cleaning</h3><span>Commercial</span>"
+            "<p>Nightly service.</p></article></section>"
+        )
+
+        with self.assertRaisesRegex(SiteExtractionError, "share one source section"):
+            validate_enrichment_result(
+                document,
+                page_type="services",
+                source_html=source,
+                source_url="https://acme.test/services",
+            )
 
     def test_content_enrichment_rejects_mixed_fabricated_item(self):
         document = {
@@ -1338,15 +1420,13 @@ class EnrichmentGroundingTests(unittest.TestCase):
             ],
         }
 
-        with self.assertRaisesRegex(
-            SiteExtractionError, r"items\[1\].*one source container"
-        ):
+        with self.assertRaisesRegex(SiteExtractionError, "share one source section"):
             validate_enrichment_result(
                 document,
                 page_type="team",
                 source_html=(
-                    "<h1>Our Team</h1><h2>Jane Doe</h2><p>Manager</p>"
-                    "<p>Leads the cleaning team.</p>"
+                    "<section><h1>Our Team</h1><h2>Jane Doe</h2><p>Manager</p>"
+                    "<p>Leads the cleaning team.</p></section>"
                 ),
                 source_url="https://acme.test/team",
             )
@@ -1674,6 +1754,10 @@ class RedesignPromptAuthorityTests(unittest.TestCase):
         self.assertNotIn("A response-time / availability promise tied", prompt)
         self.assertNotIn('"Call Now -- We Answer 24/7"', prompt)
         self.assertNotIn('"Get My Free Quote"', prompt)
+        self.assertNotIn('"Request My Quote" not "Submit"', prompt)
+        self.assertNotIn('"Schedule a Visit"', prompt)
+        self.assertIn("Capability-bearing CTA text must exactly copy", prompt)
+        self.assertIn("use capability-neutral source wording", prompt)
         self.assertNotIn("Build the headline from `site.type`", prompt)
         self.assertIn("do not substitute `site.type` as", prompt)
         self.assertNotIn("Every redesign includes a trust strip", prompt)

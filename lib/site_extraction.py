@@ -347,7 +347,17 @@ _POSTPOSED_NEGATION_TERMS = frozenset(
     }
 )
 _CONDITIONAL_TERMS = frozenset(
-    {"if", "unless", "whether", "assuming", "depending", "might", "may", "subject"}
+    {
+        "if",
+        "unless",
+        "whether",
+        "assuming",
+        "depending",
+        "might",
+        "may",
+        "subject",
+        "when",
+    }
 )
 
 
@@ -397,6 +407,15 @@ def _words_contain_negation(words: list[str], *, postposed: bool = False) -> boo
     return False
 
 
+def _words_contain_restriction(words: list[str]) -> bool:
+    if any(word in _CONDITIONAL_TERMS for word in words):
+        return True
+    return any(
+        word in {"only", "solely"} and not (index > 0 and words[index - 1] == "not")
+        for index, word in enumerate(words)
+    )
+
+
 def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     preceding_sentence = _SENTENCE_BREAK_PATTERN.split(text[:start])[-1]
     preceding_clause = _CONTRAST_BREAK_PATTERN.split(preceding_sentence)[-1]
@@ -431,7 +450,7 @@ def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
             + _WORD_PATTERN.findall(following_clause)
         )
     ]
-    return any(word in _CONDITIONAL_TERMS for word in surrounding_words)
+    return _words_contain_restriction(surrounding_words)
 
 
 def _contact_destination(value: str) -> tuple[str, str] | None:
@@ -456,18 +475,21 @@ def _is_distinct_fetchable_page(value: Any, source_url: str | None) -> bool:
     ):
         return False
 
-    def page_identity(parsed: Any) -> tuple[str, str, int | None, str, str]:
+    def origin_identity(parsed: Any) -> tuple[str, str, int | None]:
         scheme = parsed.scheme.casefold()
         default_port = 443 if scheme == "https" else 80
         return (
             scheme,
             (parsed.hostname or "").casefold(),
             parsed.port or default_port,
-            parsed.path or "/",
-            parsed.query,
         )
 
-    return page_identity(destination) != page_identity(source)
+    if origin_identity(destination) != origin_identity(source):
+        return False
+    return (destination.path or "/", destination.query) != (
+        source.path or "/",
+        source.query,
+    )
 
 
 def _attribute_values(value: Any) -> Iterable[str]:
@@ -539,6 +561,30 @@ _RECORD_CONTAINER_TAGS = {
     "tr",
     "ul",
 }
+
+
+def _heading_owned_fragment(heading: Any) -> str:
+    match = _HEADING_TAG_PATTERN.fullmatch(getattr(heading, "name", "") or "")
+    if match is None:
+        return str(heading)
+    heading_level = int(match.group(1))
+    parts = [str(heading)]
+    for sibling in heading.next_siblings:
+        sibling_name = getattr(sibling, "name", None)
+        if sibling_name in {"article", "section"}:
+            break
+        sibling_heading = (
+            _HEADING_TAG_PATTERN.fullmatch(sibling_name)
+            if isinstance(sibling_name, str)
+            else None
+        )
+        if (
+            sibling_heading is not None
+            and int(sibling_heading.group(1)) <= heading_level
+        ):
+            break
+        parts.append(str(sibling))
+    return "".join(parts)
 
 
 def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
@@ -622,27 +668,7 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
         append(str(element))
 
     for heading in soup.find_all(_HEADING_TAG_PATTERN, limit=MAX_ITEMS):
-        match = _HEADING_TAG_PATTERN.fullmatch(heading.name or "")
-        if match is None:
-            continue
-        heading_level = int(match.group(1))
-        parts = [str(heading)]
-        for sibling in heading.next_siblings:
-            sibling_name = getattr(sibling, "name", None)
-            if sibling_name in {"article", "section"}:
-                break
-            sibling_heading = (
-                _HEADING_TAG_PATTERN.fullmatch(sibling_name)
-                if isinstance(sibling_name, str)
-                else None
-            )
-            if (
-                sibling_heading is not None
-                and int(sibling_heading.group(1)) <= heading_level
-            ):
-                break
-            parts.append(str(sibling))
-        append("".join(parts))
+        append(_heading_owned_fragment(heading))
     return tuple(fragments)
 
 
@@ -824,9 +850,7 @@ class SourceEvidence:
             if element.name != "img" and _element_has_logo_marker(element):
                 identity_parts.append(element.get_text(" ", strip=True))
 
-        if len(h1_parts) == 1:
-            identity_parts.extend(h1_parts)
-        elif h1_parts:
+        if h1_parts:
             identity_seeds = tuple(
                 segment for part in identity_parts if (segment := _normalize_text(part))
             )
@@ -836,10 +860,13 @@ class SourceEvidence:
                 if (normalized := _normalize_text(part))
                 and any(
                     next(_phrase_occurrences(seed, normalized), None) is not None
+                    or next(_phrase_occurrences(normalized, seed), None) is not None
                     for seed in identity_seeds
                 )
             ]
-            identity_parts.extend(corroborated_h1_parts or h1_parts[:1])
+            identity_parts.extend(
+                corroborated_h1_parts if identity_seeds else h1_parts[:1]
+            )
 
         form_control_labels: list[str] = []
         for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):
@@ -951,7 +978,7 @@ class SourceEvidence:
                 (
                     f"#{element_id.strip()}",
                     cls.from_html(
-                        str(element),
+                        _heading_owned_fragment(element),
                         source_url,
                         _include_section_targets=False,
                     ),
@@ -1434,8 +1461,6 @@ def validate_enrichment_result(
         raise SiteExtractionError("Content enrichment contains no source items.")
     if page_type == "faq":
         admitted["headline"] = "FAQ"
-    else:
-        evidence.require_text("headline", admitted.get("headline"), asserted=True)
     derived_tag = (
         "about" if page_type == "about" else "faq" if page_type == "faq" else None
     )
@@ -1445,11 +1470,32 @@ def validate_enrichment_result(
                 raise SiteExtractionError(
                     "Enrichment item tag does not match the page type selected by code."
                 )
-    _require_content_items(
-        evidence,
-        "items",
-        admitted["items"],
-        verify_tag=derived_tag is None,
-        allow_nonassertive_title=page_type == "faq",
-    )
+    if page_type == "faq":
+        _require_content_items(
+            evidence,
+            "items",
+            admitted["items"],
+            verify_tag=False,
+            allow_nonassertive_title=True,
+        )
+    else:
+        for section_evidence in evidence.content_sections:
+            try:
+                section_evidence.require_text(
+                    "headline", admitted.get("headline"), asserted=True
+                )
+                _require_content_items(
+                    section_evidence,
+                    "items",
+                    admitted["items"],
+                    verify_tag=derived_tag is None,
+                    allow_nonassertive_title=False,
+                )
+            except SiteExtractionError:
+                continue
+            break
+        else:
+            raise SiteExtractionError(
+                "Content enrichment headline and items must share one source section."
+            )
     return admitted
