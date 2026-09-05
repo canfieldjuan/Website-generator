@@ -427,8 +427,8 @@ def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
     surrounding_words = [
         word.replace("’", "'")
         for word in (
-            _WORD_PATTERN.findall(preceding_clause)[-8:]
-            + _WORD_PATTERN.findall(following_clause)[:8]
+            _WORD_PATTERN.findall(preceding_clause)
+            + _WORD_PATTERN.findall(following_clause)
         )
     ]
     return any(word in _CONDITIONAL_TERMS for word in surrounding_words)
@@ -617,7 +617,7 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
             fragments.append(normalized)
 
     for element in soup.find_all(["article", "section"], limit=MAX_ITEMS):
-        if element.name == "section" and element.find("section") is not None:
+        if element.find("section") is not None:
             continue
         append(str(element))
 
@@ -730,17 +730,21 @@ class SourceEvidence:
         raw_image_pairs: set[tuple[str, str]] = set()
         raw_logo_urls: set[str] = set()
         identity_parts: list[str] = []
+        h1_parts: list[str] = []
         heading_parts: list[str] = []
         email_values: list[str] = list(contact_segments)
         phone_values: list[str] = list(contact_segments)
         action_labels: set[str] = set()
 
-        for element in soup.find_all(["title", "h1"], limit=MAX_ITEMS):
+        for element in soup.find_all("title", limit=MAX_ITEMS):
             identity_parts.append(element.get_text(" ", strip=True))
         for element in soup.find_all(
             ["h1", "h2", "h3", "h4", "h5", "h6"], limit=MAX_ITEMS
         ):
-            heading_parts.append(element.get_text(" ", strip=True))
+            heading_text = element.get_text(" ", strip=True)
+            heading_parts.append(heading_text)
+            if element.name == "h1":
+                h1_parts.append(heading_text)
         for meta in soup.find_all("meta", limit=MAX_ITEMS):
             property_name = str(
                 meta.get("property") or meta.get("name") or ""
@@ -819,6 +823,23 @@ class SourceEvidence:
                 identity_parts.extend(_attribute_values(element.get("title")))
             if element.name != "img" and _element_has_logo_marker(element):
                 identity_parts.append(element.get_text(" ", strip=True))
+
+        if len(h1_parts) == 1:
+            identity_parts.extend(h1_parts)
+        elif h1_parts:
+            identity_seeds = tuple(
+                segment for part in identity_parts if (segment := _normalize_text(part))
+            )
+            corroborated_h1_parts = [
+                part
+                for part in h1_parts
+                if (normalized := _normalize_text(part))
+                and any(
+                    next(_phrase_occurrences(seed, normalized), None) is not None
+                    for seed in identity_seeds
+                )
+            ]
+            identity_parts.extend(corroborated_h1_parts or h1_parts[:1])
 
         form_control_labels: list[str] = []
         for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):

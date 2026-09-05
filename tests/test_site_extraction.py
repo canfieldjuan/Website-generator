@@ -430,6 +430,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
             ),
             (
+                (
+                    "<p>If you are a member of our premium annual maintenance club, "
+                    "<strong>Free Estimates</strong> are available.</p>"
+                ),
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
+            (
                 "<p><span>No</span> <strong>Free Estimates</strong></p>",
                 {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
             ),
@@ -634,6 +641,18 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     "<h1>Acme Cleaning</h1><section><h2>Acme Web Design</h2>"
                     "<p>Our website partner.</p></section>"
                 ),
+            )
+
+        multiple_h1_source = (
+            "<title>Acme Cleaning | Home</title><h1>Acme Cleaning</h1>"
+            "<article><h1>Premium Maintenance Club</h1></article>"
+        )
+        valid = {"site": {"name": "Acme Cleaning"}}
+        self.assertEqual(validate_site_analysis(valid, multiple_h1_source), valid)
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Premium Maintenance Club"}},
+                multiple_h1_source,
             )
 
     def test_pages_to_fetch_derives_fetchability_from_destination(self):
@@ -1009,6 +1028,18 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         structural_mismatch["sections"][0]["headline"] = "Our Team"
         with self.assertRaisesRegex(SiteExtractionError, "one source section"):
             validate_site_analysis(structural_mismatch, structural_siblings)
+
+        nested_sections = (
+            "<h1>Acme Cleaning</h1><article>"
+            "<section><h2>Our Team</h2><h3>Jane Doe</h3>"
+            "<p>Operations Manager</p></section>"
+            "<section><h2>Cleaning Services</h2><h3>Office Cleaning</h3>"
+            "<p>Nightly service.</p></section></article>"
+        )
+        nested_mismatch = copy.deepcopy(valid)
+        nested_mismatch["sections"][0]["headline"] = "Our Team"
+        with self.assertRaisesRegex(SiteExtractionError, "one source section"):
+            validate_site_analysis(nested_mismatch, nested_sections)
 
     def test_single_page_section_binds_navigation_and_scopes_content(self):
         source = (

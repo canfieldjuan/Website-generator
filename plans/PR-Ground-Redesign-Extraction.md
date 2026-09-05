@@ -121,12 +121,16 @@ accessible label, duplicate references to the same source label are collapsed,
 and labels are assigned one-to-one to distinct controls. Social platform names
 are derived from recognized destination hosts; otherwise the name and URL must
 belong to the same source action.
-Business identity is further limited to title, primary H1, site-name metadata,
-and explicit brand/logo evidence; ordinary subsection headings and arbitrary
-footer or body attribution cannot become the prospect name. Negation is retained
-across the complete owning clause rather than a fixed word window. Figures are
-atomic content records. Heading-delimited section fallback stops at sibling
-`article` and `section` containers. When a homepage section
+Business identity is further limited to title, a single primary H1, site-name
+metadata, and explicit brand/logo evidence; on a multiple-H1 page, title,
+site-name, or logo evidence corroborates the admitted H1, with only the first
+document H1 used when no corroborating identity exists. Ordinary subsection
+headings and arbitrary footer or body attribution cannot become the prospect
+name. Negation and conditional qualifiers are retained across the complete
+owning clause rather than a fixed word window. Figures are atomic content
+records. Heading-delimited section fallback stops at sibling `article` and
+`section` containers, and an article wrapping nested sections cannot become a
+broad content scope. When a homepage section
 contains both a headline and items, both must validate inside one semantic or
 heading-delimited source section before admission.
 Only actual submit inputs contribute input-value CTA evidence; reset, image,
@@ -201,7 +205,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 3,453 insertions and 72 deletions across seven files. This
+The reviewed diff is 3,509 insertions and 72 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource
