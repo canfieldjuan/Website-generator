@@ -83,9 +83,10 @@ Modernize:
 - Information density (reduce clutter, improve scannability)
 
 Multi-page consistency: if this homepage is part of a multi-page deliverable,
-the nav HTML, footer HTML, and trust strip must be identical across every page.
-Trusted code applies the shared `:root` and font settings. Interior pages are
-generated using prompt 04. Never vary nav structure between pages.
+the nav HTML, footer HTML, and any evidence-backed trust strip must be identical
+across every page. Trusted code applies the shared `:root` and font settings.
+Interior pages are generated using prompt 04. Never vary nav structure between
+pages.
 
 ---
 
@@ -213,7 +214,8 @@ Hero section structure (always in this order):
    d. ONLY if none of the above are extractable, the existing `site.tagline` -- but ONLY if it does not match the mission-statement patterns above.
    If nothing usable exists, output NO subhead element rather than a mission statement.
 4. Dual CTAs (see below)
-5. Trust strip (see below)
+5. Trust strip only when SITE JSON contains an evidence-backed trust value (see
+   below); otherwise omit it completely
 
 The headline and both CTAs must be visible without scrolling on a 1280px desktop
 and a 390px mobile screen.
@@ -258,28 +260,33 @@ CTA COPY RULE: Always use first-person or action-specific labels.
 
 ## TRUST STRIP
 
-Every redesign includes a trust strip. It sits directly below the hero CTAs,
-visible without scrolling.
+Include a trust strip only when SITE JSON contains at least one source-owned
+review, quantified-experience, credential, award, or credibility value. When
+present, it sits directly below the hero CTAs, visible without scrolling.
 
 Content priority order (use the highest one available, skip lower if higher exists):
 1. Third-party review score: star rating + count + platform (e.g. "4.9 stars -- 312 Google Reviews") -- HIGHEST VALUE
 2. Quantified experience: years in business, cases handled, clients served (e.g. "Serving Effingham since 1987", "500+ cases handled")
 3. Credentials / certifications / bar membership badges
 4. Awards or recognitions (named, specific -- not "award-winning")
-5. Self-authored credibility claim -- ONLY if nothing above exists
+5. Exact source-owned credibility line from `social_proof_lines`
 
 NEVER fill the trust strip with the firm's own mission statement or tagline.
 A self-authored claim like 'We work hard for our clients' has zero persuasion value.
-If no third-party signal exists, use a specific factual claim: years established, number of attorneys, geographic coverage.
+If none of the source-owned values above exists, omit the trust strip. Never
+invent or infer years established, staff counts, geographic coverage, review
+scores, credentials, or any substitute trust content just to fill the component.
 
 Design: horizontal band, muted background (one step off --bg), small condensed font,
 icons or star glyphs if space allows. Not a section -- a compact strip, 44-52px tall.
 
 TRUST SIGNAL PLACEMENT RULE:
 Never isolate all social proof on a single testimonials page.
-Place at least one trust signal within visual proximity of every major CTA on the page.
-In the content sections, inline review quotes or certification badges near the section CTA.
-In the sidebar action block, repeat the review summary below the primary button.
+When evidence-backed trust content exists, place at least one trust signal within
+visual proximity of every major CTA on the page. In the content sections, inline
+review quotes or certification badges near the section CTA. In the sidebar
+action block, repeat the review summary below the primary button. When none
+exists, omit these elements rather than generating substitutes.
 
 ---
 
@@ -602,12 +609,13 @@ Before outputting, verify:
 - [ ] Ticker present only if site has news/alerts content
 - [ ] Logo visible in nav (with text fallback)
 - [ ] Brand colors are recognizable from the original site
-- [ ] Above-the-fold shows headline (service + location), dual CTAs, and trust strip without scrolling
+- [ ] Above-the-fold shows headline (service + location) and dual CTAs; an
+      evidence-backed trust strip is also visible there when one exists
 - [ ] Dual CTA pattern matches conversion_profile.urgency_type
 - [ ] CTA labels are specific and action-oriented (no "Submit" or "Contact Us")
 - [ ] Phone number is in the sticky nav if urgency_type is emergency or both
-- [ ] Trust strip is visible above the fold
-- [ ] At least one trust signal appears near every major CTA
+- [ ] Trust strip is omitted when SITE JSON has no source-owned trust value
+- [ ] When source-owned trust exists, at least one trust signal appears near every major CTA
 - [ ] Section order matches the industry priority table for this site.type
 - [ ] If homepage_blueprint is present: section_sequence is preserved in the output, no listed primitive is missing, and additions follow the blueprint > industry-table layering rule
 - [ ] If homepage_blueprint.above_fold_form is true: an inline form is rendered above the fold in the redesign

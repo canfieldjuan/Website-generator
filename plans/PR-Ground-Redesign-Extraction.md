@@ -40,8 +40,9 @@ analysis may control presentation but may not authorize a visible business claim
    by code; never accept model-authored provenance. Keep homepage sections free of
    that field because generation uses it as the interior-enrichment discriminator.
 6. Remove redesign-prompt instructions that synthesize availability promises from
-   urgency classification, and state the derived-versus-source authority boundary
-   at the generation prompt.
+   urgency classification or require trust claims when no source-owned signal
+   exists, and state the derived-versus-source authority boundary at the
+   generation prompt.
 7. Verify against exactly the truncated HTML slice sent to the model, not unseen
    trailing source, and add boundary regressions for valid and fabricated source
    facts, malformed and mixed structures, limits, relative/absolute URL evidence,
@@ -91,7 +92,8 @@ business-specific claims.
   pipeline contract already treats enrichment as optional.
 - Normalized matching accepts browser-equivalent whitespace, HTML entities,
   canonical phone/email forms, and source-relative URL resolution. It does not use
-  a page-wide compact substring for URLs or contacts.
+  a page-wide compact substring for URLs or contacts, and shortened text cannot
+  drop nearby source negation or match inside a larger word.
 - Derived fields remain in the established document shape for design continuity,
   but generation instructions explicitly prevent them from authorizing factual
   copy.
@@ -112,9 +114,9 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 16 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 18 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
-- `python -m unittest discover -s tests`: 301 tests passed; 34 skipped.
+- `python -m unittest discover -s tests`: 303 tests passed; 34 skipped.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.
@@ -132,7 +134,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The staged diff is 1,358 insertions and 32 deletions across seven files. This
+The reviewed diff is 1,520 insertions and 46 deletions across seven files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource

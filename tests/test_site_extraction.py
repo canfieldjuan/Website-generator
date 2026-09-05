@@ -297,6 +297,79 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             with self.assertRaisesRegex(SiteExtractionError, "source phone"):
                 pipeline.analyze_site(html, source_url="https://acme.test/")
 
+    def test_claim_text_cannot_drop_source_negation(self):
+        cases = (
+            (
+                "<h1>Acme Cleaning</h1><p>No Free Estimates</p>",
+                {"existing_ctas": ["Free Estimates"]},
+            ),
+            (
+                "<h1>Acme Cleaning</h1><p>Not BBB Accredited</p>",
+                {"trust_signals": {"certifications": ["BBB Accredited"]}},
+            ),
+            (
+                "<h1>Acme Cleaning</h1><p>Unlicensed subcontractors prohibited</p>",
+                {"trust_signals": {"certifications": ["Licensed"]}},
+            ),
+        )
+        for html, conversion_profile in cases:
+            with (
+                self.subTest(html=html),
+                self.assertRaisesRegex(SiteExtractionError, "grounded|negation"),
+            ):
+                validate_site_analysis(
+                    {
+                        "site": {"name": "Acme Cleaning"},
+                        "conversion_profile": conversion_profile,
+                    },
+                    html,
+                )
+
+    def test_complete_negated_claim_and_separate_positive_occurrence_are_admitted(self):
+        complete_claim = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {"existing_ctas": ["No Surprise Fees"]},
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                complete_claim,
+                "<h1>Acme Cleaning</h1><p>No Surprise Fees</p>",
+            ),
+            complete_claim,
+        )
+
+        positive_claim = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {"existing_ctas": ["Free Estimates"]},
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                positive_claim,
+                (
+                    "<h1>Acme Cleaning</h1><p>No Free Estimates for repairs.</p>"
+                    "<a>Free Estimates</a>"
+                ),
+            ),
+            positive_claim,
+        )
+
+        rhetorical_positive = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {
+                "trust_signals": {"certifications": ["BBB Accredited"]}
+            },
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                rhetorical_positive,
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    "<p>Not only BBB Accredited but locally owned.</p>"
+                ),
+            ),
+            rhetorical_positive,
+        )
+
 
 class EnrichmentGroundingTests(unittest.TestCase):
     def test_content_enrichment_uses_code_owned_source_url(self):
@@ -518,6 +591,8 @@ class RedesignPromptAuthorityTests(unittest.TestCase):
         self.assertNotIn('"Get My Free Quote"', prompt)
         self.assertNotIn("Build the headline from `site.type`", prompt)
         self.assertIn("do not substitute `site.type` as", prompt)
+        self.assertNotIn("Every redesign includes a trust strip", prompt)
+        self.assertIn("If none of the source-owned values above exists, omit", prompt)
 
 
 if __name__ == "__main__":

@@ -262,6 +262,14 @@ _PHONE_PATTERN = re.compile(
     re.I,
 )
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
+_CLAUSE_BREAK_PATTERN = re.compile(
+    r"[,.!?;:]|\b(?:but|however|yet|except)\b",
+    re.I,
+)
+_WORD_PATTERN = re.compile(r"[a-z0-9]+(?:['’][a-z]+)?", re.I)
+_NEGATION_TERMS = frozenset(
+    {"no", "not", "never", "without", "neither", "nor", "cannot", "non"}
+)
 
 
 def _normalize_text(value: str) -> str:
@@ -278,6 +286,40 @@ def _phone_variants(value: str) -> set[str]:
     return variants
 
 
+def _phrase_occurrences(text: str, phrase: str) -> Iterable[int]:
+    start = 0
+    while True:
+        index = text.find(phrase, start)
+        if index < 0:
+            return
+        end = index + len(phrase)
+        starts_on_boundary = index == 0 or not text[index - 1].isalnum()
+        ends_on_boundary = end == len(text) or not text[end].isalnum()
+        if starts_on_boundary and ends_on_boundary:
+            yield index
+        start = index + max(len(phrase), 1)
+
+
+def _occurrence_is_negated(text: str, start: int) -> bool:
+    preceding_clause = _CLAUSE_BREAK_PATTERN.split(text[:start])[-1]
+    words = [word.replace("’", "'") for word in _WORD_PATTERN.findall(preceding_clause)]
+    nearby = words[-6:]
+    for index, word in enumerate(nearby):
+        if (
+            word == "not"
+            and index + 1 < len(nearby)
+            and nearby[index + 1]
+            in {
+                "only",
+                "just",
+            }
+        ):
+            continue
+        if word in _NEGATION_TERMS or word.endswith("n't"):
+            return True
+    return False
+
+
 def _attribute_values(value: Any) -> Iterable[str]:
     if isinstance(value, str):
         yield value
@@ -288,6 +330,7 @@ def _attribute_values(value: Any) -> Iterable[str]:
 @dataclass(frozen=True)
 class SourceEvidence:
     text: str
+    text_segments: tuple[str, ...]
     urls: frozenset[str]
     image_urls: frozenset[str]
     emails: frozenset[str]
@@ -370,8 +413,14 @@ class SourceEvidence:
         for match in _PHONE_PATTERN.finditer(normalized_contacts):
             phones.update(_phone_variants(match.group(0)))
 
+        normalized_segments = tuple(
+            dict.fromkeys(
+                segment for part in text_parts if (segment := _normalize_text(part))
+            )
+        )
         return cls(
             text=_normalize_text(" ".join(text_parts)),
+            text_segments=normalized_segments,
             urls=resolved(raw_urls),
             image_urls=resolved(raw_image_urls),
             emails=frozenset(emails),
@@ -382,8 +431,22 @@ class SourceEvidence:
         if value is None:
             return
         normalized = _normalize_text(value)
-        if not normalized or normalized not in self.text:
+        if not normalized:
             raise SiteExtractionError(f"{path} is not grounded in source text.")
+        found = False
+        for segment in self.text_segments:
+            for index in _phrase_occurrences(segment, normalized):
+                found = True
+                if not _occurrence_is_negated(segment, index):
+                    return
+        if not found:
+            for index in _phrase_occurrences(self.text, normalized):
+                found = True
+                if not _occurrence_is_negated(self.text, index):
+                    return
+        if found:
+            raise SiteExtractionError(f"{path} drops or reverses source negation.")
+        raise SiteExtractionError(f"{path} is not grounded in source text.")
 
     def require_email(self, path: str, value: Any) -> None:
         if value is None:
