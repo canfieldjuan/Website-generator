@@ -302,18 +302,6 @@ _ASSERTION_CONTEXT_TAGS = {
     "td",
     "th",
 }
-_CONTACT_CONTEXT_TAGS = (
-    _ASSERTION_CONTEXT_TAGS
-    - {
-        "aside",
-        "body",
-        "footer",
-        "header",
-        "main",
-        "nav",
-        "section",
-    }
-) | {"a"}
 _IGNORED_TEXT_TAGS = {"noscript", "script", "style", "template"}
 _EMAIL_PATTERN = re.compile(
     r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@"
@@ -355,7 +343,15 @@ _POSTPOSED_NEGATION_TERMS = frozenset(
     }
 )
 _RESTRICTION_TERMS = frozenset(
-    {"only", "solely", "exclusive", "exclusively", "restricted", "limited"}
+    {
+        "except",
+        "only",
+        "solely",
+        "exclusive",
+        "exclusively",
+        "restricted",
+        "limited",
+    }
 )
 _CONDITIONAL_TERMS = frozenset(
     {
@@ -762,7 +758,6 @@ class SourceEvidence:
 
         soup = BeautifulSoup(source_html, "html.parser")
         context_parts: dict[int, list[str]] = {}
-        contact_context_parts: dict[int, list[str]] = {}
         for node in soup.find_all(string=True):
             if isinstance(node, Comment):
                 continue
@@ -776,26 +771,10 @@ class SourceEvidence:
             while context is not None and context.name not in _ASSERTION_CONTEXT_TAGS:
                 context = context.parent
             context_parts.setdefault(id(context or node), []).append(value)
-            contact_context = parent
-            while (
-                contact_context is not None
-                and contact_context.name not in _CONTACT_CONTEXT_TAGS
-            ):
-                contact_context = contact_context.parent
-            contact_context_parts.setdefault(
-                id(contact_context or parent or node), []
-            ).append(value)
         assertion_segments = tuple(
             dict.fromkeys(
                 segment
                 for parts in context_parts.values()
-                if (segment := _normalize_text(" ".join(parts)))
-            )
-        )
-        contact_segments = tuple(
-            dict.fromkeys(
-                segment
-                for parts in contact_context_parts.values()
                 if (segment := _normalize_text(" ".join(parts)))
             )
         )
@@ -809,8 +788,8 @@ class SourceEvidence:
         title_parts: list[str] = []
         h1_parts: list[str] = []
         heading_parts: list[str] = []
-        email_values: list[str] = list(contact_segments)
-        phone_values: list[str] = list(contact_segments)
+        email_values: list[str] = list(assertion_segments)
+        phone_values: list[str] = list(assertion_segments)
         action_labels: set[str] = set()
 
         for element in soup.find_all("title", limit=MAX_ITEMS):
@@ -866,10 +845,25 @@ class SourceEvidence:
                         contact = _contact_destination(value)
                         if contact is not None:
                             scheme, destination = contact
+                            assertion_context = element
+                            while (
+                                assertion_context is not None
+                                and assertion_context.name
+                                not in _ASSERTION_CONTEXT_TAGS
+                            ):
+                                assertion_context = assertion_context.parent
+                            context_text = _normalize_text(
+                                assertion_context.get_text(" ", strip=True)
+                                if assertion_context is not None
+                                else action_label
+                            )
+                            contextual_destination = " ".join(
+                                part for part in (context_text, destination) if part
+                            )
                             if scheme == "mailto":
-                                email_values.append(destination)
+                                email_values.append(contextual_destination)
                             else:
-                                phone_values.append(destination)
+                                phone_values.append(contextual_destination)
                     if name in _IMAGE_ATTRIBUTES:
                         raw_image_urls.add(value)
                         element_image_urls.add(value)
@@ -1018,14 +1012,27 @@ class SourceEvidence:
                     admitted.add(urljoin(source_url, candidate))
             return frozenset(admitted)
 
-        emails = {
-            match.group(0).casefold()
-            for segment in email_values
-            for match in _EMAIL_PATTERN.finditer(segment)
-        }
+        emails: set[str] = set()
+        for raw_segment in email_values:
+            segment = _normalize_text(raw_segment)
+            for match in _EMAIL_PATTERN.finditer(segment):
+                if _occurrence_is_negated(segment, match.start(), len(match.group(0))):
+                    continue
+                if _occurrence_is_nonassertive(
+                    segment, match.start(), len(match.group(0))
+                ):
+                    continue
+                emails.add(match.group(0).casefold())
         phones: set[str] = set()
-        for segment in phone_values:
+        for raw_segment in phone_values:
+            segment = _normalize_text(raw_segment)
             for match in _PHONE_PATTERN.finditer(segment):
+                if _occurrence_is_negated(segment, match.start(), len(match.group(0))):
+                    continue
+                if _occurrence_is_nonassertive(
+                    segment, match.start(), len(match.group(0))
+                ):
+                    continue
                 phones.update(_phone_variants(match.group(0)))
 
         attribute_segments = tuple(

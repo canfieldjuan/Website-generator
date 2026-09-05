@@ -167,6 +167,13 @@ button, and text inputs cannot promote their values into published CTA copy.
 Classifications, layout choices, color selections, and image-generation guidance
 are admitted as typed derived metadata, not source facts.
 
+Restriction context includes explicit exception clauses, so a shortened claim
+cannot drop an `except ...` qualifier while the complete qualified source phrase
+remains admissible. Visible and `tel:`/`mailto:` contact candidates are screened
+in their owning assertion context before becoming publishable contact evidence.
+Generated actions validate every distinct accessible, visible, submit-value, and
+title label; one neutral ARIA label cannot conceal unsupported visible wording.
+
 `analyze_site()` passes the source URL alongside HTML, validates the decoded model
 document, and returns it only after the verifier succeeds. `enrich_site_json()`
 validates each decoded page-shaped result against that page's HTML before merging,
@@ -236,6 +243,10 @@ business-specific claims.
 - Review-mode action binding check: the focused card-mode and aggregate-mode
   build/admission regressions both passed after their distinct code-owned labels
   were bound to the corresponding review mode.
+- Final assertion-ownership boundary pass: 57 focused tests passed, covering
+  restricted-versus-complete exception claims, negated visible and linked
+  phone/email contacts versus positive links, and accessible-label versus
+  visible-action wording.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.

@@ -485,6 +485,32 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     f"<h1>Acme Cleaning</h1>{source}",
                 )
 
+    def test_claim_text_preserves_except_restrictions(self):
+        shortened = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {
+                "trust_signals": {"social_proof_lines": ["Free Estimates"]}
+            },
+        }
+        source = (
+            "<h1>Acme Cleaning</h1>"
+            "<p>Free Estimates are available except to non-members.</p>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(shortened, source)
+
+        complete = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {
+                "trust_signals": {
+                    "social_proof_lines": [
+                        "Free Estimates are available except to non-members"
+                    ]
+                }
+            },
+        }
+        self.assertEqual(validate_site_analysis(complete, source), complete)
+
     def test_existing_cta_requires_an_exact_source_action_label(self):
         document = {
             "site": {"name": "Acme Cleaning"},
@@ -568,6 +594,54 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             document,
         )
+
+    def test_contact_evidence_preserves_assertion_context(self):
+        contacts = (
+            ("phone", "217-555-0100", "Do not call 217-555-0100"),
+            (
+                "phone",
+                "217-555-0100",
+                'Do not call <a href="tel:217-555-0100">this number</a>',
+            ),
+            ("email", "billing@acme.test", "Do not email billing@acme.test"),
+            (
+                "email",
+                "billing@acme.test",
+                'Do not email <a href="mailto:billing@acme.test">this address</a>',
+            ),
+        )
+        for field, value, source_contact in contacts:
+            document = {
+                "site": {
+                    "name": "Acme Cleaning",
+                    "contact": {field: value},
+                }
+            }
+            with (
+                self.subTest(field=field, source_contact=source_contact),
+                self.assertRaisesRegex(SiteExtractionError, f"source {field}"),
+            ):
+                validate_site_analysis(
+                    document,
+                    f"<h1>Acme Cleaning</h1><p>{source_contact}</p>",
+                )
+
+        positive = {
+            "site": {
+                "name": "Acme Cleaning",
+                "contact": {
+                    "phone": "217-555-0100",
+                    "email": "billing@acme.test",
+                },
+            }
+        }
+        positive_source = (
+            "<h1>Acme Cleaning</h1><p>"
+            '<a href="tel:217-555-0100">Call us</a> or '
+            '<a href="mailto:billing@acme.test">email us</a>.'
+            "</p>"
+        )
+        self.assertEqual(validate_site_analysis(positive, positive_source), positive)
 
     def test_claim_bearing_service_item_rejects_question_only_evidence(self):
         document = {

@@ -2140,10 +2140,18 @@ _NEUTRAL_ACTION_LABEL_TERMS = frozenset(
 
 def _is_neutral_action_label(value: str) -> bool:
     tokens = _alphanumeric_tokens(value)
-    return bool(tokens) and all(token in _NEUTRAL_ACTION_LABEL_TERMS for token in tokens)
+    return bool(tokens) and all(
+        token in _NEUTRAL_ACTION_LABEL_TERMS for token in tokens
+    )
 
 
-def _generated_action_label(element: Tag) -> str:
+def _generated_action_labels(element: Tag) -> tuple[str, ...]:
+    labels: list[str] = []
+
+    def append(value: object) -> None:
+        if isinstance(value, str) and value.strip() and value.strip() not in labels:
+            labels.append(value.strip())
+
     labelled_by = element.get("aria-labelledby")
     if isinstance(labelled_by, str) and labelled_by.strip():
         root = element.find_parent("body")
@@ -2154,20 +2162,13 @@ def _generated_action_label(element: Tag) -> str:
                 if target is not None:
                     labelled_parts.append(target.get_text(" ", strip=True))
         accessible_label = " ".join(part for part in labelled_parts if part)
-        if accessible_label:
-            return accessible_label
-    aria_label = element.get("aria-label")
-    if isinstance(aria_label, str) and aria_label.strip():
-        return aria_label.strip()
+        append(accessible_label)
+    append(element.get("aria-label"))
     if element.name.casefold() == "input":
-        value = element.get("value")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    visible_text = element.get_text(" ", strip=True)
-    if visible_text:
-        return visible_text
-    title = element.get("title")
-    return title.strip() if isinstance(title, str) else ""
+        append(element.get("value"))
+    append(element.get_text(" ", strip=True))
+    append(element.get("title"))
+    return tuple(labels)
 
 
 def _validate_action_urls(
@@ -2212,9 +2213,7 @@ def _validate_action_urls(
             and str(element.get("type") or "").casefold() == "submit"
         )
         if is_labelled_action:
-            action_label = _generated_action_label(element)
-            if action_label:
-                action_labels.append(action_label)
+            action_labels.extend(_generated_action_labels(element))
         action_values.extend(
             value
             for attribute in attributes

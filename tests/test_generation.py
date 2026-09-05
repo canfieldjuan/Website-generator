@@ -1297,6 +1297,18 @@ class BodyAssemblyTests(unittest.TestCase):
                 expected_action_urls=contract,
             )
 
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "non-neutral action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><a aria-label="Contact Us" '
+                    'href="https://source.test/book">Book Appointment</a></body>'
+                ),
+                expected_action_urls=contract,
+            )
+
         neutral_body = (
             '<body><a href="https://source.test/book">Contact Us</a>'
             '<a href="https://source.test/book">Book</a>'
