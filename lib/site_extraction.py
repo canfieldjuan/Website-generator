@@ -346,6 +346,9 @@ _POSTPOSED_NEGATION_TERMS = frozenset(
         "suspended",
     }
 )
+_RESTRICTION_TERMS = frozenset(
+    {"only", "solely", "exclusive", "exclusively", "restricted", "limited"}
+)
 _CONDITIONAL_TERMS = frozenset(
     {
         "if",
@@ -395,11 +398,7 @@ def _words_contain_negation(words: list[str], *, postposed: bool = False) -> boo
         if (
             word == "not"
             and index + 1 < len(words)
-            and words[index + 1]
-            in {
-                "only",
-                "just",
-            }
+            and words[index + 1] in _RESTRICTION_TERMS | {"just"}
         ):
             continue
         if word in terms or word.endswith("n't"):
@@ -411,7 +410,7 @@ def _words_contain_restriction(words: list[str]) -> bool:
     if any(word in _CONDITIONAL_TERMS for word in words):
         return True
     return any(
-        word in {"only", "solely"} and not (index > 0 and words[index - 1] == "not")
+        word in _RESTRICTION_TERMS and not (index > 0 and words[index - 1] == "not")
         for index, word in enumerate(words)
     )
 
@@ -462,6 +461,32 @@ def _contact_destination(value: str) -> tuple[str, str] | None:
     return (scheme, destination) if destination else None
 
 
+def same_site_origin(first_url: Any, second_url: Any) -> bool:
+    if not isinstance(first_url, str) or not isinstance(second_url, str):
+        return False
+    first = urlsplit(first_url)
+    second = urlsplit(second_url)
+    if (
+        first.scheme.casefold() not in {"http", "https"}
+        or second.scheme.casefold() not in {"http", "https"}
+        or not first.hostname
+        or not second.hostname
+    ):
+        return False
+
+    def identity(parsed: Any) -> tuple[str, str, int | None]:
+        scheme = parsed.scheme.casefold()
+        hostname = (parsed.hostname or "").casefold()
+        if hostname.startswith("www."):
+            hostname = hostname[4:]
+        return (scheme, hostname, parsed.port or (443 if scheme == "https" else 80))
+
+    try:
+        return identity(first) == identity(second)
+    except ValueError:
+        return False
+
+
 def _is_distinct_fetchable_page(value: Any, source_url: str | None) -> bool:
     if not isinstance(value, str) or not value.strip() or not source_url:
         return False
@@ -475,16 +500,7 @@ def _is_distinct_fetchable_page(value: Any, source_url: str | None) -> bool:
     ):
         return False
 
-    def origin_identity(parsed: Any) -> tuple[str, str, int | None]:
-        scheme = parsed.scheme.casefold()
-        default_port = 443 if scheme == "https" else 80
-        return (
-            scheme,
-            (parsed.hostname or "").casefold(),
-            parsed.port or default_port,
-        )
-
-    if origin_identity(destination) != origin_identity(source):
+    if not same_site_origin(source_url, destination.geturl()):
         return False
     return (destination.path or "/", destination.query) != (
         source.path or "/",
@@ -536,6 +552,26 @@ def _is_source_logo(image: Any) -> bool:
 
 
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
+_TITLE_SEPARATOR_PATTERN = re.compile(r"\s*(?:\||[–—•·])\s*")
+_GENERIC_PAGE_IDENTITY_PARTS = frozenset(
+    {
+        "about",
+        "about us",
+        "blog",
+        "contact",
+        "contact us",
+        "faq",
+        "frequently asked questions",
+        "gallery",
+        "home",
+        "menu",
+        "news",
+        "our services",
+        "our team",
+        "services",
+        "team",
+    }
+)
 _ATOMIC_RECORD_TAGS = {
     "address",
     "blockquote",
@@ -578,6 +614,13 @@ def _heading_owned_fragment(heading: Any) -> str:
             if isinstance(sibling_name, str)
             else None
         )
+        if sibling_heading is None and sibling_name is not None:
+            nested_heading = sibling.find(_HEADING_TAG_PATTERN)
+            sibling_heading = (
+                _HEADING_TAG_PATTERN.fullmatch(nested_heading.name or "")
+                if nested_heading is not None
+                else None
+            )
         if (
             sibling_heading is not None
             and int(sibling_heading.group(1)) <= heading_level
@@ -677,6 +720,7 @@ class SourceEvidence:
     text_segments: tuple[str, ...]
     assertion_segments: tuple[str, ...]
     identity_segments: tuple[str, ...]
+    identity_exact_segments: tuple[str, ...]
     heading_segments: tuple[str, ...]
     action_labels: frozenset[str]
     action_pairs: frozenset[tuple[str, str]]
@@ -756,6 +800,7 @@ class SourceEvidence:
         raw_image_pairs: set[tuple[str, str]] = set()
         raw_logo_urls: set[str] = set()
         identity_parts: list[str] = []
+        title_parts: list[str] = []
         h1_parts: list[str] = []
         heading_parts: list[str] = []
         email_values: list[str] = list(contact_segments)
@@ -763,7 +808,7 @@ class SourceEvidence:
         action_labels: set[str] = set()
 
         for element in soup.find_all("title", limit=MAX_ITEMS):
-            identity_parts.append(element.get_text(" ", strip=True))
+            title_parts.append(element.get_text(" ", strip=True))
         for element in soup.find_all(
             ["h1", "h2", "h3", "h4", "h5", "h6"], limit=MAX_ITEMS
         ):
@@ -850,13 +895,49 @@ class SourceEvidence:
             if element.name != "img" and _element_has_logo_marker(element):
                 identity_parts.append(element.get_text(" ", strip=True))
 
-        if h1_parts:
+        explicit_identity_seeds = tuple(
+            segment for part in identity_parts if (segment := _normalize_text(part))
+        )
+        h1_seeds = tuple(
+            segment for part in h1_parts if (segment := _normalize_text(part))
+        )
+        title_identity_parts: list[str] = []
+        for title in title_parts:
+            components = tuple(
+                component
+                for raw_component in _TITLE_SEPARATOR_PATTERN.split(title)
+                if (component := _normalize_text(raw_component))
+                and component not in _GENERIC_PAGE_IDENTITY_PARTS
+            )
+            if len(components) == 1:
+                title_identity_parts.extend(components)
+                continue
+            corroborated = tuple(
+                component
+                for component in components
+                if any(
+                    next(_phrase_occurrences(seed, component), None) is not None
+                    or next(_phrase_occurrences(component, seed), None) is not None
+                    for seed in explicit_identity_seeds + h1_seeds
+                )
+            )
+            if len(corroborated) == 1:
+                title_identity_parts.extend(corroborated)
+
+        candidate_h1_parts = [
+            part
+            for part in h1_parts
+            if _normalize_text(part) not in _GENERIC_PAGE_IDENTITY_PARTS
+        ]
+        if candidate_h1_parts:
             identity_seeds = tuple(
-                segment for part in identity_parts if (segment := _normalize_text(part))
+                segment
+                for part in (*identity_parts, *title_identity_parts)
+                if (segment := _normalize_text(part))
             )
             corroborated_h1_parts = [
                 part
-                for part in h1_parts
+                for part in candidate_h1_parts
                 if (normalized := _normalize_text(part))
                 and any(
                     next(_phrase_occurrences(seed, normalized), None) is not None
@@ -865,7 +946,7 @@ class SourceEvidence:
                 )
             ]
             identity_parts.extend(
-                corroborated_h1_parts if identity_seeds else h1_parts[:1]
+                corroborated_h1_parts if identity_seeds else candidate_h1_parts[:1]
             )
 
         form_control_labels: list[str] = []
@@ -1000,6 +1081,7 @@ class SourceEvidence:
                     if (segment := _normalize_text(part))
                 )
             ),
+            identity_exact_segments=tuple(dict.fromkeys(title_identity_parts)),
             heading_segments=tuple(
                 dict.fromkeys(
                     segment
@@ -1059,6 +1141,8 @@ class SourceEvidence:
         normalized = _normalize_text(value)
         if not normalized:
             raise SiteExtractionError(f"{path} is not grounded in source identity.")
+        if normalized in self.identity_exact_segments:
+            return
         found = False
         for source_text in self.identity_segments:
             for index in _phrase_occurrences(source_text, normalized):

@@ -2076,7 +2076,8 @@ def _contract_text_values(values: object, label: str) -> tuple[str, ...]:
 
 _CAPABILITY_ACTION_LABEL_PATTERN = re.compile(
     r"\b(?:book(?:ing)?|schedul(?:e|ing)|quotes?|estimates?|appointments?|"
-    r"reserv(?:e|ations?)|consultations?)\b",
+    r"reserv(?:e|ations?)|consultations?|orders?|ordering|purchas(?:e|es|ing)|"
+    r"buys?|shop(?:ping)?|checkout|payments?)\b",
     re.I,
 )
 

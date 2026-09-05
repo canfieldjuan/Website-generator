@@ -10,6 +10,7 @@ from lib.site_extraction import (
     MAX_ITEMS,
     MAX_TEXT_LENGTH,
     SiteExtractionError,
+    same_site_origin,
     validate_enrichment_result,
     validate_site_analysis,
 )
@@ -407,6 +408,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         }
         for source_text in (
             "Free Estimates are not only available but easy to request",
+            "Free Estimates are not exclusively available to members",
             "Free Estimates are available without obligation",
             "Free Estimates are available, however financing is not",
         ):
@@ -456,6 +458,15 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             (
                 "<p><strong>Free Estimates</strong> are available when you join "
                 "the maintenance plan.</p>",
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
+            (
+                "<p><strong>Free Estimates</strong> are available exclusively to "
+                "maintenance-plan members.</p>",
+                {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
+            ),
+            (
+                "<p><strong>Free Estimates</strong> are limited to members.</p>",
                 {"trust_signals": {"social_proof_lines": ["Free Estimates"]}},
             ),
         )
@@ -665,7 +676,24 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 multiple_h1_source,
             )
 
+        page_title_source = "<title>Services | Acme Cleaning</title><h1>Services</h1>"
+        self.assertEqual(
+            validate_site_analysis(valid, page_title_source),
+            valid,
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Services"}},
+                page_title_source,
+            )
+
     def test_pages_to_fetch_derives_fetchability_from_destination(self):
+        self.assertTrue(
+            same_site_origin("https://acme.test/", "https://www.acme.test/services")
+        )
+        self.assertFalse(
+            same_site_origin("https://acme.test/", "https://partner.test/services")
+        )
         document = {
             "site": {"name": "Acme Cleaning"},
             "pages_to_fetch": [
@@ -1120,6 +1148,25 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(SiteExtractionError, "source text"):
             validate_site_analysis(heading_target, heading_target_source)
+
+        nested_heading_source = (
+            "<h1>Acme Cleaning</h1><nav>"
+            '<a href="#about-nested">About</a></nav>'
+            '<h2 id="about-nested">About Us</h2><div>Family owned.</div>'
+            "<div><h2>Contact Us</h2><p>Call today.</p></div>"
+        )
+        nested_heading_target = copy.deepcopy(valid)
+        nested_heading_target["single_page_sections"][0]["anchor"] = "#about-nested"
+        self.assertEqual(
+            validate_site_analysis(nested_heading_target, nested_heading_source),
+            nested_heading_target,
+        )
+        nested_heading_target["single_page_sections"][0]["content"] = {
+            "headline": "About Us",
+            "body_text": "Call today.",
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "source text"):
+            validate_site_analysis(nested_heading_target, nested_heading_source)
 
     def test_single_page_section_without_anchor_uses_one_heading_owned_scope(self):
         source = (
@@ -1685,6 +1732,36 @@ class EnrichmentGroundingTests(unittest.TestCase):
         self.assertIs(returned, site_json)
         self.assertEqual(site_json["sections"], [])
 
+    def test_pipeline_skips_enrichment_redirected_off_source_site(self):
+        site_json = {
+            "pages_to_fetch": [
+                {
+                    "fetchable": True,
+                    "priority": 1,
+                    "page_type": "services",
+                    "url": "https://acme.test/services",
+                }
+            ],
+            "sections": [],
+        }
+
+        with (
+            patch.object(
+                pipeline,
+                "fetch_and_clean_html",
+                return_value=(
+                    "<section><h1>Partner Services</h1></section>",
+                    "https://partner.test/services",
+                ),
+            ),
+            patch.object(pipeline, "get_openrouter_client") as client,
+        ):
+            returned = pipeline.enrich_site_json(site_json)
+
+        self.assertIs(returned, site_json)
+        self.assertEqual(site_json["sections"], [])
+        client.assert_not_called()
+
     def test_contact_enrichment_rejects_empty_contact_container(self):
         with self.assertRaisesRegex(SiteExtractionError, "no source content"):
             validate_enrichment_result(
@@ -1748,6 +1825,9 @@ class RedesignPromptAuthorityTests(unittest.TestCase):
         prompt = Path("references/02-redesign-gen-prompt.md").read_text(
             encoding="utf-8"
         )
+        interior_prompt = Path("references/04-interior-page-prompt.md").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("SOURCE AUTHORITY BOUNDARY", prompt)
         self.assertIn("Urgency controls CTA layout and relative emphasis only", prompt)
@@ -1762,6 +1842,10 @@ class RedesignPromptAuthorityTests(unittest.TestCase):
         self.assertIn("do not substitute `site.type` as", prompt)
         self.assertNotIn("Every redesign includes a trust strip", prompt)
         self.assertIn("If none of the source-owned values above exists, omit", prompt)
+        self.assertNotIn('Hours + "Order Online" or "Reserve" button', interior_prompt)
+        self.assertNotIn('"Get My Free Quote"', interior_prompt)
+        self.assertIn("copy an admitted source action label", interior_prompt)
+        self.assertIn("do not infer", interior_prompt)
 
 
 if __name__ == "__main__":

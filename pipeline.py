@@ -16,6 +16,7 @@ from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
 from lib.site_extraction import (
     SiteExtractionError,
+    same_site_origin,
     validate_enrichment_result,
     validate_site_analysis,
 )
@@ -575,6 +576,11 @@ def enrich_site_json(site_json):
             page_html, fetched_url = fetch_and_clean_html(url, include_source_url=True)
         except Exception as e:
             print(f"[!] Enrichment fetch failed for {url}: {e}")
+            continue
+        if not same_site_origin(url, fetched_url):
+            print(
+                f"[!] Enrichment redirect left the source site for {url}; skipping."
+            )
             continue
 
         prompt_html = page_html[:ENRICHMENT_HTML_TRUNCATE]

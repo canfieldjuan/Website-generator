@@ -1257,7 +1257,12 @@ class BodyAssemblyTests(unittest.TestCase):
                     expected_action_urls=contract,
                 )
 
-        for fabricated_label in ("Request My Quote", "Book My Appointment"):
+        for fabricated_label in (
+            "Request My Quote",
+            "Book My Appointment",
+            "Order Online",
+            "Buy Now",
+        ):
             with (
                 self.subTest(fabricated_label=fabricated_label),
                 self.assertRaisesRegex(

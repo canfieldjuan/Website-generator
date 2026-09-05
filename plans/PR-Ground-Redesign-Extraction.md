@@ -56,6 +56,7 @@ analysis may control presentation but may not authorize a visible business claim
 - `lib/generation.py`
 - `pipeline.py`
 - `references/02-redesign-gen-prompt.md`
+- `references/04-interior-page-prompt.md`
 - `tests/test_generation.py`
 - `tests/test_site_extraction.py`
 - `requirements.txt`
@@ -121,7 +122,8 @@ navigation logo.
 Fetchability is overwritten by code from the admitted destination and effective
 source URL: same-document anchors, same-page URLs, and external origins are not
 queued, while a distinct same-origin HTTP(S) page remains fetchable even if the
-model says otherwise.
+model says otherwise. The same source-site boundary is rechecked after fetch
+redirects and before any enrichment model call.
 Business identity uses assertion evidence. Nested content containers prevent a
 broad article from recombining separate cards. Form labels must match a complete
 accessible label, duplicate references to the same source label are collapsed,
@@ -131,9 +133,13 @@ belong to the same source action.
 Business identity is further limited to title, a single primary H1, site-name
 metadata, and explicit brand/logo evidence; on a multiple-H1 page, title,
 site-name, or logo evidence corroborates the admitted H1, with only the first
-document H1 used when no corroborating identity exists. Ordinary subsection
+non-generic document H1 used when no corroborating identity exists. Ordinary
+subsection
 headings and arbitrary footer or body attribution cannot become the prospect
-name. Negation and conditional qualifiers are retained across the complete
+name. Generic page-title components are excluded, and isolated title identity
+components require an exact match rather than lending every phrase in the full
+document title to business identity. Negation and conditional qualifiers are
+retained across the complete
 owning clause rather than a fixed word window. Figures are atomic content
 records. Heading-delimited section fallback stops at sibling `article` and
 `section` containers, and an article wrapping nested sections cannot become a
@@ -191,12 +197,12 @@ business-specific claims.
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
-- `python -m unittest -q tests.test_site_extraction`: 50 tests passed, including
+- `python -m unittest -q tests.test_site_extraction`: 51 tests passed, including
   both-side/mixed/cap/provenance and prompt-visible-source boundaries.
 - `python -m unittest tests.test_generation -q`: 143 tests passed, including
   source-owned capability labels, neutral CTA wording, and destination-first
   rejection behavior.
-- `python -m unittest discover -s tests -q`: 335 tests passed with 34 skipped on
+- `python -m unittest discover -s tests -q`: 336 tests passed with 34 skipped on
   the current working tree.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
@@ -215,7 +221,7 @@ business-specific claims.
 
 ## Estimated diff size
 
-The reviewed diff is 3,788 insertions and 75 deletions across nine files. This
+The reviewed diff is 3,980 insertions and 80 deletions across ten files. This
 exceeds the 400-line soft target because the extraction document has many
 independently consumed fact paths: structure admission without provenance checks
 still trusts fabricated facts, while provenance checks without shape and resource
