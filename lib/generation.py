@@ -4,20 +4,29 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import os
 import re
+import socket
 import tempfile
+import threading
+import time
 import unicodedata
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Iterator
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from openai import DefaultHttpxClient, OpenAI
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 
@@ -29,13 +38,18 @@ DEFAULT_LOCAL_CONTEXT_TOKENS = 40960
 LOCAL_CONTEXT_SAFETY_TOKENS = 64
 DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
+DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS = 300.0
+MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS = 900.0
 LOCAL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
+LOCAL_STREAM_CHUNK_BYTES = 64 * 1024
+LOCAL_STREAM_WIRE_BYTES_PER_OUTPUT_TOKEN = 1024
 # Non-HTML generation keeps the historical ceiling. HTML callers apply the
 # tighter body-only ceiling before trusted code assembles the final document.
 DEFAULT_MAX_OUTPUT_TOKENS = 65536
 MAX_GENERATED_BODY_TOKENS = 8192
 MAX_SHORT_TEXT_OUTPUT_TOKENS = 4096
 MAX_HTML_BYTES = 2 * 1024 * 1024
+MAX_LOCAL_STREAM_FRAME_BYTES = MAX_HTML_BYTES * 6 + LOCAL_STREAM_CHUNK_BYTES
 MAX_GENERATED_BODY_BYTES = 512 * 1024
 SUPPORTED_PROVIDERS = frozenset(("local", "openrouter"))
 HOMEPAGE_SHARED_PAGE_CLASSES = frozenset(("page-wrap",))
@@ -322,6 +336,9 @@ class GenerationConfig:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     trust_env: bool = True
+    local_no_progress_timeout_seconds: float = (
+        DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS
+    )
 
 
 @dataclass(frozen=True)
@@ -674,6 +691,7 @@ def resolve_generation_config(
     )
 
     if provider_name == "local":
+        no_progress_timeout_seconds = _bounded_local_no_progress_timeout_env()
         local_model = (
             model
             or os.environ.get("LOCAL_GENERATION_MODEL")
@@ -693,6 +711,7 @@ def resolve_generation_config(
             ),
             timeout_seconds=timeout_seconds,
             max_output_tokens=max_output_tokens,
+            local_no_progress_timeout_seconds=no_progress_timeout_seconds,
         )
 
     openrouter_model = model or os.environ.get("OPENROUTER_GENERATION_MODEL")
@@ -728,6 +747,127 @@ def create_generation_client(config: GenerationConfig) -> OpenAI:
     )
 
 
+@dataclass(frozen=True)
+class _LocalRequestDeadline:
+    expires_at: float
+    expired: threading.Event
+
+
+_LOCAL_REQUEST_DEADLINE: ContextVar[_LocalRequestDeadline | None] = ContextVar(
+    "local_request_deadline",
+    default=None,
+)
+
+
+class _LocalDeadlineConnectionMixin:
+    """Abort a local request socket when its elapsed deadline expires."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._local_deadline_condition = threading.Condition()
+        self._local_deadline_token: object | None = None
+        self._local_deadline_state: _LocalRequestDeadline | None = None
+        self._local_deadline_thread: threading.Thread | None = None
+
+    def _run_local_deadline_watchdog(self) -> None:
+        while True:
+            with self._local_deadline_condition:
+                deadline = self._local_deadline_state
+                if deadline is None:
+                    self._local_deadline_thread = None
+                    return
+                remaining = deadline.expires_at - time.monotonic()
+                if remaining > 0:
+                    self._local_deadline_condition.wait(timeout=remaining)
+                    continue
+                deadline.expired.set()
+                active_socket = self.sock
+                self._local_deadline_thread = None
+            if active_socket is not None:
+                try:
+                    active_socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            return
+
+    def _arm_local_deadline(self, deadline: _LocalRequestDeadline) -> object:
+        token = object()
+        with self._local_deadline_condition:
+            self._local_deadline_token = token
+            self._local_deadline_state = deadline
+            watchdog = self._local_deadline_thread
+            if watchdog is None or not watchdog.is_alive():
+                watchdog = threading.Thread(
+                    target=self._run_local_deadline_watchdog,
+                    daemon=True,
+                    name="ollama-request-deadline",
+                )
+                self._local_deadline_thread = watchdog
+                watchdog.start()
+            self._local_deadline_condition.notify_all()
+        return token
+
+    def _disarm_local_deadline(self, token: object | None = None) -> None:
+        with self._local_deadline_condition:
+            if token is not None and self._local_deadline_token is not token:
+                return
+            self._local_deadline_token = None
+            self._local_deadline_state = None
+            self._local_deadline_condition.notify_all()
+
+    def request(self, *args: Any, **kwargs: Any) -> None:
+        deadline = _LOCAL_REQUEST_DEADLINE.get()
+        if deadline is None:
+            return super().request(*args, **kwargs)
+        token = self._arm_local_deadline(deadline)
+        try:
+            super().request(*args, **kwargs)
+            if deadline.expired.is_set():
+                raise TimeoutError("Local request deadline expired.")
+        except BaseException:
+            self._disarm_local_deadline(token)
+            raise
+
+    def getresponse(self) -> Any:
+        try:
+            return super().getresponse()
+        except BaseException:
+            self._disarm_local_deadline()
+            raise
+
+
+class _LocalDeadlineHTTPConnection(_LocalDeadlineConnectionMixin, HTTPConnection):
+    pass
+
+
+class _LocalDeadlineHTTPSConnection(_LocalDeadlineConnectionMixin, HTTPSConnection):
+    pass
+
+
+class _LocalDeadlineHTTPConnectionPool(HTTPConnectionPool):
+    ConnectionCls = _LocalDeadlineHTTPConnection
+
+
+class _LocalDeadlineHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = _LocalDeadlineHTTPSConnection
+
+
+class _LocalDeadlineHTTPAdapter(HTTPAdapter):
+    def init_poolmanager(
+        self,
+        connections: int,
+        maxsize: int,
+        block: bool = False,
+        **pool_kwargs: Any,
+    ) -> None:
+        super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
+        self.poolmanager.pool_classes_by_scheme = {
+            **self.poolmanager.pool_classes_by_scheme,
+            "http": _LocalDeadlineHTTPConnectionPool,
+            "https": _LocalDeadlineHTTPSConnectionPool,
+        }
+
+
 def create_local_generation_client(config: GenerationConfig) -> requests.Session:
     session = requests.Session()
     # A loopback-only provider must not inherit HTTP(S)_PROXY from the shell:
@@ -735,8 +875,12 @@ def create_local_generation_client(config: GenerationConfig) -> requests.Session
     # the configured Ollama URL itself is local. OpenRouter continues to
     # honor GenerationConfig.trust_env through create_generation_client.
     session.trust_env = False
+    deadline_adapter = _LocalDeadlineHTTPAdapter(max_retries=0)
+    session.mount("http://", deadline_adapter)
+    session.mount("https://", deadline_adapter)
     session.headers.update(
         {
+            "Accept-Encoding": "identity",
             "Authorization": f"Bearer {config.api_key}",
             "Content-Type": "application/json",
         }
@@ -782,6 +926,400 @@ def _raise_for_local_response_status(response: Any) -> None:
             f"Local generation endpoint returned redirect status {status_code}."
         )
     response.raise_for_status()
+
+
+def _bounded_local_no_progress_timeout_env() -> float:
+    value = _positive_float_env(
+        "LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS",
+        DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS,
+    )
+    if not math.isfinite(value) or value > MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS:
+        raise GenerationConfigurationError(
+            "LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS must be at most "
+            f"{MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS:g}."
+        )
+    return value
+
+
+def _local_request_timeout(
+    config: GenerationConfig,
+    deadline: float,
+) -> tuple[float, float]:
+    no_progress = config.local_no_progress_timeout_seconds
+    if (
+        isinstance(no_progress, bool)
+        or not isinstance(no_progress, (int, float))
+        or not math.isfinite(no_progress)
+        or no_progress <= 0
+        or no_progress > MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS
+    ):
+        raise GenerationConfigurationError(
+            "Local generation no-progress timeout must be a positive number at most "
+            f"{MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS:g}."
+        )
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise GenerationProviderUnavailable(
+            "Local generation exceeded its configured request deadline."
+        )
+    read_timeout = min(float(no_progress), remaining)
+    return min(LOCAL_PREFLIGHT_TIMEOUT_SECONDS, read_timeout), read_timeout
+
+
+def _local_no_progress_error(
+    stage: str,
+    timeout_seconds: float,
+) -> GenerationProviderUnavailable:
+    return GenerationProviderUnavailable(
+        f"Ollama made no {stage} progress within "
+        f"{timeout_seconds:g} seconds. Another local model "
+        "request may be using the runtime; retry when Ollama is free."
+    )
+
+
+def _local_stream_connection(response: Any) -> Any:
+    raw = getattr(response, "raw", None)
+    connection = getattr(raw, "connection", None)
+    arm_deadline = getattr(connection, "_arm_local_deadline", None)
+    disarm_deadline = getattr(connection, "_disarm_local_deadline", None)
+    if not callable(arm_deadline) or not callable(disarm_deadline):
+        raise GenerationProviderUnavailable(
+            "Ollama response does not expose elapsed deadline enforcement."
+        )
+    return connection
+
+
+def _set_local_stream_socket_timeout(connection: Any, timeout_seconds: float) -> None:
+    sock = getattr(connection, "sock", None)
+    settimeout = getattr(sock, "settimeout", None)
+    if not callable(settimeout):
+        raise GenerationProviderUnavailable(
+            "Ollama response does not expose a socket for deadline enforcement."
+        )
+    try:
+        settimeout(timeout_seconds)
+    except (OSError, ValueError) as exc:
+        raise GenerationProviderUnavailable(
+            "Ollama response socket rejected deadline enforcement."
+        ) from exc
+
+
+def _arm_local_stream_deadline(
+    connection: Any,
+    expires_at: float,
+    expired: threading.Event,
+) -> None:
+    connection._arm_local_deadline(
+        _LocalRequestDeadline(expires_at=expires_at, expired=expired)
+    )
+
+
+def _disarm_local_response_deadline(response: Any) -> None:
+    raw = getattr(response, "raw", None)
+    connection = getattr(raw, "connection", None)
+    disarm_deadline = getattr(connection, "_disarm_local_deadline", None)
+    if callable(disarm_deadline):
+        disarm_deadline()
+
+
+def _local_stream_wire_byte_limit(request_body: dict[str, Any]) -> int:
+    options = request_body.get("options")
+    num_predict = options.get("num_predict") if isinstance(options, dict) else None
+    if (
+        isinstance(num_predict, bool)
+        or not isinstance(num_predict, int)
+        or num_predict <= 0
+    ):
+        raise GenerationConfigurationError(
+            "Local generation requires a positive output-token limit."
+        )
+    return (
+        MAX_LOCAL_STREAM_FRAME_BYTES
+        + num_predict * LOCAL_STREAM_WIRE_BYTES_PER_OUTPUT_TOKEN
+    )
+
+
+def _iter_bounded_local_stream_lines(
+    response: Any,
+    *,
+    connection: Any,
+    deadline: float,
+    deadline_expired: threading.Event,
+    max_wire_bytes: int,
+    no_progress_timeout_seconds: float,
+    no_progress_deadline: float,
+    progress_stage: str,
+) -> Iterator[bytes]:
+    pending = bytearray()
+    wire_bytes = 0
+    raw = getattr(response, "raw", None)
+    read_once = getattr(raw, "read1", None)
+    if not callable(read_once):
+        raise GenerationProviderUnavailable(
+            "Ollama response does not expose bounded streaming reads."
+        )
+    progress_deadline = no_progress_deadline
+    while True:
+        now = time.monotonic()
+        total_remaining = deadline - now
+        progress_remaining = progress_deadline - now
+        if total_remaining <= 0:
+            raise GenerationProviderUnavailable(
+                "Local generation exceeded its configured request deadline."
+            )
+        if progress_remaining <= 0:
+            raise _local_no_progress_error(
+                progress_stage, no_progress_timeout_seconds
+            )
+        receive_deadline = min(deadline, progress_deadline)
+        _arm_local_stream_deadline(
+            connection,
+            receive_deadline,
+            deadline_expired,
+        )
+        _set_local_stream_socket_timeout(
+            connection,
+            min(total_remaining, progress_remaining),
+        )
+        try:
+            # read1 bounds returned data, but HTTP chunk framing may perform
+            # multiple receives internally. The connection watchdog enforces
+            # elapsed deadlines independently of this call returning.
+            chunk = read_once(LOCAL_STREAM_CHUNK_BYTES, decode_content=False)
+        except (OSError, requests.RequestException, Urllib3HTTPError) as exc:
+            if time.monotonic() >= deadline:
+                raise GenerationProviderUnavailable(
+                    "Local generation exceeded its configured request deadline."
+                ) from exc
+            raise _local_no_progress_error(
+                progress_stage, no_progress_timeout_seconds
+            ) from exc
+        if chunk == b"":
+            break
+        if not chunk:
+            raise GenerationResponseError(
+                "Local generation provider returned invalid empty stream data."
+            )
+        if not isinstance(chunk, bytes):
+            raise GenerationResponseError(
+                "Local generation provider returned non-byte stream data."
+            )
+        pending.extend(chunk)
+        while True:
+            newline = pending.find(b"\n")
+            if newline < 0:
+                break
+            if newline > MAX_LOCAL_STREAM_FRAME_BYTES:
+                raise GenerationResponseError(
+                    "Local generation provider returned an oversized stream frame."
+                )
+            raw_line = bytes(pending[:newline])
+            del pending[: newline + 1]
+            wire_bytes += len(raw_line) + 1
+            if wire_bytes > max_wire_bytes:
+                raise GenerationResponseError(
+                    "Local generation provider exceeded its cumulative stream limit."
+                )
+            if not raw_line:
+                yield raw_line
+                continue
+            now = time.monotonic()
+            if now >= deadline:
+                raise GenerationProviderUnavailable(
+                    "Local generation exceeded its configured request deadline."
+                )
+            if now >= progress_deadline:
+                raise _local_no_progress_error(
+                    progress_stage, no_progress_timeout_seconds
+                )
+            progress_deadline = now + no_progress_timeout_seconds
+            _arm_local_stream_deadline(
+                connection,
+                min(deadline, progress_deadline),
+                deadline_expired,
+            )
+            yield raw_line
+        if len(pending) > MAX_LOCAL_STREAM_FRAME_BYTES:
+            raise GenerationResponseError(
+                "Local generation provider returned an oversized stream frame."
+            )
+    if pending:
+        wire_bytes += len(pending)
+        if wire_bytes > max_wire_bytes:
+            raise GenerationResponseError(
+                "Local generation provider exceeded its cumulative stream limit."
+            )
+        now = time.monotonic()
+        if now >= deadline:
+            raise GenerationProviderUnavailable(
+                "Local generation exceeded its configured request deadline."
+            )
+        if now >= progress_deadline:
+            raise _local_no_progress_error(
+                progress_stage, no_progress_timeout_seconds
+            )
+        _arm_local_stream_deadline(
+            connection,
+            min(deadline, now + no_progress_timeout_seconds),
+            deadline_expired,
+        )
+        yield bytes(pending)
+
+
+def _read_local_chat_stream(
+    response: Any,
+    *,
+    deadline: float,
+    deadline_expired: threading.Event,
+    max_wire_bytes: int,
+    no_progress_timeout_seconds: float,
+    no_progress_deadline: float,
+    progress_stage: str = "generation",
+) -> dict[str, Any]:
+    content_parts: list[str] = []
+    content_bytes = 0
+    terminal: dict[str, Any] | None = None
+    connection: Any | None = None
+
+    try:
+        connection = _local_stream_connection(response)
+        for raw_line in _iter_bounded_local_stream_lines(
+            response,
+            connection=connection,
+            deadline=deadline,
+            deadline_expired=deadline_expired,
+            max_wire_bytes=max_wire_bytes,
+            no_progress_timeout_seconds=no_progress_timeout_seconds,
+            no_progress_deadline=no_progress_deadline,
+            progress_stage=progress_stage,
+        ):
+            if not raw_line:
+                continue
+            try:
+                frame = json.loads(raw_line)
+            except (TypeError, ValueError) as exc:
+                raise GenerationResponseError(
+                    "Local generation provider returned invalid streaming JSON."
+                ) from exc
+            if not isinstance(frame, dict):
+                raise GenerationResponseError(
+                    "Local generation provider returned a non-object stream frame."
+                )
+            if frame.get("error") is not None:
+                raise GenerationProviderUnavailable(
+                    "Ollama reported an error during streamed local generation."
+                )
+            if terminal is not None:
+                raise GenerationResponseError(
+                    "Ollama returned data after its terminal stream frame."
+                )
+            message = frame.get("message")
+            if not isinstance(message, dict):
+                raise GenerationResponseError(
+                    "Local generation provider returned a stream frame without a message."
+                )
+            content = message.get("content")
+            if not isinstance(content, str):
+                raise GenerationResponseError(
+                    "Local generation provider returned a message without text content."
+                )
+            if message.get("thinking") not in (None, ""):
+                raise GenerationResponseError(
+                    "Local generation provider returned reasoning despite thinking being disabled."
+                )
+            if message.get("tool_calls") not in (None, []):
+                raise GenerationResponseError(
+                    "Local generation provider returned tool calls when none were requested."
+                )
+            if content:
+                content_parts.append(content)
+            content_bytes += len(content.encode("utf-8"))
+            if content_bytes > MAX_HTML_BYTES:
+                raise GenerationResponseError(
+                    "Local generation provider returned an oversized streamed response."
+                )
+            done = frame.get("done")
+            if done is True:
+                terminal = frame
+            elif done is not False:
+                raise GenerationResponseError(
+                    "Ollama returned a stream frame without completion state."
+                )
+    finally:
+        if connection is not None:
+            connection._disarm_local_deadline()
+        else:
+            _disarm_local_response_deadline(response)
+        response.close()
+
+    if terminal is None:
+        raise GenerationResponseError(
+            "Ollama returned an incomplete streaming response."
+        )
+    payload = dict(terminal)
+    payload["message"] = {"content": "".join(content_parts)}
+    return payload
+
+
+def _request_local_chat_stream(
+    client: Any,
+    endpoint: str,
+    request_body: dict[str, Any],
+    *,
+    config: GenerationConfig,
+    deadline: float,
+    progress_stage: str,
+) -> dict[str, Any]:
+    request_timeout = _local_request_timeout(config, deadline)
+    max_wire_bytes = _local_stream_wire_byte_limit(request_body)
+    phase_started = time.monotonic()
+    no_progress_deadline = phase_started + request_timeout[1]
+    establishment_deadline = min(deadline, no_progress_deadline)
+    deadline_state = _LocalRequestDeadline(
+        expires_at=establishment_deadline,
+        expired=threading.Event(),
+    )
+    deadline_token = _LOCAL_REQUEST_DEADLINE.set(deadline_state)
+    try:
+        try:
+            response = client.post(
+                endpoint,
+                json=request_body,
+                stream=True,
+                timeout=request_timeout,
+                allow_redirects=False,
+            )
+        except requests.RequestException as exc:
+            if deadline_state.expired.is_set():
+                if deadline <= no_progress_deadline:
+                    raise GenerationProviderUnavailable(
+                        "Local generation exceeded its configured request deadline."
+                    ) from exc
+                raise _local_no_progress_error(
+                    progress_stage, request_timeout[1]
+                ) from exc
+            if isinstance(exc, requests.Timeout):
+                raise _local_no_progress_error(
+                    progress_stage, request_timeout[1]
+                ) from exc
+            raise
+    finally:
+        _LOCAL_REQUEST_DEADLINE.reset(deadline_token)
+    try:
+        _raise_for_local_response_status(response)
+    except Exception:
+        _disarm_local_response_deadline(response)
+        response.close()
+        raise
+    return _read_local_chat_stream(
+        response,
+        deadline=deadline,
+        deadline_expired=deadline_state.expired,
+        max_wire_bytes=max_wire_bytes,
+        no_progress_timeout_seconds=request_timeout[1],
+        no_progress_deadline=no_progress_deadline,
+        progress_stage=progress_stage,
+    )
 
 
 def preflight_generation_provider(
@@ -1012,6 +1550,10 @@ def _generate_local_text(
     client: Any | None,
 ) -> GenerationResult:
     selected_client = client or create_local_generation_client(config)
+    deadline = time.monotonic() + config.timeout_seconds
+    # Validate direct GenerationConfig callers before transport errors are
+    # translated into recoverable provider unavailability.
+    _local_request_timeout(config, deadline)
     _health_url, _models_url, _show_url, endpoint = _local_ollama_urls(
         config.base_url
     )
@@ -1022,7 +1564,7 @@ def _generate_local_text(
     request_body = {
         "model": config.model,
         "messages": messages,
-        "stream": False,
+        "stream": True,
         "think": False,
         "options": {
             "temperature": temperature,
@@ -1043,7 +1585,7 @@ def _generate_local_text(
     token_probe = {
         "model": config.model,
         "messages": messages,
-        "stream": False,
+        "stream": True,
         "think": False,
         "options": {
             "temperature": 0,
@@ -1053,14 +1595,14 @@ def _generate_local_text(
         },
     }
     try:
-        probe_response = selected_client.post(
+        probe_payload = _request_local_chat_stream(
+            selected_client,
             endpoint,
-            json=token_probe,
-            timeout=config.timeout_seconds,
-            allow_redirects=False,
+            token_probe,
+            config=config,
+            deadline=deadline,
+            progress_stage="prompt-probe",
         )
-        _raise_for_local_response_status(probe_response)
-        probe_payload = probe_response.json()
         if not isinstance(probe_payload, dict) or probe_payload.get("done") is not True:
             raise ValueError("Ollama returned an incomplete prompt probe")
         prompt_tokens = probe_payload.get("prompt_eval_count")
@@ -1075,25 +1617,21 @@ def _generate_local_text(
                 "The complete local generation prompt does not fit alongside "
                 "the required output reserve. Reduce the prospect data."
             )
-        response = selected_client.post(
+        payload = _request_local_chat_stream(
+            selected_client,
             endpoint,
-            json=request_body,
-            timeout=config.timeout_seconds,
-            allow_redirects=False,
+            request_body,
+            config=config,
+            deadline=deadline,
+            progress_stage="generation",
         )
-        _raise_for_local_response_status(response)
     except GenerationResponseError:
+        raise
+    except GenerationProviderUnavailable:
         raise
     except Exception as exc:
         raise GenerationProviderUnavailable(
             f"local generation failed for model {config.model!r}: {exc}"
-        ) from exc
-
-    try:
-        payload = response.json()
-    except (TypeError, ValueError) as exc:
-        raise GenerationResponseError(
-            "Local generation provider returned invalid JSON."
         ) from exc
     if not isinstance(payload, dict):
         raise GenerationResponseError(
@@ -1102,7 +1640,7 @@ def _generate_local_text(
 
     if payload.get("done") is not True:
         raise GenerationResponseError(
-            "Ollama returned an incomplete non-streaming response."
+            "Ollama returned an incomplete streaming response."
         )
     finish_reason = payload.get("done_reason")
     if not isinstance(finish_reason, str) or not finish_reason:
