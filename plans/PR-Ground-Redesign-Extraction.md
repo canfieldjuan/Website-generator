@@ -175,6 +175,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6frw_-`: exact `class="logo"` was not a logo marker | Logo admission must recognize bounded exact semantic tokens without treating descriptive alt text or substring matches as ownership. | An image with exact class token `logo` now admits as the business logo; existing generic image and third-party `alt="... logo"` controls still reject. | fixed/superseded | `lib/site_extraction.py:397-408,1092-1117`; `tests/test_site_extraction.py:1993-2029` |
 | `PRRT_kwDOTDYaKM6fr0Cl`: lowercase multiword abbreviated fax fields escaped ownership | Contact ownership must use a case-independent, bounded field-punctuation grammar for both prefix and postfix order; capitalization cannot confer callable authority. | Lowercase `fax regional dept. line: 217-555-0100` and its unwrapped postfix counterpart reject; equivalent lowercase phone fields admit. | fixed/superseded | `lib/site_extraction.py:472-485,780-818`; `tests/test_site_extraction.py:1125-1143,1173-1187` |
 | `PRRT_kwDOTDYaKM6fr0Cn`: an acronym-ending fax sentence swallowed the following office phone | Completed prose punctuation must remain a group boundary regardless of capitalization, while the explicitly bounded field abbreviations remain structural. | `Fax inquiries are handled by IT. Main office: 217-555-0100` now admits the office phone; `Dept.`/`No.` fax fields still reject and their phone controls admit. | fixed/superseded | `lib/site_extraction.py:481-485,780-818`; `tests/test_site_extraction.py:1125-1220` |
+| `PRRT_kwDOTDYaKM6fsB38`: explicit invalid form-owner values fell back to an ancestor form | Browser form ownership is exact: the presence of `form` must prevent ancestor fallback, and extraction, contract construction, and generated-output validation must consume that same result. | Empty, whitespace-only, and whitespace-padded owner references cannot authorize the submitter endpoint or label and a generated broken submitter rejects; an exact owner still admits, while a genuinely standalone neutral button remains non-submit UI. | fixed/superseded | `lib/site_extraction.py:1384-1442`; `pipeline.py:309-350`; `lib/generation.py:2267-2276`; `tests/test_site_extraction.py:3996-4010`; `tests/test_generation.py:1585-1629` |
+| `PRRT_kwDOTDYaKM6fsB3-`: an unconditional `Dept.` exception swallowed a real sentence boundary | Abbreviation punctuation is structural only when the remaining text fits the bounded contact-field grammar; it cannot suppress a boundary across a second field. | `Fax inquiries go to billing dept. Main office: 217-555-0100` admits the office phone, while both `Fax Dept. Line` and `Fax Dept. Number` still reject and the existing phone controls remain admissible. | fixed/superseded | `lib/site_extraction.py:481-488,781-825`; `tests/test_site_extraction.py:1188-1233,1304-1327` |
 
 ## Mechanism
 
@@ -383,10 +385,10 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `fe2baaa67039d2de7736c1443ec53c0832e0a44e`.
+- Code revision under test: `9613143ee55b4ecd21d183c3ff193f6f528520e2`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
-- Root-cause boundary probes cover the five latest review paths without adding
+- Root-cause boundary probes cover the seven latest review paths without adding
   tag- or phrase-specific exceptions. Lowercase prefix/postfix fax fields reject,
   their phone equivalents admit, and the office phone after the acronym-ending
   `IT.` sentence admits. Exact class token `logo` admits while existing alt-only
@@ -395,44 +397,47 @@ business-specific claims.
   owning form requires a valid endpoint. Extraction retains one source form
   endpoint/method pair; generated POST preserves it and an omitted method (browser
   default GET) rejects. Existing GET, submitter-override, ambiguous-form, and
-  URL-only caller controls all remain covered.
+  URL-only caller controls all remain covered. Explicit invalid form-owner values
+  authorize neither their endpoint nor label and a generated broken submitter
+  rejects, while exact ownership and standalone neutral UI controls still pass.
+  `Dept.` punctuation preserves the bounded `Line`/`Number` field grammar but no
+  longer swallows a following `Main office:` field.
 - Affected boundary suite: `python -m unittest -q
-  tests.test_site_extraction tests.test_generation` exited 0; the saved log reports
-  239 tests passed in 7.686 seconds. Log:
-  `/dev/shm/pr47-affected-fe2baaa.log`.
+  tests.test_site_extraction tests.test_generation` exited 0 with 239 tests passed
+  in 7.745 seconds.
 - Full suite: `python -m unittest -q` exited 0; the saved log reports 381 tests
-  passed with 34 skipped in 13.765 seconds. Log:
-  `/dev/shm/pr47-full-suite-fe2baaa.log`.
+  passed with 34 skipped in 13.945 seconds. Log:
+  `/dev/shm/pr47-full-suite-current.log`.
 - Static evidence: `python -m ruff check lib/site_extraction.py
-  lib/generation.py tests/test_site_extraction.py`, `python -m ruff check
-  --ignore F401,F541 pipeline.py tests/test_generation.py`, `python -m compileall
+  lib/generation.py pipeline.py tests/test_site_extraction.py
+  tests/test_generation.py --ignore F401,F541`, `python -m compileall
   -q lib pipeline.py tests/test_site_extraction.py tests/test_generation.py`, and
   `git diff --check` passed. The unfiltered repository-wide Ruff invocation remains
   red on 14 pre-existing F401/F541 findings outside this boundary change; they were
   not auto-fixed or folded into this PR.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T08:17:03,962250829-05:00`, completed at
-  `2026-09-06T08:18:04,705699220-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T08:41:04,022923691-05:00`, completed at
+  `2026-09-06T08:41:54,738451922-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-fe2baaa.log`.
-- The invocation replaced artifact inode 3311281 with inode 3325017 and set mtime
-  `2026-09-06 08:18:01.232872759 -0500`, proving this invocation rewrote
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-9613143.log`.
+- The invocation replaced artifact inode 3325017 with inode 3309618 and set mtime
+  `2026-09-06 08:41:54.648032274 -0500`, proving this invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71858-byte artifact
   has SHA-256
   `13f7b426c17c17ff620ee92214e4f7404bcd11fef48582124a6381b2286d640f`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-fe2baaa.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-fe2baaa.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-9613143.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-9613143.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
-  loaded a 1440x3300 screenshot with title `DREES PLUMBING INC` and 2454
+  loaded a 1440x3300 screenshot with title `DREES PLUMBING INC` and 2481
   body-text characters. The screenshot was visually inspected and shows the
-  styled navigation, hero, service grid, trust content, reviews, request form,
-  and footer without an obvious render break. Screenshot:
-  `/dev/shm/website-generator-pr47-browser-render-fe2baaa.png`,
+  styled navigation, hero, service grid, trust content, and beginning of the
+  reviews section without an obvious render break. Screenshot:
+  `/dev/shm/website-generator-pr47-browser-render-9613143.png`,
   SHA-256
-  `4c9333807d871ee623517b78f49fd15e041cd3781638b838682c18f37ea09e2a`.
+  `9ed1d5d9d93580de5aafd10e149c88b112053c3d551104f318dbb2882724a3de`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
   separate open issue because one successful run does not resolve its historical
   stall.
