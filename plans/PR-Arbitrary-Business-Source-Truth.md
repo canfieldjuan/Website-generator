@@ -68,8 +68,9 @@ The Trade select becomes a required Business type text input backed by a
 `datalist` of the three existing suggestions. State import accepts any trimmed,
 non-empty string instead of enforcing a TypeScript union.
 
-`prepare_prospect()` validates and normalizes a non-empty list of non-empty
-service strings. The required class-count and child-sequence contracts derive
+`prepare_prospect()` validates and canonicalizes a non-empty list of non-empty
+service strings with Unicode compatibility and browser-whitespace normalization
+before duplicate detection. The required class-count and child-sequence contracts derive
 their service-card count from that normalized list, and the response scaffold
 contains one code-owned card per submitted service. Each card uses the exact
 source casing and a deterministic `Ask us about <service>` description. The
@@ -100,7 +101,9 @@ expected values. This is the shared authority boundary for hero, benefit,
 footer, and any other body surface; it does not attempt to recognize offerings
 by enumerating English predicates. `aria-hidden` removes content from the
 accessibility tree but does not visually hide it, so it never exempts rendered
-copy from this admission boundary.
+copy from this admission boundary. Direct attributes, rendered input values,
+and all four supported indirect ARIA reference attributes use the same resolver
+and exact catalog.
 
 ## Intentional
 
@@ -127,7 +130,7 @@ copy from this admission boundary.
 ## Verification
 
 Current implementation evidence is based on commit
-`ff747faab00ba22c804ade77a238f674e0f4fccd`. The generated artifact and evidence logs are
+`b426c31d52ffad149a423d3831fa4158930e4bbb`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -142,21 +145,21 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 378 passed, 34 skipped, 649 subtests passed in 35.46s
+# 385 passed, 34 skipped, 658 subtests passed in 38.09s
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
   --skip-image-gen --skip-email-draft --skip-deploy
-# 2026-09-06T17:55:09-05:00 through 2026-09-06T17:55:49-05:00
+# 2026-09-06T18:08:13-05:00 through 2026-09-06T18:08:57-05:00
 # Exit 0; local:qwen3-30b-a3b:latest; no deploy, email, or image generation
 ```
 
 The final fixture invocation completed without a correction. Its complete log
-is `/tmp/pr50-visible-copy-fixture-final2.log` with SHA-256
-`5fe4d4cd3561e25f54680272af892d4c554cd5c9422973e5f704392b143f95f8`.
+is `/tmp/pr50-visible-copy-fixture-final3.log` with SHA-256
+`c05581a3e9b0155e01d60c2e127b718ca4dbdb046c30d4fa28583ef81dccbcaa`.
 The invocation wrote
 `outputs/builds/drees-plumbing-inc/index.html` at
-`2026-09-06 17:55:49.854712291 -0500`. The artifact is 71,838 bytes with
+`2026-09-06 18:08:57.257109498 -0500`. The artifact is 71,838 bytes with
 SHA-256 `2c16369fd1dc42ed0e79b98f344b1077990e3270aed25060667518e0bb6f2367`.
 Both the required placeholder pattern and the case-insensitive forbidden-claim
 pattern returned zero matches. Parsed artifact inspection confirmed the exact
@@ -175,7 +178,7 @@ block after this evidence note is committed.
 
 ## Estimated diff size
 
-The current PR diff is 1,604 changed lines across the 11 declared source files
+The current PR diff is 1,914 changed lines across the 11 declared source files
 plus this plan, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
