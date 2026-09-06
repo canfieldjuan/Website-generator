@@ -157,7 +157,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6frI0U`: a wrapper's descendant heading hid its pre-heading qualifier | Claim ownership must split a rendered wrapper at its first semantic boundary; all nested contexts in the prefix fragment belong to the preceding claim run, while the heading or independent record starts a new run. | Direct, span-wrapped, paragraph-wrapped, and nested-wrapper qualifiers all reject the shortened benefit, admit `Free Estimates Members only.`, and do not attach `Details` to that claim. Existing peer-heading and record boundaries still pass. | fixed/superseded | `lib/site_extraction.py:1759-1853,1870-1891`; `tests/test_site_extraction.py:749-767` |
 | `PRRT_kwDOTDYaKM6frI0W`: abbreviation punctuation separated a fax role from its number | Contact-role ownership must be assigned inside the already bounded source assertion, not by treating every period as a sentence break. Complete field-label spans must associate each role with its governed phone occurrence. | `Fax No. 217-555-0100` and the dotted-number variant reject; `Phone No. 217-555-0100` admits. In a mixed fax/phone record, only the phone occurrence authorizes a callable number. | fixed/superseded | `lib/site_extraction.py:471-474,766-798`; `tests/test_site_extraction.py:1115-1186` |
 | `PRRT_kwDOTDYaKM6frNFW`: nested independent records discarded their wrapper prefix | A wrapper may donate only its prefix before the first semantic boundary; the boundary and its descendants remain an independent owner. | Both direct and paragraph-wrapped `Members only.` prefixes before a nested `<section>` stay attached to `Free Estimates`; the shortened claim rejects, the complete claim admits, and the section heading is excluded. | fixed/superseded | `lib/site_extraction.py:1759-1853,1870-1891`; `tests/test_site_extraction.py:749-767` |
-| `PRRT_kwDOTDYaKM6frNFY`: a shared fax role governed only its nearest number | A single explicit contact role in a bounded assertion governs every phone occurrence in that assertion; assertions with mixed role kinds retain per-number nearest-role ownership. | Both numbers reject in prefix and postfix shared-fax lists, both admit in a shared-phone list, and the mixed `Fax No.` / `Phone No.` record still admits only the phone occurrence. | fixed/superseded | `lib/site_extraction.py:766-798`; `tests/test_site_extraction.py:1175-1216` |
+| `PRRT_kwDOTDYaKM6frNFY`: a shared fax role governed only its nearest number | A single explicit contact role in a bounded assertion governs every phone occurrence in that assertion; mixed role kinds must partition adjacent field groups rather than assign each number to a globally nearest label. | Both numbers reject in prefix and postfix shared-fax lists, both admit in a shared-phone list, and mixed fax/phone records admit only numbers owned by the phone group. | fixed/superseded | `lib/site_extraction.py:766-834`; `tests/test_site_extraction.py:1175-1271` |
+| `PRRT_kwDOTDYaKM6frR1p`: a later phone label captured the second number in a fax group | Each complete prefix or postfix field label owns its adjacent coordinated number group and an intervening role label is an ownership boundary. | The exact `Fax: 217-555-0100 or 217-555-0101. Phone: 217-555-0199` probe reproduced on `504d4be`: the second fax admitted. Both fax numbers now reject and the phone admits; reverse and postfix group probes pass in both directions. | fixed/superseded | `lib/site_extraction.py:766-834`; `tests/test_site_extraction.py:1188-1241` |
 
 ## Mechanism
 
@@ -363,53 +364,54 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `3c240133e6e90f43511881e0473828f8e2aaca13`.
+- Code revision under test: `8fdfb954b6238bbda82119d771c578036aff2fd4`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
-- Isolated probes reproduced the two latest review paths against the preceding
-  head: a wrapper's first descendant heading hid pre-heading qualifier text, and
-  abbreviation punctuation split `Fax No.` from its number. The correction splits
-  wrapper evidence at its first heading or independent-record boundary and
-  associates complete phone/fax field-label spans inside the already bounded
-  assertion. One role governs the whole number group; mixed roles retain nearest
-  per-number ownership. It does not enumerate claim wording, treat every period
-  as a sentence boundary, make body/document shells owners, or merge independent
-  record-mode evidence.
+- An isolated probe reproduced the current-head review path against `504d4be`:
+  in `Fax: 217-555-0100 or 217-555-0101. Phone: 217-555-0199`, the first fax
+  rejected but the second fax and the phone both admitted. The correction replaces
+  global nearest-label assignment with adjacent prefix/postfix field-group
+  ownership. One role still governs a whole single-role assertion; an intervening
+  role label now bounds a mixed group. It does not enumerate phone/fax sentence
+  predicates or add an exception for the reproduced wording.
 - Boundary probe: `python -m unittest -q tests.test_site_extraction
   tests.test_generation` passed 236 tests. Focused positive/negative coverage
   additionally proves shortened versus complete pre-boundary wrapper claims,
   nested heading and independent-record boundaries, prefix/postfix/abbreviated
-  and shared fax versus phone roles, mixed fax-and-phone assertions, submitter
-  override versus conflicting endpoints, generated action propagation, and
-  unchanged peer-heading and leaf-record isolation.
-- Full suite: `timeout 180s python -m unittest discover -s tests -q` passed 378
-  tests with 34 skipped.
+  and shared fax versus phone roles, mixed prefix, reverse, and postfix field
+  groups, submitter override versus conflicting endpoints, generated action
+  propagation, and unchanged peer-heading and leaf-record isolation.
+- Full suite: the first `timeout 180s python -m unittest discover -s tests -q`
+  attempt returned status 124 without a failure traceback. The bounded rerun,
+  `timeout 600s python -m unittest discover -s tests -q`, exited 0; independent
+  discovery reports 378 tests.
 - Static evidence: `python -m ruff check lib/site_extraction.py
   tests/test_site_extraction.py`, `python -m compileall -q
-  lib/site_extraction.py tests/test_site_extraction.py`, and `git diff --check`
-  passed.
+  build.py pipeline.py connect_provider.py lib tests`, and `git diff --check`
+  passed. The focused phone-role regression also passed independently.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T06:17:38,209661058-05:00`, completed at
-  `2026-09-06T06:18:28,568226464-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T06:34:10,037260593-05:00`, completed at
+  `2026-09-06T06:35:00,525507041-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-3c24013.log`.
-- The invocation replaced artifact inode 3325019 with inode 3325015 and set mtime
-  `2026-09-06 06:18:28.465588823 -0500`, proving this invocation rewrote
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-8fdfb95.log`.
+- The invocation replaced artifact inode 3325015 with inode 3325022 and set mtime
+  `2026-09-06 06:35:00.455037826 -0500`, proving this invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71939-byte artifact
   has SHA-256
   `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-3c24013.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-3c24013.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-8fdfb95.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-8fdfb95.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
-  reported title `DREES PLUMBING INC`, 2441 body-text characters, and a
-  1440x3040 document. The full screenshot was visually inspected and shows the
-  complete styled page from hero through footer without an obvious render break.
-  Screenshot: `/dev/shm/website-generator-pr47-browser-render-3c24013.png`,
+  loaded a 1440x3040 screenshot with title `DREES PLUMBING INC` and 2468
+  body-text characters. The screenshot was visually inspected and shows the
+  styled navigation, hero, service grid, trust content, and review content
+  without an obvious render break. Screenshot:
+  `/dev/shm/website-generator-pr47-browser-render-8fdfb95.png`,
   SHA-256
-  `8bd3d16328852d0dd3e9e388433d2cc5ae25724c1955a43e6172c45d1586ae75`.
+  `12bd0bd8b1e07d030a3bdaa4a3345e94345f8b951619a8333b563c1c40371efb`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
   separate open issue because one successful run does not resolve its historical
   stall.
