@@ -652,9 +652,14 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "tagline": "Free Estimates Membership required.",
             }
         }
-        for level in range(2, 7):
+        for level in range(1, 7):
+            identity_source = (
+                '<meta property="og:site_name" content="Acme">'
+                if level == 1
+                else "<h1>Acme</h1>"
+            )
             heading_owned_scope = (
-                f"<h1>Acme</h1><div><h{level}>Free Estimates</h{level}>"
+                f"{identity_source}<div><h{level}>Free Estimates</h{level}>"
                 "<p>Membership required.</p></div>"
             )
             with (
@@ -666,6 +671,19 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 validate_site_analysis(complete_heading_claim, heading_owned_scope),
                 complete_heading_claim,
             )
+
+        peer_sections = (
+            '<meta property="og:site_name" content="Acme"><div>'
+            "<h2>About</h2><p>Licensed and insured.</p>"
+            "<h2>Hours</h2><p>Monday–Friday.</p></div>"
+        )
+        paragraph_claim = {
+            "site": {"name": "Acme", "tagline": "Licensed and insured."}
+        }
+        self.assertEqual(
+            validate_site_analysis(paragraph_claim, peer_sections),
+            paragraph_claim,
+        )
 
     def test_contact_facts_allow_only_field_owned_presentation_labels(self):
         labeled = {

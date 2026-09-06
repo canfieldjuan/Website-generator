@@ -713,6 +713,15 @@ def _starts_presentation_field(text: str) -> bool:
     )
 
 
+def _assertion_heading_level(element: Any) -> int | None:
+    match = re.fullmatch(
+        r"h([1-6])",
+        getattr(element, "name", "") or "",
+        re.IGNORECASE,
+    )
+    return int(match.group(1)) if match is not None else None
+
+
 def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
     without_affirmative_idiom = _AFFIRMATIVE_CONTACT_NEGATION_PATTERN.sub(
         lambda match: " " * len(match.group(0)),
@@ -1382,10 +1391,11 @@ class SourceEvidence:
             "td",
             "th",
         }
-        claim_scope_sibling_tags = {"p", "small"}
+        paragraph_claim_tags = {"p", "small"}
+        claim_scope_sibling_tags = set(paragraph_claim_tags)
         if _group_heading_claims:
             claim_scope_sibling_tags.update(
-                {"h2", "h3", "h4", "h5", "h6"}
+                {"h1", "h2", "h3", "h4", "h5", "h6"}
             )
         for context_key, local_parts in context_parts.items():
             context = context_elements[context_key]
@@ -1408,25 +1418,52 @@ class SourceEvidence:
                     if context_index is not None:
                         first = context_index
                         last = context_index
-                        if not _starts_presentation_field(local_segment):
+                        heading_level = (
+                            _assertion_heading_level(context)
+                            if _group_heading_claims
+                            else None
+                        )
+                        if heading_level is not None:
                             while (
-                                first > 0
-                                and siblings[first - 1].name
+                                last + 1 < len(siblings)
+                                and siblings[last + 1].name
                                 in claim_scope_sibling_tags
                             ):
-                                first -= 1
+                                next_sibling = siblings[last + 1]
                                 if _starts_presentation_field(
-                                    siblings[first].get_text(" ", strip=True)
+                                    next_sibling.get_text(" ", strip=True)
                                 ):
                                     break
-                        while (
-                            last + 1 < len(siblings)
-                            and siblings[last + 1].name in claim_scope_sibling_tags
-                            and not _starts_presentation_field(
-                                siblings[last + 1].get_text(" ", strip=True)
-                            )
-                        ):
-                            last += 1
+                                next_heading_level = _assertion_heading_level(
+                                    next_sibling
+                                )
+                                if (
+                                    next_heading_level is not None
+                                    and next_heading_level <= heading_level
+                                ):
+                                    break
+                                last += 1
+                        else:
+                            if not _starts_presentation_field(local_segment):
+                                while (
+                                    first > 0
+                                    and siblings[first - 1].name
+                                    in paragraph_claim_tags
+                                ):
+                                    first -= 1
+                                    if _starts_presentation_field(
+                                        siblings[first].get_text(" ", strip=True)
+                                    ):
+                                        break
+                            while (
+                                last + 1 < len(siblings)
+                                and siblings[last + 1].name
+                                in paragraph_claim_tags
+                                and not _starts_presentation_field(
+                                    siblings[last + 1].get_text(" ", strip=True)
+                                )
+                            ):
+                                last += 1
                         if first != last:
                             owner_segment = _normalize_text(
                                 " ".join(
