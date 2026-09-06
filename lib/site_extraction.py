@@ -238,6 +238,15 @@ _TEXT_ATTRIBUTES = {
 }
 _ACTION_URL_ATTRIBUTES = {"href"}
 _IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
+_IMAGE_METADATA_URL_PROPERTIES = frozenset(
+    {
+        "og:image",
+        "og:image:secure_url",
+        "og:image:url",
+        "twitter:image",
+        "twitter:image:src",
+    }
+)
 _ACTION_INPUT_TYPES = frozenset(
     {
         "button",
@@ -752,10 +761,10 @@ def source_action_accessible_name(
 def is_labelled_action_element(element: Any) -> bool:
     """Return whether one DOM element presents a browser action label."""
     tag_name = str(getattr(element, "name", "") or "").casefold()
-    role = str(element.get("role") or "").casefold()
+    roles = str(element.get("role") or "").casefold().split()
     if tag_name in {"a", "area"}:
         return element.has_attr("href")
-    if tag_name == "button" or role == "button":
+    if tag_name == "button" or any(role in {"button", "link"} for role in roles):
         return True
     return tag_name == "input" and (
         str(element.get("type") or "").casefold() in _ACTION_INPUT_TYPES
@@ -1132,7 +1141,7 @@ class SourceEvidence:
                         property_name = str(
                             element.get("property") or element.get("name") or ""
                         ).casefold()
-                        if "image" in property_name:
+                        if property_name in _IMAGE_METADATA_URL_PROPERTIES:
                             raw_image_urls.add(value)
             style = element.get("style")
             if isinstance(style, str):
@@ -1218,17 +1227,11 @@ class SourceEvidence:
                 in _NON_DATA_INPUT_TYPES
             ):
                 continue
-            accessible_label = ""
-            labelled_by = control.get("aria-labelledby")
-            if isinstance(labelled_by, str):
-                labelled_parts = []
-                for target_id in labelled_by.split()[:MAX_ITEMS]:
-                    target = soup.find(id=target_id)
-                    if target is not None:
-                        labelled_parts.append(target.get_text(" ", strip=True))
-                accessible_label = " ".join(part for part in labelled_parts if part)
-            if not accessible_label:
-                accessible_label = str(control.get("aria-label") or "").strip()
+            accessible_label = (
+                _source_accessible_text(control, soup, frozenset())
+                if control.has_attr("aria-labelledby") or control.has_attr("aria-label")
+                else ""
+            )
             if not accessible_label:
                 labels = []
                 seen_labels: set[int] = set()
@@ -1422,6 +1425,15 @@ class SourceEvidence:
             )
         raise SiteExtractionError(f"{path} is not grounded in source text.")
 
+    def require_exact_text(self, path: str, value: Any) -> None:
+        if value is None:
+            return
+        normalized = _normalize_text(value)
+        if not normalized or normalized not in self.text_segments:
+            raise SiteExtractionError(
+                f"{path} is not the complete text of one source context."
+            )
+
     def require_identity(self, path: str, value: Any) -> None:
         if value is None:
             return
@@ -1599,11 +1611,17 @@ def _require_content_items(
             raise SiteExtractionError(f"{item_path} contains no source-owned content.")
 
         def require_fields(container: SourceEvidence) -> None:
-            container.require_text(
-                f"{item_path}.title",
-                item.get("title"),
-                asserted=not allow_nonassertive_title,
-            )
+            if allow_nonassertive_title:
+                container.require_exact_text(
+                    f"{item_path}.title",
+                    item.get("title"),
+                )
+            else:
+                container.require_text(
+                    f"{item_path}.title",
+                    item.get("title"),
+                    asserted=True,
+                )
             container.require_text(
                 f"{item_path}.description", item.get("description"), asserted=True
             )

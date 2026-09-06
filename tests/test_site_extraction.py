@@ -604,23 +604,25 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             document,
         )
 
-        role_button = {
+        aria_action = {
             "site": {"name": "Acme Cleaning"},
             "conversion_profile": {"existing_ctas": ["Book Appointment"]},
         }
-        self.assertEqual(
-            validate_site_analysis(
-                role_button,
-                (
-                    "<h1>Acme Cleaning</h1>"
-                    '<div role="button" tabindex="0">Book Appointment</div>'
-                ),
-            ),
-            role_button,
-        )
+        for role in ("button", "link"):
+            with self.subTest(role=role):
+                self.assertEqual(
+                    validate_site_analysis(
+                        aria_action,
+                        (
+                            "<h1>Acme Cleaning</h1>"
+                            f'<div role="{role}" tabindex="0">Book Appointment</div>'
+                        ),
+                    ),
+                    aria_action,
+                )
         with self.assertRaisesRegex(SiteExtractionError, "action label"):
             validate_site_analysis(
-                role_button,
+                aria_action,
                 (
                     "<h1>Acme Cleaning</h1>"
                     '<div tabindex="0">Book Appointment</div>'
@@ -1261,6 +1263,29 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             valid["form_fields"],
         )
 
+        for source in (
+            '<img id="email-label" alt="Email"><input aria-labelledby="email-label">',
+            '<span id="email-label" aria-label="Email">Wrong</span>'
+            '<input aria-labelledby="email-label">',
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(
+                    validate_enrichment_result(
+                        {"form_fields": ["Email"]},
+                        page_type="contact",
+                        source_html=source,
+                        source_url="https://acme.test/contact",
+                    )["form_fields"],
+                    ["Email"],
+                )
+                with self.assertRaisesRegex(SiteExtractionError, "complete label"):
+                    validate_enrichment_result(
+                        {"form_fields": ["Wrong"]},
+                        page_type="contact",
+                        source_html=source,
+                        source_url="https://acme.test/contact",
+                    )
+
         dual_association = {"form_fields": ["Email"]}
         self.assertEqual(
             validate_enrichment_result(
@@ -1313,6 +1338,49 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     page_type="contact",
                     source_html=source_html,
                     source_url="https://acme.test/contact",
+                )
+
+    def test_image_metadata_admits_only_resource_url_properties(self):
+        for property_name in (
+            "og:image",
+            "og:image:url",
+            "og:image:secure_url",
+            "twitter:image",
+            "twitter:image:src",
+        ):
+            document = {
+                "site": {"name": "Acme"},
+                "images": [{"url": "/hero.jpg", "alt": None, "context": "hero"}],
+            }
+            with self.subTest(property_name=property_name):
+                self.assertEqual(
+                    validate_site_analysis(
+                        document,
+                        f'<meta property="{property_name}" content="/hero.jpg">'
+                        "<h1>Acme</h1>",
+                        "https://acme.test/",
+                    ),
+                    document,
+                )
+
+        for property_name, value in (
+            ("og:image:alt", "hero.jpg"),
+            ("og:image:width", "1200"),
+            ("og:image:type", "image/jpeg"),
+        ):
+            document = {
+                "site": {"name": "Acme"},
+                "images": [{"url": value, "alt": None, "context": "hero"}],
+            }
+            with (
+                self.subTest(property_name=property_name),
+                self.assertRaisesRegex(SiteExtractionError, "source image URL"),
+            ):
+                validate_site_analysis(
+                    document,
+                    f'<meta property="{property_name}" content="{value}">'
+                    "<h1>Acme</h1>",
+                    "https://acme.test/",
                 )
 
     def test_article_record_does_not_span_nested_content_cards(self):
@@ -2062,6 +2130,40 @@ class EnrichmentGroundingTests(unittest.TestCase):
         )
 
         self.assertEqual(admitted["headline"], "FAQ")
+
+    def test_faq_titles_preserve_the_complete_source_question(self):
+        def document(title):
+            return {
+                "type": "misc",
+                "headline": "FAQ",
+                "items": [
+                    {
+                        "title": title,
+                        "url": None,
+                        "image_url": None,
+                        "tag": "faq",
+                        "meta": None,
+                    }
+                ],
+            }
+
+        source = "<h1>FAQ</h1><h2>Do you offer Free Estimates?</h2><p>No.</p>"
+        with self.assertRaisesRegex(SiteExtractionError, "complete text"):
+            validate_enrichment_result(
+                document("Free Estimates"),
+                page_type="faq",
+                source_html=source,
+                source_url="https://acme.test/faq",
+            )
+        self.assertEqual(
+            validate_enrichment_result(
+                document("Do you offer Free Estimates?"),
+                page_type="faq",
+                source_html=source,
+                source_url="https://acme.test/faq",
+            )["items"],
+            document("Do you offer Free Estimates?")["items"],
+        )
 
     def test_composite_item_fields_must_share_one_source_container(self):
         document = {
