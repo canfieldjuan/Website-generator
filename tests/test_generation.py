@@ -1307,6 +1307,48 @@ class ProviderBoundaryTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=1)
 
+    def test_local_prompt_probe_headers_do_not_reset_no_progress_deadline(self):
+        class SlowHeadersClient(FakeLocalClient):
+            def post(self, url, **kwargs):
+                if url.endswith("/api/chat") and self.chat_calls == 0:
+                    time.sleep(0.04)
+                return super().post(url, **kwargs)
+
+        class BlockingResponse(FakeLocalResponse):
+            def _read1(self, chunk_size, decode_content=False):
+                time.sleep(self.socket_timeouts[-1])
+                raise requests.ReadTimeout("no frame after headers")
+
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            timeout_seconds=1,
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+            local_no_progress_timeout_seconds=0.05,
+        )
+        client = SlowHeadersClient()
+        client.prompt_response = BlockingResponse()
+
+        started = time.monotonic()
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "no prompt-probe progress within 0.05 seconds",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=client,
+            )
+        elapsed = time.monotonic() - started
+
+        self.assertGreaterEqual(elapsed, 0.04)
+        self.assertLess(elapsed, 0.075)
+        self.assertEqual(len(client.calls), 1)
+
     def test_local_stream_read_honors_no_progress_before_total_deadline(self):
         class BlockingResponse(FakeLocalResponse):
             def _read1(self, chunk_size, decode_content=False):

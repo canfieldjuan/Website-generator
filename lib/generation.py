@@ -990,6 +990,7 @@ def _iter_bounded_local_stream_lines(
     *,
     deadline: float,
     no_progress_timeout_seconds: float,
+    no_progress_deadline: float,
     progress_stage: str,
 ) -> Iterator[bytes]:
     pending = bytearray()
@@ -999,11 +1000,11 @@ def _iter_bounded_local_stream_lines(
         raise GenerationProviderUnavailable(
             "Ollama response does not expose bounded streaming reads."
         )
-    last_progress = time.monotonic()
+    progress_deadline = no_progress_deadline
     while True:
         now = time.monotonic()
         total_remaining = deadline - now
-        progress_remaining = no_progress_timeout_seconds - (now - last_progress)
+        progress_remaining = progress_deadline - now
         if total_remaining <= 0:
             raise GenerationProviderUnavailable(
                 "Local generation exceeded its configured request deadline."
@@ -1059,7 +1060,9 @@ def _iter_bounded_local_stream_lines(
                 raise GenerationProviderUnavailable(
                     "Local generation exceeded its configured request deadline."
                 )
-            last_progress = time.monotonic()
+            progress_deadline = (
+                time.monotonic() + no_progress_timeout_seconds
+            )
             yield raw_line
         if len(pending) > MAX_LOCAL_STREAM_FRAME_BYTES:
             raise GenerationResponseError(
@@ -1078,6 +1081,7 @@ def _read_local_chat_stream(
     *,
     deadline: float,
     no_progress_timeout_seconds: float,
+    no_progress_deadline: float,
     progress_stage: str = "generation",
 ) -> dict[str, Any]:
     content_parts: list[str] = []
@@ -1089,6 +1093,7 @@ def _read_local_chat_stream(
             response,
             deadline=deadline,
             no_progress_timeout_seconds=no_progress_timeout_seconds,
+            no_progress_deadline=no_progress_deadline,
             progress_stage=progress_stage,
         ):
             if not raw_line:
@@ -1206,6 +1211,7 @@ def _request_local_chat_stream(
         response,
         deadline=deadline,
         no_progress_timeout_seconds=request_timeout[1],
+        no_progress_deadline=no_progress_deadline,
         progress_stage=progress_stage,
     )
 
