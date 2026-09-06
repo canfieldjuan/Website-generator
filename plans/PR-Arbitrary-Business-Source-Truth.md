@@ -98,7 +98,9 @@ validator checks every rendered or accessibility-exposed text fragment against
 that contract and separately pins the free-copy owner classes to their exact
 expected values. This is the shared authority boundary for hero, benefit,
 footer, and any other body surface; it does not attempt to recognize offerings
-by enumerating English predicates.
+by enumerating English predicates. `aria-hidden` removes content from the
+accessibility tree but does not visually hide it, so it never exempts rendered
+copy from this admission boundary.
 
 ## Intentional
 
@@ -125,8 +127,7 @@ by enumerating English predicates.
 ## Verification
 
 Current implementation evidence is based on commit
-`855da8c8400c331349e914ad72e4f54607a29348`; the working tree was clean when
-the local PR review bundle ran. The generated artifact and evidence logs are
+`ff747faab00ba22c804ade77a238f674e0f4fccd`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -141,40 +142,40 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 376 passed, 34 skipped, 649 subtests passed in 35.04s
+# 378 passed, 34 skipped, 649 subtests passed in 35.46s
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
   --skip-image-gen --skip-email-draft --skip-deploy
-# 2026-09-06T17:43:58-05:00 through 2026-09-06T17:44:26-05:00
+# 2026-09-06T17:55:09-05:00 through 2026-09-06T17:55:49-05:00
 # Exit 0; local:qwen3-30b-a3b:latest; no deploy, email, or image generation
 ```
 
 The final fixture invocation completed without a correction. Its complete log
-is `/tmp/pr50-visible-copy-fixture-final.log` with SHA-256
-`0cac0464e6df5f68859870b23316cf9f22ccaace7c2cf2089d3626b3fcd6a784`.
+is `/tmp/pr50-visible-copy-fixture-final2.log` with SHA-256
+`5fe4d4cd3561e25f54680272af892d4c554cd5c9422973e5f704392b143f95f8`.
 The invocation wrote
 `outputs/builds/drees-plumbing-inc/index.html` at
-`2026-09-06 17:44:26.777937232 -0500`. The artifact is 71,969 bytes with
-SHA-256 `36add0592973501916edbc769c5c9f25c8a38f0c616ed9a2276b5482af6b7c56`.
+`2026-09-06 17:55:49.854712291 -0500`. The artifact is 71,838 bytes with
+SHA-256 `2c16369fd1dc42ed0e79b98f344b1077990e3270aed25060667518e0bb6f2367`.
 Both the required placeholder pattern and the case-insensitive forbidden-claim
 pattern returned zero matches. Parsed artifact inspection confirmed the exact
 code-owned hero, benefit, and form-trust copy. A headless Chrome render of these
-exact artifact bytes wrote `/tmp/pr50-drees-render.png` with SHA-256
-`d6c277ec62ae76e37d40cf27b960990472fa5b90978748b8e2ea7327e9fab79c`;
-visual inspection confirmed coherent hero, service-grid, and page-function
-content.
+exact artifact bytes wrote `/tmp/pr50-drees-render-final2.png` with SHA-256
+`329482b35d29390c41bb27a67a2380309d9ffcd75cd1e2bbd0b174477dbd25bf`;
+Chromium computed-style inspection and direct PNG pixel reads confirmed the
+white page, red gradient hero, visible white hero copy, service grid, and
+page-function content.
 
 No live OpenRouter request was made; doing so would spend provider credit and
 is unnecessary to prove the provider-independent prompt and admission contract.
-`git diff --check` also passed. On implementation commit
-`855da8c8400c331349e914ad72e4f54607a29348`,
-`bash scripts/local_pr_review.sh` passed its diff-check and plan-presence gates
-against merge base `758626d2df23865449f41b5b185a19cd79fd847b`.
+`git diff --check` also passed. The final-head
+`bash scripts/local_pr_review.sh` result is recorded in the PR verification
+block after this evidence note is committed.
 
 ## Estimated diff size
 
-The current PR diff is 1,557 changed lines across the 11 declared source files
+The current PR diff is 1,604 changed lines across the 11 declared source files
 plus this plan, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
