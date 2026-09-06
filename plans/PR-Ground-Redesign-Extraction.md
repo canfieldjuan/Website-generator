@@ -118,7 +118,9 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fqgE9`: semantically deleted facts remained current evidence | Source facts and actions marked deleted or no longer accurate cannot authorize current generated output. | A phone or booking action inside `del` rejects while its `ins` replacement admits; `s` and legacy `strike` use the same noncurrent-source boundary. | fixed/superseded | `lib/site_extraction.py:448-456,1038-1065,1523-1524`; `tests/test_site_extraction.py:1069-1137` |
 | `PRRT_kwDOTDYaKM6fqgE_`: HTML entities diverged between source and generated action contracts | Source-derived values and label/destination pairs must enter downstream contracts in one decoded browser form. | `/search?a=1&amp;b=2` is stored as `/search?a=1&b=2`, so the browser-parsed generated link admits instead of exhausting retry. | fixed/superseded | `pipeline.py:84-103`; `tests/test_generation.py:1195-1251` |
 | `PRRT_kwDOTDYaKM6fqgFA`: phone extensions erased the base-number match | Phone evidence must retain both the complete extension-qualified number and its base-number variant. | Source `217-555-0100 ext. 42` now admits extracted `217-555-0100`; fax-role and unrelated-number checks still fail closed. | fixed/superseded | `lib/site_extraction.py:467-471,589-603`; `tests/test_site_extraction.py:1069-1137` |
-| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `47a7b08` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-47a7b08.log`; `/dev/shm/website-generator-pr47-browser-render-47a7b08.png` |
+| `PRRT_kwDOTDYaKM6fqpia`: unavailable controls became active generated fields | Every source form-control consumer must apply the same browser-availability rule, including disabled and inert ancestry plus the native first-legend exception. | Disabled, disabled-fieldset, and inert controls now reject; enabled controls and a control inside the first legend of a disabled fieldset remain admissible. | fixed/superseded | `lib/site_extraction.py:1086-1110,1905-1910`; `tests/test_site_extraction.py:2109-2144` |
+| `PRRT_kwDOTDYaKM6fqpic`: prompt-required CTA labels contradicted admission | Prompt requirements and executable admission must use the same exact-source-or-bounded-neutral action-label contract. | Enriched preview and submit instructions no longer mandate invented labels; they copy an admitted source action pair or one exact neutral label permitted by the runtime contract. | fixed/superseded | `references/02-redesign-gen-prompt.md:387-430`; `tests/test_site_extraction.py:3596-3601` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `f539b1c` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-f539b1c.log`; `/dev/shm/website-generator-pr47-browser-render-f539b1c.png` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 | `PRRT_kwDOTDYaKM6fpeiS`: class-based stylesheet suppression is not applied before evidence collection | Raw fetched HTML does not own browser-computed visibility; a correct computed-visibility policy must account for the CSS cascade, media state, viewport, and external stylesheets once at the fetch/render boundary. | The class-hidden claim is present in fetched HTML and is admitted; the equivalent inline-hidden claim rejects. A selector regex here would not establish computed visibility. | separate issue | `lib/site_extraction.py:805-815,1328-1335`; issue #48 |
 | `PRRT_kwDOTDYaKM6fpeiT`: an adjacent sibling disclaimer did not scope its claim | Claim ownership must preserve every adjacent paragraph-like assertion owned by the same bounded record without using an English predicate list. | Adjacent paragraph/small runs now form one structural owner occurrence; a shortened claim rejects, the complete owner passes, and a separately contained assertion remains independent. | fixed/superseded | `lib/site_extraction.py:1278-1409,1778-1825`; `tests/test_site_extraction.py:606-647` |
@@ -348,7 +350,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `47a7b0833d36786eb4a447c2062ada068622cbd8`.
+- Code revision under test: `f539b1cbf252cf4cbfd1dff612da9aab2aa60634`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -381,6 +383,13 @@ business-specific claims.
   cross-paired item URL, and share-as-profile inputs while admitting ordinary and
   extension-bearing phones, inserted replacements, record-local detail links,
   owned profiles, and browser-decoded URLs.
+- The last two paginated threads were remaining consumers of already-declared
+  rules. Form-field collection now applies the same availability predicate as
+  actions, including disabled, inert, and first-legend boundaries. The redesign
+  prompt's enriched-preview and submit-label branches now state the same
+  exact-source-or-bounded-neutral contract enforced by output admission. Focused
+  tests passed for unavailable controls, action availability, and prompt
+  consistency.
 - Current affected modules: `python -m unittest -q tests.test_site_extraction
   tests.test_generation` passed 234 tests.
 - Full suite: `python -m unittest discover -s tests` passed 376 tests with 34
@@ -393,24 +402,25 @@ business-specific claims.
   mechanically rewrite all 5 inspected Python files; neither unrelated rewrite is
   included in this PR.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began after `2026-09-06T04:28:09,234569801-05:00`, completed before
-  `2026-09-06T04:29:11,175085392-05:00`, exited 0, and left the model resident
+  Ollama. It began after `2026-09-06T04:35:07,631172909-05:00`, completed before
+  `2026-09-06T04:36:06,879843694-05:00`, exited 0, and left the model resident
   100% on the GPU. No correction attempt, email, or deployment path ran. Log:
-  `/dev/shm/website-generator-pr47-fixture-47a7b08.log`.
-- The invocation replaced the prior artifact inode with inode 3309502 at mtime
-  `2026-09-06 04:29:06.655938575 -0500`; the resulting 71939-byte
+  `/dev/shm/website-generator-pr47-fixture-f539b1c.log`.
+- The invocation replaced the prior artifact inode with inode 3309618 at mtime
+  `2026-09-06 04:36:03.819089057 -0500`; the resulting 71939-byte
   `outputs/builds/drees-plumbing-inc/index.html` has SHA-256
   `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned status 1 with zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-47a7b08.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-47a7b08.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-f539b1c.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-f539b1c.log`.
 - Rendered spot-check: the committed artifact returned HTTP 200 with 71939 bytes;
   headless Chrome reported title `DREES PLUMBING INC` and 2441 body-text
-  characters. The inspected full-page render is a nonblank styled Drees Plumbing
-  page with navigation, hero and CTAs, services, trust/reviews, contact form, and
-  footer. Screenshot:
-  `/dev/shm/website-generator-pr47-browser-render-47a7b08.png`, SHA-256
+  characters. The tall screenshot was inspected at original resolution through
+  top, middle, and bottom crops and shows a nonblank styled Drees Plumbing page
+  with navigation, hero and CTAs, services, trust/reviews, contact form, and
+  footer. Full screenshot:
+  `/dev/shm/website-generator-pr47-browser-render-f539b1c.png`, SHA-256
   `bbd0dbe929f645f5b0a3830d69cc20f82c575c9f729346433999d2683136a4b7`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
   separate open issue because one successful run does not resolve its historical
