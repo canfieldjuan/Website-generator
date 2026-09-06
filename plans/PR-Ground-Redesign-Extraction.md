@@ -157,9 +157,11 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6frI0U`: a wrapper's descendant heading hid its pre-heading qualifier | Claim ownership must split a rendered wrapper at its first semantic boundary; all nested contexts in the prefix fragment belong to the preceding claim run, while the heading or independent record starts a new run. | Direct, span-wrapped, paragraph-wrapped, and nested-wrapper qualifiers all reject the shortened benefit, admit `Free Estimates Members only.`, and do not attach `Details` to that claim. Existing peer-heading and record boundaries still pass. | fixed/superseded | `lib/site_extraction.py:1759-1853,1870-1891`; `tests/test_site_extraction.py:749-767` |
 | `PRRT_kwDOTDYaKM6frI0W`: abbreviation punctuation separated a fax role from its number | Contact-role ownership must be assigned inside the already bounded source assertion, not by treating every period as a sentence break. Complete field-label spans must associate each role with its governed phone occurrence. | `Fax No. 217-555-0100` and the dotted-number variant reject; `Phone No. 217-555-0100` admits. In a mixed fax/phone record, only the phone occurrence authorizes a callable number. | fixed/superseded | `lib/site_extraction.py:471-474,766-798`; `tests/test_site_extraction.py:1115-1186` |
 | `PRRT_kwDOTDYaKM6frNFW`: nested independent records discarded their wrapper prefix | A wrapper may donate only its prefix before the first semantic boundary; the boundary and its descendants remain an independent owner. | Both direct and paragraph-wrapped `Members only.` prefixes before a nested `<section>` stay attached to `Free Estimates`; the shortened claim rejects, the complete claim admits, and the section heading is excluded. | fixed/superseded | `lib/site_extraction.py:1759-1853,1870-1891`; `tests/test_site_extraction.py:749-767` |
-| `PRRT_kwDOTDYaKM6frNFY`: a shared fax role governed only its nearest number | A single explicit contact role in a bounded assertion governs every phone occurrence in that assertion; mixed role kinds must partition adjacent field groups rather than assign each number to a globally nearest label. | Both numbers reject in prefix and postfix shared-fax lists, both admit in a shared-phone list, and mixed fax/phone records admit only numbers owned by the phone group. | fixed/superseded | `lib/site_extraction.py:766-871`; `tests/test_site_extraction.py:1175-1333` |
-| `PRRT_kwDOTDYaKM6frR1p`: a later phone label captured the second number in a fax group | Each complete prefix or postfix field label owns its adjacent coordinated number group and an intervening role label is an ownership boundary. | The exact `Fax: 217-555-0100 or 217-555-0101. Phone: 217-555-0199` probe reproduced on `504d4be`: the second fax admitted. Both fax numbers now reject and the phone admits; reverse and postfix group probes pass in both directions. | fixed/superseded | `lib/site_extraction.py:766-871`; `tests/test_site_extraction.py:1188-1333` |
-| `PRRT_kwDOTDYaKM6frX9E`: a preceding prefix role captured part of a following postfix group | Contact assertions must be partitioned at real clause boundaries before role ownership is assigned; punctuation inside a role label, dotted number, or extension is not a boundary. A postfix label owns the complete number group in its clause, and contradictory ownership fails closed. | Both exact forward/reverse probes reproduced on `b1cc0e0`: each gave one number to the wrong preceding role. Period- and semicolon-separated prefix/postfix groups now classify every number correctly in both directions; protected `Fax No.` and dotted-number punctuation still classify correctly, and one contradictory group grants no callable authority. | fixed/superseded | `lib/site_extraction.py:766-871`; `tests/test_site_extraction.py:1243-1303` |
+| `PRRT_kwDOTDYaKM6frNFY`: a shared fax role governed only its nearest number | A single explicit contact role in a bounded assertion governs every phone occurrence in that assertion; mixed role kinds must partition adjacent field groups rather than assign each number to a globally nearest label. | Both numbers reject in prefix and postfix shared-fax lists, both admit in a shared-phone list, and mixed fax/phone records admit only numbers owned by the phone group. | fixed/superseded | `lib/site_extraction.py:768-873`; `tests/test_site_extraction.py:1175-1375` |
+| `PRRT_kwDOTDYaKM6frR1p`: a later phone label captured the second number in a fax group | Each complete prefix or postfix field label owns its adjacent coordinated number group and an intervening role label is an ownership boundary. | The exact `Fax: 217-555-0100 or 217-555-0101. Phone: 217-555-0199` probe reproduced on `504d4be`: the second fax admitted. Both fax numbers now reject and the phone admits; reverse and postfix group probes pass in both directions. | fixed/superseded | `lib/site_extraction.py:768-873`; `tests/test_site_extraction.py:1188-1375` |
+| `PRRT_kwDOTDYaKM6frX9E`: a preceding prefix role captured part of a following postfix group | Contact assertions must be partitioned at real group boundaries before role ownership is assigned; punctuation inside a role label, dotted number, or extension is not a boundary. A postfix label owns the complete number group in its clause, and contradictory ownership fails closed. | Both exact forward/reverse probes reproduced on `b1cc0e0`: each gave one number to the wrong preceding role. Period- and semicolon-separated prefix/postfix groups now classify every number correctly in both directions; protected field-label and dotted-number punctuation still classify correctly, and one contradictory group grants no callable authority. | fixed/superseded | `lib/site_extraction.py:768-873`; `tests/test_site_extraction.py:1285-1345` |
+| `PRRT_kwDOTDYaKM6frbqw`: `Fax Line No.` was split at its abbreviation period | Contact lexing must recognize the complete role-field label, including bounded intervening field descriptors and the terminal `Number`/`No.` marker, before scanning delimiters. | `Fax Line No. 217-555-0100` reproduced as callable on `cbed8d6`. Multiword `Fax Line No.` and `Fax Customer Service Number:` forms now reject, while the equivalent `Phone Line No.` form admits and the existing dotted-number control remains correct. | fixed/superseded | `lib/site_extraction.py:471-477,768-807`; `tests/test_site_extraction.py:1243-1261` |
+| `PRRT_kwDOTDYaKM6frbqx`: a pipe-separated phone group was rejected with the following fax group | Contact evidence needs one explicit group-delimiter grammar covering sentence and common visual separators before fail-closed conflict handling. | The exact pipe form reproduced with all three numbers rejected on `cbed8d6`. Pipe, bullet, and em-dash groups now retain the legitimate phone and reject both fax numbers; role-reversed bullet controls also pass. | fixed/superseded | `lib/site_extraction.py:477,768-807`; `tests/test_site_extraction.py:1263-1283` |
 
 ## Mechanism
 
@@ -365,54 +367,54 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `bb3d639e6b115601f973209bcb6655b67b682820`.
+- Code revision under test: `54605a87bec411538968c1cbbd2da7a3ea61cc2a`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
-- Isolated probes reproduced the latest review paths against `b1cc0e0`:
-  `Phone: 217-555-0199. 217-555-0100 or 217-555-0101 (fax)` admitted the
-  first fax, while the role-reversed form rejected the first callable number. The
-  correction partitions contact evidence at real clause delimiters before assigning
-  prefix/postfix roles, protecting punctuation that is intrinsic to `Fax No.`,
-  dotted numbers, and extensions. A postfix role therefore owns its complete
-  adjacent number group; conflicting ownership within one clause fails closed.
-  This replaces cross-clause distance arbitration rather than enumerating sentence
-  predicates or adding exceptions for the reproduced wording.
+- Isolated probes reproduced both latest review paths against `cbed8d6`:
+  `Fax Line No. 217-555-0100` was admitted as callable, while the pipe-separated
+  phone/fax footer rejected the legitimate phone along with both faxes. The
+  correction completes one contact-field lexer: role labels may contain bounded
+  field descriptors before a terminal `Number`/`No.` marker, and a contact-only
+  delimiter grammar recognizes sentence and common visual separators before role
+  ownership runs. This does not alter general claim-sentence parsing or add
+  exceptions for the two reproduced strings.
 - Boundary probe: `python -m unittest -q tests.test_site_extraction
   tests.test_generation` passed 236 tests. Focused positive/negative coverage
   additionally proves shortened versus complete pre-boundary wrapper claims,
   nested heading and independent-record boundaries, prefix/postfix/abbreviated
-  and shared fax versus phone roles, mixed prefix, reverse, postfix, period-, and
-  semicolon-bounded field groups, conflicting-role rejection, submitter override
-  versus conflicting endpoints, generated action propagation, and unchanged
-  peer-heading and leaf-record isolation.
+  and shared fax versus phone roles, complete multiword field labels, mixed prefix,
+  reverse, postfix, sentence-, pipe-, bullet-, and dash-bounded groups,
+  conflicting-role rejection, submitter override versus conflicting endpoints,
+  generated action propagation, and unchanged peer-heading and leaf-record
+  isolation.
 - Full suite: `timeout 600s python -m unittest discover -s tests -q` exited 0;
-  the saved log reports 378 tests passed with 34 skipped in 13.962 seconds. Log:
-  `/dev/shm/website-generator-pr47-full-suite-bb3d639.log`.
+  the saved log reports 378 tests passed with 34 skipped in 13.686 seconds. Log:
+  `/dev/shm/website-generator-pr47-full-suite-54605a8.log`.
 - Static evidence: `python -m ruff check lib/site_extraction.py
   tests/test_site_extraction.py`, `python -m compileall -q
   build.py pipeline.py connect_provider.py lib tests`, and `git diff --check`
   passed. The focused phone-role regression also passed independently.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T06:44:14,181362138-05:00`, completed at
-  `2026-09-06T06:45:04,870441364-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T06:56:32,520092572-05:00`, completed at
+  `2026-09-06T06:57:23,476196974-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-bb3d639.log`.
-- The invocation replaced artifact inode 3325022 with inode 3311297 and set mtime
-  `2026-09-06 06:45:04.782597788 -0500`, proving this invocation rewrote
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-54605a8.log`.
+- The invocation replaced artifact inode 3311297 with inode 3309502 and set mtime
+  `2026-09-06 06:57:23.362714977 -0500`, proving this invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71939-byte artifact
   has SHA-256
   `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-bb3d639.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-bb3d639.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-54605a8.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-54605a8.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
   loaded a 1440x3040 screenshot with title `DREES PLUMBING INC` and 2468
   body-text characters. The screenshot was visually inspected and shows the
   styled navigation, hero, service grid, trust content, and review content
   without an obvious render break. Screenshot:
-  `/dev/shm/website-generator-pr47-browser-render-bb3d639.png`,
+  `/dev/shm/website-generator-pr47-browser-render-54605a8.png`,
   SHA-256
   `12bd0bd8b1e07d030a3bdaa4a3345e94345f8b951619a8333b563c1c40371efb`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
