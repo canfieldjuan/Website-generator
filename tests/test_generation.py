@@ -47,6 +47,8 @@ from lib.generation import (
     GenerationResponseError,
     GenerationResult,
     PromptPart,
+    ReviewAdmissionContract,
+    ServiceLocationAdmissionContract,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -2010,10 +2012,19 @@ class BodyAssemblyTests(unittest.TestCase):
         contract = ActionUrlAdmissionContract(
             allowed_urls=(
                 "https://source.test/book",
+                "sms:2175550100?body=Hello",
+            ),
+            allowed_form_urls=(
+                "https://source.test/book",
                 "https://source.test/form",
             ),
             phones=("217-555-0100",),
             emails=("office@source.test",),
+            allowed_labels=("Book", "Text"),
+            allowed_pairs=(
+                ("Book", "https://source.test/book"),
+                ("Text", "sms:2175550100?body=Hello"),
+            ),
         )
         valid_body = (
             '<body><a href="#contact">Contact</a>'
@@ -2032,6 +2043,65 @@ class BodyAssemblyTests(unittest.TestCase):
             ),
             valid_body,
         )
+
+        for mismatched_label in ("Text Us", "Email Us"):
+            with (
+                self.subTest(mismatched_label=mismatched_label),
+                self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "channel-specific action label",
+                ),
+            ):
+                validate_generated_body(
+                    body_result(
+                        f'<body><a href="tel:2175550100">{mismatched_label}</a></body>'
+                    ),
+                    expected_action_urls=contract,
+                )
+
+        text_body = (
+            '<body><a href="sms:2175550100?body=Hello">Text Us</a></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(text_body),
+                expected_action_urls=contract,
+            ),
+            text_body,
+        )
+
+        exact_source_mismatch = ActionUrlAdmissionContract(
+            phones=("217-555-0100",),
+            allowed_labels=("Text Us",),
+            allowed_pairs=(("Text Us", "tel:2175550100"),),
+        )
+        source_owned_body = '<body><a href="tel:2175550100">Text Us</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(source_owned_body),
+                expected_action_urls=exact_source_mismatch,
+            ),
+            source_owned_body,
+        )
+
+        entity_site = {
+            "site": {"name": "Acme Plumbing"},
+            "nav": [
+                {"label": "Search", "url": "/search?a=1&amp;b=2"}
+            ],
+        }
+        entity_contract = pipeline._redesign_action_url_contract(
+            entity_site,
+            pipeline._redesign_contact_contract(entity_site),
+        )
+        decoded_body = '<body><a href="/search?a=1&b=2">Search</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(decoded_body),
+                expected_action_urls=entity_contract,
+            ),
+            decoded_body,
+        )
         no_action_body = "<body><main>No actions</main></body>"
         self.assertEqual(
             validate_generated_body(
@@ -2049,13 +2119,28 @@ class BodyAssemblyTests(unittest.TestCase):
                 expected_action_urls=ActionUrlAdmissionContract(),
             )
 
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "must declare one admitted action endpoint",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><form><button type="submit">Submit</button></form></body>'
+                ),
+                expected_action_urls=ActionUrlAdmissionContract(),
+            )
+
         invalid_destinations = (
             '<a href="https://calendly.com/wrong">Book</a>',
             '<area href="//unrelated.test/path">',
             '<a xlink:href="https://unrelated.test/path">Open</a>',
             '<form action="https://unrelated.test/form"></form>',
-            '<button formaction="https://unrelated.test/form">Send</button>',
+            (
+                '<form action="https://source.test/form">'
+                '<button formaction="https://unrelated.test/form">Send</button></form>'
+            ),
             '<a href="tel:2175550199">Call</a>',
+            '<a href="sms:2175550100">Text</a>',
             '<a href="mailto:wrong@source.test">Email</a>',
         )
         for invalid in invalid_destinations:
@@ -2070,6 +2155,725 @@ class BodyAssemblyTests(unittest.TestCase):
                 validate_generated_body(
                     body_result(mixed_body),
                     expected_action_urls=contract,
+                )
+
+        for fabricated_label in (
+            "Request My Quote",
+            "Book My Appointment",
+            "Order Online",
+            "Buy Now",
+            "Pay Now",
+            "Add to Cart",
+            "Donate Now",
+            "Register",
+            "Subscribe",
+            "Get Tickets",
+        ):
+            with (
+                self.subTest(fabricated_label=fabricated_label),
+                self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "non-neutral action label",
+                ),
+            ):
+                validate_generated_body(
+                    body_result(
+                        '<body><a href="https://source.test/book">'
+                        f"{fabricated_label}</a></body>"
+                    ),
+                    expected_action_urls=contract,
+                )
+
+        svg_contract = ActionUrlAdmissionContract(
+            allowed_urls=("/contact",),
+            allowed_labels=("Contact Us",),
+            allowed_pairs=(("Contact Us", "/contact"),),
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "non-neutral action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><svg><a xlink:href="/contact">'
+                    "<text>Book Appointment</text></a></svg></body>"
+                ),
+                expected_action_urls=svg_contract,
+            )
+        source_owned_svg = (
+            '<body><svg><a xlink:href="/contact">'
+            "<text>Contact Us</text></a></svg></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(source_owned_svg),
+                expected_action_urls=svg_contract,
+            ),
+            source_owned_svg,
+        )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "non-neutral action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><span id="cta-label">Request My Quote</span>'
+                    '<a aria-labelledby="cta-label" '
+                    'href="https://source.test/book"></a></body>'
+                ),
+                expected_action_urls=contract,
+            )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "non-neutral action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><a href="https://source.test/book">Book →</a></body>'
+                ),
+                expected_action_urls=contract,
+            )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "non-neutral action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><a aria-label="Contact Us" '
+                    'href="https://source.test/book">Book Appointment</a></body>'
+                ),
+                expected_action_urls=contract,
+            )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "non-neutral action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><a aria-labelledby="cta-label" '
+                    'href="https://source.test/book"></a>'
+                    '<span id="cta-label" aria-label="Book Appointment">'
+                    "Contact Us</span></body>"
+                ),
+                expected_action_urls=contract,
+            )
+
+        aria_labelled_body = (
+            '<body><a aria-labelledby="cta-label" '
+            'href="https://source.test/book"></a>'
+            '<span id="cta-label" aria-label="Contact Us">'
+            "Book Appointment</span></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(aria_labelled_body),
+                expected_action_urls=contract,
+            ),
+            aria_labelled_body,
+        )
+
+        for image_action in (
+            (
+                '<body><a href="https://source.test/book">'
+                '<img src="https://source.test/logo.png" alt="Book Appointment">'
+                "</a></body>"
+            ),
+            (
+                '<body><form action="https://source.test/book">'
+                '<input type="image" alt="Book Appointment" '
+                'src="https://source.test/button.png" '
+                'formaction="https://source.test/book"></form></body>'
+            ),
+            (
+                '<body><a aria-labelledby="booking-label" '
+                'href="https://source.test/book"></a>'
+                '<img id="booking-label" src="https://source.test/button.png" '
+                'alt="Book Appointment"></body>'
+            ),
+        ):
+            with (
+                self.subTest(image_action=image_action),
+                self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"),
+            ):
+                validate_generated_body(
+                    body_result(image_action),
+                    expected_action_urls=contract,
+                )
+
+        neutral_body = (
+            '<body><a href="https://source.test/book">Contact Us</a>'
+            '<a href="https://source.test/book">Book</a>'
+            '<a href="#contact">Learn More</a></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(neutral_body),
+                expected_action_urls=contract,
+            ),
+            neutral_body,
+        )
+
+    def test_service_location_claims_require_one_complete_source_assertion(self):
+        restricted = ServiceLocationAdmissionContract(
+            services=("Drain Cleaning",),
+            locations=("Effingham, IL",),
+        )
+        for body in (
+            '<body><h1>Drain Cleaning in Effingham, IL</h1></body>',
+            (
+                '<body><section><span>Drain Cleaning</span> '
+                '<span>in Effingham, IL</span></section></body>'
+            ),
+        ):
+            with (
+                self.subTest(body=body),
+                self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "without one complete source-owned assertion",
+                ),
+            ):
+                validate_generated_body(
+                    body_result(body),
+                    expected_service_locations=restricted,
+                )
+
+        independent_facts = (
+            '<body><h2>Drain Cleaning</h2><p>Effingham, IL</p></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(independent_facts),
+                expected_service_locations=restricted,
+            ),
+            independent_facts,
+        )
+
+        source_owned_claim = "Drain Cleaning throughout Effingham, IL"
+        admitted = ServiceLocationAdmissionContract(
+            services=("Drain Cleaning",),
+            locations=("Effingham, IL",),
+            allowed_claims=(source_owned_claim,),
+        )
+        body = f"<body><h1>{source_owned_claim}</h1></body>"
+        self.assertEqual(
+            validate_generated_body(
+                body_result(body),
+                expected_service_locations=admitted,
+            ),
+            body,
+        )
+
+    def test_body_button_inputs_enforce_label_authority(self):
+        allowed = ActionUrlAdmissionContract(
+            allowed_labels=("Book Appointment",),
+        )
+        for input_type in ("button", "reset"):
+            body = f'<body><input type="{input_type}" value="Book Appointment"></body>'
+            with self.subTest(input_type=input_type):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=allowed,
+                    ),
+                    body,
+                )
+                with self.assertRaisesRegex(
+                    GeneratedBodyError, "non-neutral action label"
+                ):
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=ActionUrlAdmissionContract(),
+                    )
+
+        data_input = '<body><input type="text" value="Book Appointment"></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(data_input),
+                expected_action_urls=ActionUrlAdmissionContract(),
+            ),
+            data_input,
+        )
+
+    def test_standalone_buttons_do_not_acquire_form_submit_semantics(self):
+        for standalone in (
+            "<body><button>Open menu</button></body>",
+            '<body><button form="missing">Open menu</button></body>',
+            '<body><button type="button" formaction="/inert">Open menu</button></body>',
+        ):
+            with self.subTest(standalone=standalone):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(standalone),
+                        expected_action_urls=ActionUrlAdmissionContract(),
+                    ),
+                    standalone,
+                )
+
+        invalid_owner_contract = ActionUrlAdmissionContract(
+            allowed_form_urls=("/other",),
+            allowed_form_pairs=(("/other", "get"),),
+            allowed_labels=("Send",),
+            allowed_pairs=(("Send", "/other"),),
+        )
+        for invalid_owner in ('form=""', 'form=" "', 'form=" owned "'):
+            with self.subTest(invalid_owner=invalid_owner), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "no exact form owner",
+            ):
+                validate_generated_body(
+                    body_result(
+                        '<body><form id="owned" action="/other">'
+                        f'<button {invalid_owner}>Send</button></form></body>'
+                    ),
+                    expected_action_urls=invalid_owner_contract,
+                )
+
+        with self.assertRaisesRegex(GeneratedBodyError, "no exact form owner"):
+            validate_generated_body(
+                body_result(
+                    '<body><div id="owned"></div>'
+                    '<form id="owned" action="/other">'
+                    '<button form="owned">Send</button></form></body>'
+                ),
+                expected_action_urls=invalid_owner_contract,
+            )
+
+        exact_owner = (
+            '<body><form id="owned" action="/other">'
+            '<button form="owned">Send</button></form></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(exact_owner),
+                expected_action_urls=invalid_owner_contract,
+            ),
+            exact_owner,
+        )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "must declare one admitted action endpoint",
+        ):
+            validate_generated_body(
+                body_result(
+                    "<body><form><button>Open menu</button></form></body>"
+                ),
+                expected_action_urls=ActionUrlAdmissionContract(),
+            )
+
+    def test_body_form_submission_preserves_endpoint_and_method_as_one_pair(self):
+        contract = ActionUrlAdmissionContract(
+            allowed_form_urls=("/submit", "/search"),
+            allowed_form_pairs=(("/submit", "post"), ("/search", "get")),
+            allowed_labels=("Search",),
+            allowed_pairs=(("Search", "/search"),),
+        )
+        for valid in (
+            '<body><form action="/submit" method="post"></form></body>',
+            '<body><form action="/search"><button>Search</button></form></body>',
+        ):
+            with self.subTest(valid=valid):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(valid),
+                        expected_action_urls=contract,
+                    ),
+                    valid,
+                )
+
+        for invalid in (
+            '<body><form action="/submit"></form></body>',
+            '<body><form action="/search" method="post"></form></body>',
+            (
+                '<body><form action="/submit" method="post">'
+                '<button formmethod="get">Search</button></form></body>'
+            ),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "source-owned submission pair",
+            ):
+                validate_generated_body(
+                    body_result(invalid),
+                    expected_action_urls=contract,
+                )
+
+        legacy_url_only = ActionUrlAdmissionContract(allowed_form_urls=("/submit",))
+        legacy_body = '<body><form action="/submit"></form></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(legacy_body),
+                expected_action_urls=legacy_url_only,
+            ),
+            legacy_body,
+        )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "exceeds its URL authority",
+        ):
+            validate_generated_body(
+                body_result(legacy_body),
+                expected_action_urls=ActionUrlAdmissionContract(
+                    allowed_form_urls=("/submit",),
+                    allowed_form_pairs=(("/other", "post"),),
+                ),
+            )
+
+    def test_body_input_actions_validate_every_rendered_label_surface(self):
+        contact_only = ActionUrlAdmissionContract(
+            allowed_form_urls=("/contact",),
+            allowed_labels=("Contact Us",),
+            allowed_pairs=(("Contact Us", "/contact"),),
+        )
+        conflicting = (
+            '<body><form action="/contact">'
+            '<input type="submit" value="Book Appointment" '
+            'aria-label="Contact Us"></form></body>'
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            validate_generated_body(
+                body_result(conflicting),
+                expected_action_urls=contact_only,
+            )
+
+        source_owned = ActionUrlAdmissionContract(
+            allowed_form_urls=("/contact",),
+            allowed_labels=("Contact Us", "Book Appointment"),
+            allowed_pairs=(
+                ("Contact Us", "/contact"),
+                ("Book Appointment", "/contact"),
+            ),
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(conflicting),
+                expected_action_urls=source_owned,
+            ),
+            conflicting,
+        )
+
+    def test_neutral_action_labels_are_bounded_complete_phrases(self):
+        destination_only = ActionUrlAdmissionContract(allowed_urls=("/contact",))
+        for label in ("Contact Us", "Learn More"):
+            body = f'<body><a href="/contact">{label}</a></body>'
+            with self.subTest(label=label):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=destination_only,
+                    ),
+                    body,
+                )
+
+        fabricated_reviews = '<body><a href="/contact">Read All Reviews</a></body>'
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            validate_generated_body(
+                body_result(fabricated_reviews),
+                expected_action_urls=destination_only,
+            )
+
+        for capability_label in (
+            "About Us",
+            "Coverage Area",
+            "Directions",
+            "FAQ",
+            "Gallery",
+            "Map",
+            "Meet Our Team",
+            "Our Services",
+            "Request Service",
+            "Service",
+            "Service Area",
+            "Services",
+            "Team",
+            "View Our Services",
+            "View Services",
+            "Work",
+        ):
+            with self.subTest(capability_label=capability_label), self.assertRaisesRegex(
+                GeneratedBodyError, "non-neutral action label"
+            ):
+                validate_generated_body(
+                    body_result(
+                        f'<body><a href="/contact">{capability_label}</a></body>'
+                    ),
+                    expected_action_urls=destination_only,
+                )
+
+        source_owned_team = ActionUrlAdmissionContract(
+            allowed_urls=("/team",),
+            allowed_labels=("Meet Our Team",),
+            allowed_pairs=(("Meet Our Team", "/team"),),
+        )
+        owned_team = '<body><a href="/team">Meet Our Team</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(owned_team),
+                expected_action_urls=source_owned_team,
+            ),
+            owned_team,
+        )
+
+        source_owned_reviews = ActionUrlAdmissionContract(
+            allowed_urls=("/reviews",),
+            allowed_labels=("Read All Reviews",),
+            allowed_pairs=(("Read All Reviews", "/reviews"),),
+        )
+        owned = '<body><a href="/reviews">Read All Reviews</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(owned),
+                expected_action_urls=source_owned_reviews,
+            ),
+            owned,
+        )
+
+    def test_body_aria_actions_enforce_label_authority(self):
+        allowed = ActionUrlAdmissionContract(
+            allowed_labels=("Book Appointment",),
+        )
+        for role in ("button", "link"):
+            body = (
+                f'<body><div role="{role}" tabindex="0">Book Appointment</div></body>'
+            )
+            with self.subTest(role=role):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=allowed,
+                    ),
+                    body,
+                )
+                with self.assertRaisesRegex(
+                    GeneratedBodyError, "non-neutral action label"
+                ):
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=ActionUrlAdmissionContract(),
+                    )
+
+        descendant_aria = (
+            '<body><a href="/contact">'
+            '<img alt="Contact Us" aria-label="Book Appointment"></a></body>'
+        )
+        contact_contract = ActionUrlAdmissionContract(
+            allowed_urls=("/contact",),
+            allowed_labels=("Contact Us",),
+            allowed_pairs=(("Contact Us", "/contact"),),
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            validate_generated_body(
+                body_result(descendant_aria),
+                expected_action_urls=contact_contract,
+            )
+
+        aria_override = (
+            '<body><a href="/contact">'
+            '<img alt="Contact Us" aria-label="Contact Us"></a></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(aria_override),
+                expected_action_urls=contact_contract,
+            ),
+            aria_override,
+        )
+
+    def test_build_action_contract_binds_canonical_form_labels(self):
+        form_action = "https://source.test/form"
+        contract = build.expected_build_action_url_contract(
+            {"formspree_endpoint": form_action},
+            ReviewAdmissionContract(mode="omit"),
+        )
+        self.assertEqual(
+            contract.allowed_labels,
+            (
+                *build.BUILD_FORM_SUBMIT_LABELS,
+                *(label for label, _destination in build.BUILD_CODE_OWNED_ACTION_PAIRS),
+            ),
+        )
+        self.assertEqual(
+            contract.allowed_pairs,
+            tuple((label, form_action) for label in build.BUILD_FORM_SUBMIT_LABELS)
+            + build.BUILD_CODE_OWNED_ACTION_PAIRS,
+        )
+
+        for label in build.BUILD_FORM_SUBMIT_LABELS:
+            body = (
+                f'<body><form action="{form_action}">'
+                f'<button type="submit">{label}</button></form></body>'
+            )
+            with self.subTest(label=label):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=contract,
+                    ),
+                    body,
+                )
+
+        request_service = '<body><a href="#contact">Request Service</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(request_service), expected_action_urls=contract
+            ),
+            request_service,
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "source-owned action pair"):
+            validate_generated_body(
+                body_result(
+                    '<body><a href="#other">Request Service</a></body>'
+                ),
+                expected_action_urls=contract,
+            )
+
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            validate_generated_body(
+                body_result(
+                    f'<body><form action="{form_action}">'
+                    '<button type="submit">Send My Free Quote</button>'
+                    "</form></body>"
+                ),
+                expected_action_urls=contract,
+            )
+
+    def test_body_action_labels_remain_bound_to_source_destinations(self):
+        contract = ActionUrlAdmissionContract(
+            allowed_urls=(
+                "https://source.test/contact",
+                "https://source.test/order",
+            ),
+            allowed_form_urls=(
+                "https://source.test/contact",
+                "https://source.test/order",
+            ),
+            allowed_labels=("Contact Us", "Order Online"),
+            allowed_pairs=(
+                ("Contact Us", "https://source.test/contact"),
+                ("Order Online", "https://source.test/order"),
+            ),
+        )
+        valid = (
+            '<body><a href="https://source.test/contact">Contact Us</a>'
+            '<a href="https://source.test/order">Order Online</a>'
+            '<form action="https://source.test/contact">'
+            '<button>Contact Us</button></form>'
+            '<form id="order-form" action="https://source.test/order"></form>'
+            '<input type="submit" form="order-form" value="Order Online"></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(body_result(valid), expected_action_urls=contract),
+            valid,
+        )
+        for swapped in (
+            '<body><a href="https://source.test/order">Contact Us</a></body>',
+            '<body><a href="https://source.test/contact">Order Online</a></body>',
+        ):
+            with self.subTest(swapped=swapped), self.assertRaisesRegex(
+                GeneratedBodyError, "source-owned action pair"
+            ):
+                validate_generated_body(
+                    body_result(swapped),
+                    expected_action_urls=contract,
+                )
+
+        for swapped_form_control in (
+            (
+                '<body><form action="https://source.test/contact">'
+                '<button>Order Online</button></form></body>'
+            ),
+            (
+                '<body><form id="order-form" action="https://source.test/order">'
+                '</form><button form="order-form">Contact Us</button></body>'
+            ),
+        ):
+            with self.subTest(body=swapped_form_control), self.assertRaisesRegex(
+                GeneratedBodyError, "source-owned action pair"
+            ):
+                validate_generated_body(
+                    body_result(swapped_form_control),
+                    expected_action_urls=contract,
+                )
+
+        contact_contract = ActionUrlAdmissionContract(
+            allowed_urls=("https://source.test/contact",),
+            phones=("217-555-0100",),
+            emails=("office@source.test",),
+        )
+        for contact_swap in (
+            (
+                '<body><a href="https://source.test/contact">217-555-0100</a></body>',
+                "phone label",
+            ),
+            (
+                '<body><a href="https://source.test/contact">office@source.test</a></body>',
+                "email label",
+            ),
+        ):
+            body, error = contact_swap
+            with self.subTest(body=body), self.assertRaisesRegex(
+                GeneratedBodyError, error
+            ):
+                validate_generated_body(
+                    body_result(body),
+                    expected_action_urls=contact_contract,
+                )
+
+    def test_body_keeps_link_and_form_destination_authority_separate(self):
+        contract = ActionUrlAdmissionContract(
+            allowed_urls=("/contact",),
+            allowed_form_urls=("/submit",),
+            phones=("217-555-0100",),
+            emails=("office@source.test",),
+            allowed_labels=("Contact", "Send"),
+            allowed_pairs=(("Contact", "/contact"), ("Send", "/submit")),
+        )
+        valid = (
+            '<body><a href="/contact">Contact</a>'
+            '<form action="/submit"><button type="submit">Send</button>'
+            "</form></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(body_result(valid), expected_action_urls=contract),
+            valid,
+        )
+        for invalid in (
+            '<body><a href="/submit">Contact</a></body>',
+            '<body><form action="/contact"><button>Send</button></form></body>',
+            '<body><form action="tel:2175550100"><button>Send</button></form></body>',
+            '<body><form action="mailto:office@source.test"><button>Send</button></form></body>',
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                GeneratedBodyError, "outside source-owned destinations"
+            ):
+                validate_generated_body(
+                    body_result(invalid), expected_action_urls=contract
+                )
+
+    def test_body_action_pair_contract_cannot_exceed_component_authority(self):
+        for invalid_contract in (
+            ActionUrlAdmissionContract(
+                allowed_urls=("/contact",),
+                allowed_labels=("Contact",),
+                allowed_pairs=[("Contact", "/contact")],
+            ),
+            ActionUrlAdmissionContract(
+                allowed_urls=("/contact",),
+                allowed_labels=("Contact",),
+                allowed_pairs=(("Missing", "/contact"),),
+            ),
+        ):
+            with self.subTest(contract=invalid_contract), self.assertRaisesRegex(
+                GeneratedBodyError, "pair contract"
+            ):
+                validate_generated_body(
+                    body_result('<body><a href="/contact">Contact</a></body>'),
+                    expected_action_urls=invalid_contract,
                 )
 
     def test_body_admission_restricts_inline_styles_to_declared_properties(self):
@@ -2876,6 +3680,8 @@ class PromptContractTests(unittest.TestCase):
                 for value in forbidden:
                     self.assertNotIn(value, filtered)
                 self.assertNotIn("REVIEW_BRANCH_", filtered)
+                self.assertNotIn("Read All on Google &rarr;", filtered)
+                self.assertNotIn("Read All Reviews on Google &rarr;", filtered)
 
     def test_review_prompt_filter_fails_closed_when_markers_drift(self):
         prompt = Path("references/06-build-prompt.md").read_text(encoding="utf-8")
@@ -2915,6 +3721,22 @@ class PromptContractTests(unittest.TestCase):
                 prompt = prompt_path.read_text(encoding="utf-8")
                 self.assertNotIn("onerror", prompt.casefold())
                 self.assertIn("trusted code", prompt.casefold())
+
+    def test_redesign_prompt_does_not_compose_service_and_location_facts(self):
+        prompt = Path("references/02-redesign-gen-prompt.md").read_text(
+            encoding="utf-8"
+        )
+
+        normalized_prompt = " ".join(prompt.split())
+        self.assertIn(
+            "Never combine a service found in one field with a location found in another field",
+            normalized_prompt,
+        )
+        self.assertIn("one complete source-owned service-and-location assertion", prompt)
+        self.assertNotIn(
+            "Build the headline from the most specific grounded service",
+            prompt,
+        )
 
     def test_deployment_comments_are_code_owned_and_absent_from_prompts(self):
         for prompt_path, markers in (
@@ -3714,6 +4536,17 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         admitted_body = build_body_with_review_section(
             aggregate_review_section("4.4", "12")
         )
+        review_contract = build.expected_review_contract(prospect)
+        self.assertEqual(
+            build.expected_build_action_url_contract(
+                prospect, review_contract
+            ).allowed_labels,
+            (
+                *build.BUILD_FORM_SUBMIT_LABELS,
+                *(label for label, _destination in build.BUILD_CODE_OWNED_ACTION_PAIRS),
+                "Read All Reviews on Google",
+            ),
+        )
         html = build.generate_build_html(
             prospect,
             config(),
@@ -3741,6 +4574,17 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 prospect,
                 config(),
                 FakeLocalClient(local_chat_payload(extra_cta_text)),
+            )
+
+        decorated_cta = admitted_body.replace(
+            "Read All Reviews on Google",
+            "Read All Reviews on Google →",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid CTA text"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(decorated_cta)),
             )
 
         exact_ambient = admitted_body.replace(
@@ -3849,12 +4693,34 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         admitted_body = build_body_with_review_section(
             review_card_section(reviews, "4.8", "31")
         )
+        review_contract = build.expected_review_contract(prospect)
+        self.assertEqual(
+            build.expected_build_action_url_contract(
+                prospect, review_contract
+            ).allowed_labels,
+            (
+                *build.BUILD_FORM_SUBMIT_LABELS,
+                *(label for label, _destination in build.BUILD_CODE_OWNED_ACTION_PAIRS),
+                "Read All on Google",
+            ),
+        )
         html = build.generate_build_html(
             prospect,
             config(),
             FakeLocalClient(local_chat_payload(admitted_body)),
         )
         self.assertIn(admitted_body, html)
+
+        decorated_cta = admitted_body.replace(
+            "Read All on Google",
+            "Read All on Google →",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid CTA text"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(decorated_cta)),
+            )
 
         extra_grid_text = admitted_body.replace(
             '<div class="reviews-card-grid">',
@@ -4119,12 +4985,12 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "</nav>",
             '<a href="sms:2175550100">Text us</a></nav>',
         )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(matching_optional_action)),
-        )
-        self.assertIn("sms:2175550100", html)
+        with self.assertRaisesRegex(GeneratedBodyError, "source-owned destinations"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(matching_optional_action)),
+            )
 
     def test_generators_reject_classes_outside_provided_catalog(self):
         prospect = {
@@ -5071,6 +5937,22 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             html = generator()
             self.assertIn(f'href="{source_url}"', html)
 
+        linked_brand = COMPLETE_PAGE_BODY.replace(
+            "<main>",
+            '<a href="/" class="nav-brand">Current Business</a><main>',
+        )
+        for generator in generators(linked_brand):
+            html = generator()
+            self.assertIn('<a href="/" class="nav-brand">Current Business</a>', html)
+
+        misbound_brand = linked_brand.replace('href="/"', f'href="{source_url}"')
+        for generator in generators(misbound_brand):
+            with self.assertRaisesRegex(
+                GeneratedBodyError,
+                "source-owned action pair",
+            ):
+                generator()
+
         wrong_identity = COMPLETE_PAGE_BODY.replace(
             "Current Business",
             "Invented Business",
@@ -5093,7 +5975,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         fetched_source_url = "https://current.test/source-only-action"
         fetched_body = COMPLETE_PAGE_BODY.replace(
             "</main>",
-            f'<a href="{fetched_source_url}">Source action</a></main>',
+            f'<a href="{fetched_source_url}">Learn More</a></main>',
         )
         html = pipeline.generate_interior_page(
             {"site": {"name": "Current Business"}},
@@ -5114,8 +5996,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         site_json = {"site": {"name": "Current Business"}}
         with patch(
             "pipeline.fetch_and_clean_html",
-            return_value="<main>Verified contact source</main>",
-        ), patch(
+            return_value=(
+                "<main>Verified contact source</main>",
+                "https://current.test/contact",
+            ),
+        ) as fetcher, patch(
             "pipeline.generate_interior_page",
             side_effect=GenerationResponseError("rejected generated body"),
         ) as generator:
@@ -5130,9 +6015,18 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     config(),
                 )
         self.assertEqual(generator.call_count, 1)
+        fetcher.assert_called_once_with(
+            "https://current.test/contact",
+            include_source_url=True,
+            required_origin="https://current.test/contact",
+        )
         self.assertEqual(
             generator.call_args.kwargs["source_content"],
             "<main>Verified contact source</main>",
+        )
+        self.assertEqual(
+            generator.call_args.kwargs["page_url"],
+            "https://current.test/contact",
         )
 
         with patch(

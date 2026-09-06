@@ -83,9 +83,10 @@ Modernize:
 - Information density (reduce clutter, improve scannability)
 
 Multi-page consistency: if this homepage is part of a multi-page deliverable,
-the nav HTML, footer HTML, and trust strip must be identical across every page.
-Trusted code applies the shared `:root` and font settings. Interior pages are
-generated using prompt 04. Never vary nav structure between pages.
+the nav HTML, footer HTML, and any evidence-backed trust strip must be identical
+across every page. Trusted code applies the shared `:root` and font settings.
+Interior pages are generated using prompt 04. Never vary nav structure between
+pages.
 
 ---
 
@@ -152,6 +153,20 @@ NOTES: [INSERT OR none]
 SITE JSON:
 [PASTE JSON HERE]
 
+SOURCE AUTHORITY BOUNDARY:
+- Source-owned identity, contact, navigation, CTA, section, trust-signal, and
+  image/link values in SITE JSON have passed local evidence admission. Those
+  values may be rendered as business facts.
+- `site.type`, brand/style selections, `site_structure`, urgency/goal booleans,
+  `booking_platform`, `homepage_blueprint`, and `image_generation_prompt` are
+  derived design metadata. Use them only to choose presentation. Never turn
+  them into a new availability, pricing, credential, geography, service, or
+  performance claim.
+- A derived urgency value does NOT prove 24/7 service, same-day availability,
+  walk-ins, free consultations, free estimates, or any similar promise. Render
+  such a promise only when its exact source-owned wording appears elsewhere in
+  SITE JSON.
+
 ALLOWED BODY CLASSES:
 [PASTE THE CLASS CATALOG FROM 03-BASE-TEMPLATE.HTML HERE]
 
@@ -168,32 +183,39 @@ does, where it operates, and what to do next without scrolling.
 
 Hero section structure (always in this order):
 1. **Full-bleed hero image section** — If the JSON contains ANY image with context='hero' or 'background', you MUST render it using BOTH the `dual-cta-hero` AND `hero-fullbleed` CSS classes on the section element, with the image as an inline `style="background-image: url('[URL]')"`. The `hero-fullbleed` class handles the overlay and min-height automatically — all text will be white. This is NON-NEGOTIABLE — the hero must be a visual, image-driven section.
-2. Headline = [Primary Service or Value] + [Location]. Keep it under 8 words.
-   Example: "Emergency HVAC Repair in Effingham, IL" or "Effingham's Classic Hits & Local News"
+2. Keep the headline under 8 words. Use one complete source-owned assertion
+   only when that assertion already relates a service to a location. Otherwise
+   use the grounded business name plus `site.location`, for example
+   "Acme Plumbing — Effingham, IL".
    The headline is derived. Do NOT use `site.tagline` verbatim as the headline if
-   the tagline is a mission statement. Build the headline from `site.type` +
-   `site.location` plus the most specific service you can find in `sections[]`
-   or `conversion_profile.existing_ctas`. The tagline rarely makes a good headline.
+   the tagline is a mission statement. Never combine a service found in one field
+   with a location found in another field; their separate presence does not prove
+   service coverage. Do not substitute `site.type` as a claimed service. The
+   tagline rarely makes a good headline.
 3. Subheadline = one concrete outcome statement -- what the visitor GETS, not what
    the business BELIEVES. Must NOT echo the headline's key phrase.
-   - CORRECT: "Full-service civil, criminal, and family law in Effingham -- call for a same-day consultation."
-   - CORRECT: "We answer 24/7. Same-day HVAC service anywhere in Madison County."
+   - CORRECT: Reuse one complete source-owned service-and-location assertion
+     without shortening, expanding, or recombining it.
+   - CORRECT: Reuse one complete source-owned outcome or coverage line verbatim.
    - WRONG: "Working together as a team to provide dedicated advocacy." (this is a mission statement, not a benefit)
    - WRONG: Any tagline that starts with "We believe", "Our mission", or "Committed to"
    - WRONG: Repeating the headline's primary noun phrase. If the headline says
      "Dedicated Advocacy" the subhead must NOT also say "dedicated advocacy".
-     Pick a different angle: response time, geographic coverage, free consultation,
-     years in business, or specific service scope.
+     Pick a different source-owned angle: outcome, geographic coverage, tenure,
+     or specific service scope.
 
    SUBHEAD SOURCE PRIORITY -- pick the first available:
    a. A specific outcome line found in `conversion_profile.trust_signals.social_proof_lines` that names a service or coverage area.
-   b. A concrete service-scope line you can synthesize from `sections[]` items: "Criminal, family, and civil litigation -- free 15-minute consultations."
-   c. A response-time / availability promise tied to `conversion_profile.urgency_type`: "Same-day appointments. We answer 24/7." or "Walk-ins welcome. No appointment needed."
-   d. A geographic coverage statement: "Serving Effingham, Mattoon, and Vandalia, IL."
-   e. ONLY if none of the above are extractable, the existing `site.tagline` -- but ONLY if it does not match the mission-statement patterns above.
+   b. A concrete service-scope line assembled only from the exact service names
+      in `sections[]` items. Add no availability, price, consultation, outcome,
+      or geographic qualifier that is absent from those source-owned values.
+   c. An exact source-owned availability or geographic coverage line already
+      present in `sections[]`, `existing_ctas`, or `social_proof_lines`.
+   d. ONLY if none of the above are extractable, the existing `site.tagline` -- but ONLY if it does not match the mission-statement patterns above.
    If nothing usable exists, output NO subhead element rather than a mission statement.
 4. Dual CTAs (see below)
-5. Trust strip (see below)
+5. Trust strip only when SITE JSON contains an evidence-backed trust value (see
+   below); otherwise omit it completely
 
 The headline and both CTAs must be visible without scrolling on a 1280px desktop
 and a 390px mobile screen.
@@ -206,13 +228,19 @@ Every local business has two visitor types. The design must serve both.
 
 Read conversion_profile.urgency_type from the JSON and apply the matching pattern:
 
+Urgency controls CTA layout and relative emphasis only. It is not evidence of
+hours, response time, same-day service, walk-in availability, or any other
+business promise.
+
 **urgency_type = "emergency"**
-- Primary CTA: large click-to-call button -- phone number visible in the button, accent color, "24/7" or "Same-Day" badge if applicable
+- Primary CTA: large click-to-call button -- phone number visible in the button,
+  accent color. Add a "24/7" or "Same-Day" badge only when that exact promise is
+  present in a source-owned field.
 - Secondary CTA: form or booking button, lower visual weight
 - Sticky header: phone number always visible on scroll
 
 **urgency_type = "planned"**
-- Primary CTA: booking, reservation, or form button -- specific label (not "Submit", not "Contact Us")
+- Primary CTA: the strongest source-owned action, using its exact admitted label
 - Secondary CTA: phone number as text link or smaller button
 - No sticky phone required
 
@@ -220,39 +248,46 @@ Read conversion_profile.urgency_type from the JSON and apply the matching patter
 - Two equal-weight CTAs side by side
 - Left: call button (emergency path)
 - Right: form/booking button (planned path)
-- Label the distinction: "Emergency? Call Now" vs "Schedule a Visit"
+- Label the distinction without inventing a booking, quote, estimate,
+  appointment, reservation, scheduling, or consultation capability
 
-CTA COPY RULE: Always use first-person or action-specific labels.
-"Get My Free Quote" not "Submit"
-"Book My Appointment" not "Book Appointment"
-"Call Now -- We Answer 24/7" not "Contact Us"
+CTA COPY RULE: Capability-bearing CTA text must exactly copy an admitted source
+action label. Never rewrite a generic source action such as "Contact Us" or
+"Submit" into a promise to book, schedule, quote, estimate, reserve, or arrange
+an appointment or consultation. When no source label proves such a capability,
+use capability-neutral source wording.
 
 ---
 
 ## TRUST STRIP
 
-Every redesign includes a trust strip. It sits directly below the hero CTAs,
-visible without scrolling.
+Include a trust strip only when SITE JSON contains at least one source-owned
+review, quantified-experience, credential, award, or credibility value. When
+present, it sits directly below the hero CTAs, visible without scrolling.
 
 Content priority order (use the highest one available, skip lower if higher exists):
 1. Third-party review score: star rating + count + platform (e.g. "4.9 stars -- 312 Google Reviews") -- HIGHEST VALUE
 2. Quantified experience: years in business, cases handled, clients served (e.g. "Serving Effingham since 1987", "500+ cases handled")
 3. Credentials / certifications / bar membership badges
 4. Awards or recognitions (named, specific -- not "award-winning")
-5. Self-authored credibility claim -- ONLY if nothing above exists
+5. Exact source-owned credibility line from `social_proof_lines`
 
 NEVER fill the trust strip with the firm's own mission statement or tagline.
 A self-authored claim like 'We work hard for our clients' has zero persuasion value.
-If no third-party signal exists, use a specific factual claim: years established, number of attorneys, geographic coverage.
+If none of the source-owned values above exists, omit the trust strip. Never
+invent or infer years established, staff counts, geographic coverage, review
+scores, credentials, or any substitute trust content just to fill the component.
 
 Design: horizontal band, muted background (one step off --bg), small condensed font,
 icons or star glyphs if space allows. Not a section -- a compact strip, 44-52px tall.
 
 TRUST SIGNAL PLACEMENT RULE:
 Never isolate all social proof on a single testimonials page.
-Place at least one trust signal within visual proximity of every major CTA on the page.
-In the content sections, inline review quotes or certification badges near the section CTA.
-In the sidebar action block, repeat the review summary below the primary button.
+When evidence-backed trust content exists, place at least one trust signal within
+visual proximity of every major CTA on the page. In the content sections, inline
+review quotes or certification badges near the section CTA. In the sidebar
+action block, repeat the review summary below the primary button. When none
+exists, omit these elements rather than generating substitutes.
 
 ---
 
@@ -354,15 +389,20 @@ extracted from a dedicated interior page (not the homepage hero). Render
 them on the homepage as preview grids that link to the full interior page:
 
 - `type: "services"` with `source_url` -> render up to 6 items in
-  `.services-grid` / `.service-card`. Add a "See all" link or button
-  pointing to `source_url`. The link label should be specific
-  (e.g. "See all practice areas"), not generic.
+  `.services-grid` / `.service-card`. Add a link or button pointing to
+  `source_url`. Copy an admitted source action label/pair when one exists;
+  otherwise use one exact capability-neutral label permitted by the action
+  destination contract, such as "Learn More".
 - `type: "team"` with `source_url` -> render up to 4 items in
   `.team-grid` / `.team-card`. Use `title` as the name, `tag` as the
   role, `image_url` as the headshot, and `meta`
-  as the short bio. Add a "Meet the full team" link to `source_url`.
+  as the short bio. Link to `source_url` only with an admitted source
+  action label/pair or an exact capability-neutral label permitted by the
+  action destination contract.
 - `type: "misc"` with `tag: "faq"` on items -> render up to 4 items as
-  an FAQ preview. Add a "See all FAQs" link to `source_url`.
+  an FAQ preview. Link to `source_url` only with an admitted source action
+  label/pair or an exact capability-neutral label permitted by the action
+  destination contract.
 - `type: "misc"` with `tag: "about"` on items -> render as a narrative
   block using paragraph styling, no grid. Link a "Learn more" button to
   `source_url` if helpful.
@@ -380,8 +420,10 @@ on the homepage in a contact section using `.contact-form-wrap`:
   `.form-input` / `.form-textarea` / `.form-select` from the base
   template based on the label (e.g. multi-line text for a "Message" or
   "Tell us..." field).
-- The submit button label must be specific and action-oriented (e.g.
-  "Send My Request"), never "Submit".
+- The submit button must copy an admitted source action label/pair when one
+  exists; otherwise use one exact capability-neutral label permitted by the
+  action destination contract, such as "Send" or "Submit". Do not invent a
+  request, booking, quote, or scheduling capability in the label.
 - Display `contact_form.contact_info` (phone, email, address, hours)
   next to the form. Use `tel:` and `mailto:` links.
 - Link the section heading or a small "Full contact page" link to
@@ -575,12 +617,15 @@ Before outputting, verify:
 - [ ] Ticker present only if site has news/alerts content
 - [ ] Logo visible in nav (with text fallback)
 - [ ] Brand colors are recognizable from the original site
-- [ ] Above-the-fold shows headline (service + location), dual CTAs, and trust strip without scrolling
+- [ ] Above-the-fold shows a business-name/location headline, or one complete
+      source-owned service/location assertion, plus dual CTAs; an
+      evidence-backed trust strip is also visible there when one exists
 - [ ] Dual CTA pattern matches conversion_profile.urgency_type
-- [ ] CTA labels are specific and action-oriented (no "Submit" or "Contact Us")
+- [ ] CTA labels are exact admitted source labels or bounded capability-neutral
+      labels; no capability-bearing wording is invented
 - [ ] Phone number is in the sticky nav if urgency_type is emergency or both
-- [ ] Trust strip is visible above the fold
-- [ ] At least one trust signal appears near every major CTA
+- [ ] Trust strip is omitted when SITE JSON has no source-owned trust value
+- [ ] When source-owned trust exists, at least one trust signal appears near every major CTA
 - [ ] Section order matches the industry priority table for this site.type
 - [ ] If homepage_blueprint is present: section_sequence is preserved in the output, no listed primitive is missing, and additions follow the blueprint > industry-table layering rule
 - [ ] If homepage_blueprint.above_fold_form is true: an inline form is rendered above the fold in the redesign

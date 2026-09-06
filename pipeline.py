@@ -1,4 +1,5 @@
 import os
+import html
 import json
 import re
 import urllib.parse
@@ -14,6 +15,19 @@ from lib.clients import (
 from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
+from lib.site_extraction import (
+    action_element_destinations,
+    action_element_labels,
+    action_element_submission_method,
+    has_invalid_explicit_form_owner,
+    css_image_urls,
+    SiteExtractionError,
+    same_site_origin,
+    is_source_action_available,
+    source_document_base_url,
+    validate_enrichment_result,
+    validate_site_analysis,
+)
 from lib.generation import (
     ActionUrlAdmissionContract,
     DEFAULT_DOCUMENT_ACCENT,
@@ -23,6 +37,7 @@ from lib.generation import (
     DocumentColors,
     ImageAdmissionContract,
     PromptPart,
+    ServiceLocationAdmissionContract,
     SourceContactAdmissionContract,
     action_url_contract_instruction,
     assemble_generated_html,
@@ -45,6 +60,7 @@ from lib.generation import (
 # the homepage redesign has real content (practice areas, team, contact
 # form) to inject -- not just a hero with nothing under it.
 ENRICHMENT_TEMPERATURE = 0.1
+ANALYSIS_HTML_TRUNCATE = 120000
 ENRICHMENT_HTML_TRUNCATE = 120000
 ENRICHMENT_PRIORITY_THRESHOLD = 2
 ENRICHABLE_PAGE_TYPES = {"services", "single-service", "team", "about", "faq", "contact"}
@@ -68,8 +84,23 @@ REDESIGN_DEPLOYMENT_COMMENT_MARKERS = (
 
 
 def _append_source_value(values, value):
-    if isinstance(value, str) and value.strip() and value.strip() not in values:
-        values.append(value.strip())
+    if not isinstance(value, str):
+        return
+    candidate = html.unescape(value).strip()
+    if candidate and candidate not in values:
+        values.append(candidate)
+
+
+def _append_source_pair(pairs, label, destination):
+    if not isinstance(label, str) or not isinstance(destination, str):
+        return
+    canonical_label = html.unescape(label).strip()
+    canonical_destination = html.unescape(destination).strip()
+    if not canonical_label or not canonical_destination:
+        return
+    pair = (canonical_label, canonical_destination)
+    if pair not in pairs:
+        pairs.append(pair)
 
 
 def _redesign_contact_contract(site_json):
@@ -122,44 +153,209 @@ def _redesign_contact_contract(site_json):
     )
 
 
+def _redesign_service_location_contract(site_json):
+    site = site_json.get("site")
+    location = site.get("location") if isinstance(site, dict) else None
+    if not isinstance(location, str) or not location.strip():
+        return ServiceLocationAdmissionContract()
+
+    services = []
+    source_claims = []
+
+    def append_text(values, value):
+        if isinstance(value, str) and value.strip() and value.strip() not in values:
+            values.append(value.strip())
+
+    def collect_service_section(section):
+        if not isinstance(section, dict):
+            return
+        append_text(services, section.get("headline"))
+        append_text(source_claims, section.get("headline"))
+        for item in section.get("items") or ():
+            if not isinstance(item, dict):
+                continue
+            append_text(services, item.get("title"))
+            for field in ("title", "description", "meta"):
+                append_text(source_claims, item.get(field))
+
+    for section in site_json.get("sections") or ():
+        if isinstance(section, dict) and section.get("type") == "services":
+            collect_service_section(section)
+    for section in site_json.get("single_page_sections") or ():
+        if not isinstance(section, dict) or section.get("page_type") not in {
+            "services",
+            "single-service",
+        }:
+            continue
+        collect_service_section(section.get("content"))
+
+    def contains_complete_phrase(value, phrase):
+        normalized_value = " ".join(value.casefold().split())
+        normalized_phrase = " ".join(phrase.casefold().split())
+        return re.search(
+            rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)",
+            normalized_value,
+        ) is not None
+
+    allowed_claims = tuple(
+        claim
+        for claim in source_claims
+        if contains_complete_phrase(claim, location)
+        and any(contains_complete_phrase(claim, service) for service in services)
+    )
+    return ServiceLocationAdmissionContract(
+        services=tuple(services),
+        locations=(location.strip(),),
+        allowed_claims=allowed_claims,
+    )
+
+
 def _redesign_action_url_contract(
     site_json,
     contact_contract,
     *,
     source_content=None,
+    source_url=None,
     extra_urls=(),
 ):
     allowed_urls = []
+    allowed_form_urls = []
+    allowed_form_pairs = []
+    allowed_labels = []
+    allowed_pairs = []
 
-    def collect_source_urls(value):
+    site = site_json.get("site")
+    if isinstance(site, dict):
+        site_name = site.get("name")
+        _append_source_value(allowed_labels, site_name)
+        # The redesign catalog owns this internal navigation pair. Keep the
+        # verified business identity and its generated-site home destination
+        # bound together rather than authorizing either half independently.
+        _append_source_value(allowed_urls, "/")
+        _append_source_pair(allowed_pairs, site_name, "/")
+
+    def append_field(value, field="url"):
         if isinstance(value, dict):
-            for key, nested in value.items():
-                normalized_key = str(key).casefold()
-                if normalized_key in {
-                    "action",
-                    "anchor",
-                    "formaction",
-                    "href",
-                    "url",
-                } or normalized_key.endswith("_url"):
-                    _append_source_value(allowed_urls, nested)
-                collect_source_urls(nested)
-        elif isinstance(value, list):
-            for nested in value:
-                collect_source_urls(nested)
+            _append_source_value(allowed_urls, value.get(field))
 
-    collect_source_urls(site_json)
+    def append_action(value, label_field="label", url_field="url"):
+        if not isinstance(value, dict):
+            return
+        label = value.get(label_field)
+        destination = value.get(url_field)
+        _append_source_value(allowed_labels, label)
+        _append_source_value(allowed_urls, destination)
+        _append_source_pair(allowed_pairs, label, destination)
+
+    def append_form_action(value):
+        if isinstance(value, dict):
+            destination = value.get("form_action")
+            method = value.get("form_method")
+            _append_source_value(allowed_form_urls, destination)
+            if (
+                isinstance(destination, str)
+                and destination.strip()
+                and isinstance(method, str)
+                and method.strip()
+            ):
+                pair = (destination.strip(), method.strip().casefold())
+                if pair not in allowed_form_pairs:
+                    allowed_form_pairs.append(pair)
+
+    def append_item_urls(items):
+        if isinstance(items, list):
+            for item in items:
+                append_action(item, "title")
+
+    for item in site_json.get("nav") or ():
+        append_action(item)
+    cta = site_json.get("cta") or {}
+    append_action(cta)
+    for section in site_json.get("sections") or ():
+        if isinstance(section, dict):
+            append_field(section, "source_url")
+            append_item_urls(section.get("items"))
+    contact_form = site_json.get("contact_form") or {}
+    append_field(contact_form, "source_url")
+    append_form_action(contact_form)
+    for item in site_json.get("social") or ():
+        append_action(item, "platform")
+    for item in site_json.get("footer_links") or ():
+        append_action(item)
+    for item in site_json.get("pages_to_fetch") or ():
+        append_action(item)
+    for section in site_json.get("single_page_sections") or ():
+        if not isinstance(section, dict):
+            continue
+        append_action(section, "nav_label", "anchor")
+        content = section.get("content")
+        if isinstance(content, dict):
+            append_item_urls(content.get("items"))
+            append_form_action(content)
+    conversion_profile = site_json.get("conversion_profile")
+    if isinstance(conversion_profile, dict):
+        for label in conversion_profile.get("existing_ctas") or ():
+            _append_source_value(allowed_labels, label)
     for url in extra_urls:
         _append_source_value(allowed_urls, url)
     if isinstance(source_content, str) and "<" in source_content:
         source_root = BeautifulSoup(source_content, "html.parser")
-        for element in source_root.find_all(True):
-            for attribute in ("href", "action", "formaction", "xlink:href"):
-                _append_source_value(allowed_urls, element.get(attribute))
+        source_base_url = source_document_base_url(source_content, source_url)
+
+        def resolve_destination(value):
+            if not isinstance(value, str) or not source_base_url:
+                return value
+            return urllib.parse.urljoin(source_base_url, value)
+
+        for element in source_root.find_all(
+            ["a", "area", "form", "button", "input"]
+        ):
+            if not is_source_action_available(element):
+                continue
+            if has_invalid_explicit_form_owner(element, source_root):
+                continue
+            destinations = tuple(
+                resolve_destination(destination)
+                for destination in action_element_destinations(element, source_root)
+            )
+            if element.name in {"a", "area"}:
+                for destination in destinations:
+                    _append_source_value(allowed_urls, destination)
+            if element.name == "form":
+                for destination in destinations:
+                    _append_source_value(allowed_form_urls, destination)
+                    method = action_element_submission_method(element, source_root)
+                    if method is not None:
+                        pair = (destination, method)
+                        if pair not in allowed_form_pairs:
+                            allowed_form_pairs.append(pair)
+                continue
+            if element.name == "input" and str(
+                element.get("type") or ""
+            ).casefold() not in {"submit", "image"}:
+                continue
+            labels = action_element_labels(element, source_root)
+            for label in labels:
+                _append_source_value(allowed_labels, label)
+                for destination in destinations:
+                    if element.name in {"button", "input"}:
+                        _append_source_value(allowed_form_urls, destination)
+                        method = action_element_submission_method(
+                            element, source_root
+                        )
+                        if method is not None:
+                            pair = (destination, method)
+                            if pair not in allowed_form_pairs:
+                                allowed_form_pairs.append(pair)
+                    _append_source_pair(allowed_pairs, label, destination)
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
+        allowed_form_urls=tuple(allowed_form_urls),
+        allowed_form_pairs=tuple(allowed_form_pairs),
         phones=contact_contract.phones,
         emails=contact_contract.emails,
+        allowed_labels=tuple(allowed_labels),
+        allowed_pairs=tuple(allowed_pairs),
     )
 
 
@@ -341,13 +537,14 @@ def _fetch_with_playwright(url):
             page = browser.new_page()
             page.goto(url, wait_until="networkidle", timeout=30000)
             content = page.content()
+            effective_url = page.url
             browser.close()
-            return content
+            return content, effective_url
     except Exception as e:
         print(f"[!] Playwright fetch failed: {e}")
         return None
 
-def fetch_and_clean_html(url):
+def fetch_and_clean_html(url, *, include_source_url=False, required_origin=None):
     print(f"[*] Fetching URL: {url}")
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -372,6 +569,7 @@ def fetch_and_clean_html(url):
             url = alt_url
         else:
             raise
+    effective_url = getattr(response, "url", None) or url
     raw_html = response.text
 
     # Thin content detection: JS-rendered sites return < 8000 chars of visible text.
@@ -379,12 +577,22 @@ def fetch_and_clean_html(url):
     visible_text = BeautifulSoup(raw_html, "html.parser").get_text(separator=" ", strip=True)
     if len(visible_text) < 8000:
         print(f"[*] Thin content ({len(visible_text)} chars). Upgrading to headless browser fetch...")
-        playwright_html = _fetch_with_playwright(url)
+        playwright_result = _fetch_with_playwright(effective_url)
+        if isinstance(playwright_result, tuple):
+            playwright_html, playwright_url = playwright_result
+        else:
+            playwright_html, playwright_url = playwright_result, effective_url
         if playwright_html and len(playwright_html) > len(raw_html):
             print("[*] Playwright fetch succeeded -- using richer content.")
             raw_html = playwright_html
+            effective_url = playwright_url
         else:
             print("[*] Falling back to static fetch.")
+
+    if required_origin is not None and not same_site_origin(
+        required_origin, effective_url
+    ):
+        raise ValueError("Fetched page left the required source origin.")
 
     soup = BeautifulSoup(raw_html, 'html.parser')
 
@@ -393,8 +601,9 @@ def fetch_and_clean_html(url):
     for element in soup(["script", "svg", "noscript", "iframe"]):
         element.decompose()
 
-    # Aggressively extract ALL image src URLs (including lazy-loaded data-src)
-    # and embed as a comment at the top so the LLM can always find them.
+    # Aggressively extract image URLs (including lazy-loaded data-src) and place
+    # the bounded code-owned inventory at the top. The same real img attributes
+    # are therefore visible to both the model and SourceEvidence after truncation.
     image_urls = set()
     for img in soup.find_all("img"):
         for attr in ["src", "data-src", "data-lazy-src", "data-original"]:
@@ -402,15 +611,23 @@ def fetch_and_clean_html(url):
             if val and val.startswith("http") and any(ext in val.lower() for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]):
                 image_urls.add(val)
     for style in soup.find_all("style"):
-        found = re.findall(r'url\(["\']?(https://[^"\')\s]+)["\']?\)', style.string or "")
-        image_urls.update(found)
+        image_urls.update(
+            url
+            for url in css_image_urls(style.string or "")
+            if url.startswith("https://")
+        )
 
-    image_comment = "\n<!-- EXTRACTED IMAGE URLS (use these in the redesign):\n"
-    for img_url in list(image_urls)[:20]:
-        image_comment += f"  {img_url}\n"
-    image_comment += "-->"
+    inventory = BeautifulSoup("", "html.parser")
+    inventory_root = inventory.new_tag("template")
+    inventory_root["data-code-owned-image-inventory"] = "true"
+    for img_url in sorted(image_urls)[:20]:
+        inventory_root.append(inventory.new_tag("img", src=img_url))
+    inventory.append(inventory_root)
 
-    return image_comment + "\n" + str(soup)
+    cleaned_html = str(inventory) + "\n" + str(soup)
+    if include_source_url:
+        return cleaned_html, effective_url
+    return cleaned_html
 
 def mirror_images_locally(site_json, output_dir):
     """Download CDN images to the output folder so they travel with the Vercel deploy.
@@ -439,22 +656,30 @@ def mirror_images_locally(site_json, output_dir):
         print(f"[*] Mirrored {mirrored} image(s) locally to {img_dir}/")
     return site_json
 
-def analyze_site(html_content):
+def analyze_site(html_content, source_url=None):
     print(f"[*] Analyzing site content with {EXTRACTION_MODEL}...")
     with open("references/01-site-analysis-prompt.md", "r") as f:
         system_prompt = f.read()
+    prompt_html = html_content[:ANALYSIS_HTML_TRUNCATE]
 
     response = get_openrouter_client().chat.completions.create(
         model=EXTRACTION_MODEL,
         response_format={ "type": "json_object" },
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": html_content[:120000]} # Truncate to avoid context window limits
+            {
+                "role": "user",
+                "content": (
+                    f"SOURCE_URL: {source_url or 'not supplied'}\n\n"
+                    f"HTML:\n{prompt_html}"
+                ),
+            },
         ],
         temperature=0.1
     )
 
-    return _extract_json_object(response.choices[0].message.content)
+    document = _extract_json_object(response.choices[0].message.content)
+    return validate_site_analysis(document, prompt_html, source_url)
 
 def enrich_site_json(site_json):
     """Fetch high-priority interior pages and merge extracted JSON chunks
@@ -506,15 +731,25 @@ def enrich_site_json(site_json):
     for page_type, url in deduped:
         print(f"[*] Enriching {page_type} from {url}...")
         try:
-            page_html = fetch_and_clean_html(url)
+            page_html, fetched_url = fetch_and_clean_html(
+                url,
+                include_source_url=True,
+                required_origin=url,
+            )
         except Exception as e:
             print(f"[!] Enrichment fetch failed for {url}: {e}")
             continue
+        if not same_site_origin(url, fetched_url):
+            print(
+                f"[!] Enrichment redirect left the source site for {url}; skipping."
+            )
+            continue
 
+        prompt_html = page_html[:ENRICHMENT_HTML_TRUNCATE]
         user_prompt = (
             f"PAGE_TYPE: {page_type}\n"
-            f"SOURCE_URL: {url}\n\n"
-            f"HTML:\n{page_html[:ENRICHMENT_HTML_TRUNCATE]}"
+            f"SOURCE_URL: {fetched_url}\n\n"
+            f"HTML:\n{prompt_html}"
         )
 
         try:
@@ -532,6 +767,19 @@ def enrich_site_json(site_json):
             print(f"[!] Enrichment LLM call failed for {page_type} at {url}: {e}")
             continue
 
+        try:
+            result = validate_enrichment_result(
+                result,
+                page_type=page_type,
+                source_html=prompt_html,
+                source_url=fetched_url,
+            )
+        except SiteExtractionError as e:
+            print(
+                f"[!] Enrichment source validation failed for {page_type} at {url}: {e}"
+            )
+            continue
+
         if not isinstance(result, dict) or not result:
             print(f"[*] Enrichment for {page_type} returned empty; skipping.")
             continue
@@ -540,11 +788,10 @@ def enrich_site_json(site_json):
             form_fields = result.get("form_fields")
             contact_info = result.get("contact_info") or {}
             has_form = isinstance(form_fields, list) and len(form_fields) > 0
-            has_info = any(contact_info.get(k) for k in ("phone", "email", "address", "hours"))
+            has_info = any(contact_info.get(k) for k in ("phone", "email", "address", "addresses", "hours"))
             if not (has_form or has_info):
                 print(f"[*] Enrichment for contact at {url} had no form or contact info; skipping.")
                 continue
-            result.setdefault("source_url", url)
             if "contact_form" not in site_json:
                 site_json["contact_form"] = result
                 summary = f"{len(form_fields) if has_form else 0} form field(s)"
@@ -557,7 +804,6 @@ def enrich_site_json(site_json):
             if not isinstance(section_type, str) or not isinstance(items, list) or len(items) == 0:
                 print(f"[*] Enrichment for {page_type} at {url} had no usable items; skipping.")
                 continue
-            result.setdefault("source_url", url)
             site_json.setdefault("sections", []).append(result)
             print(f"[*] Enriched {page_type} from {url}: {len(items)} item(s)")
 
@@ -590,6 +836,7 @@ def generate_redesign(
     image_contract = _redesign_image_contract(site_json)
     site_name = site_json.get("site", {}).get("name") or "Website"
     contact_contract = _redesign_contact_contract(site_json)
+    service_location_contract = _redesign_service_location_contract(site_json)
     action_url_contract = _redesign_action_url_contract(
         site_json,
         contact_contract,
@@ -642,6 +889,7 @@ text, HTML head metadata, or unresolved template token.
             allowed_class_names=homepage_classes,
             required_exposed_values=(("site_name", site_name),),
             source_contacts=contact_contract,
+            expected_service_locations=service_location_contract,
             expected_images=image_contract,
             expected_action_urls=action_url_contract,
             required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
@@ -686,7 +934,11 @@ def generate_interior_page(
         content_source = "fetched-page" if page_url else "provided-source"
     elif page_url:
         print(f"[*] Fetching interior page content from {page_url}...")
-        source_content = fetch_and_clean_html(page_url)
+        source_content, page_url = fetch_and_clean_html(
+            page_url,
+            include_source_url=True,
+            required_origin=page_url,
+        )
         content_source = "fetched-page"
     else:
         # Try to find a matching single_page_sections entry
@@ -700,10 +952,12 @@ def generate_interior_page(
 
     site_name = site_json.get("site", {}).get("name") or "Website"
     contact_contract = _redesign_contact_contract(site_json)
+    service_location_contract = _redesign_service_location_contract(site_json)
     action_url_contract = _redesign_action_url_contract(
         site_json,
         contact_contract,
         source_content=source_content,
+        source_url=page_url,
         extra_urls=(page_url,),
     )
         
@@ -751,6 +1005,7 @@ SOURCE CONTENT:
             allowed_class_names=template_classes,
             required_exposed_values=(("site_name", site_name),),
             source_contacts=contact_contract,
+            expected_service_locations=service_location_contract,
             expected_images=image_contract,
             expected_action_urls=action_url_contract,
             required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
@@ -772,7 +1027,11 @@ def _generate_contact_page(site_json, contact_page, theme, generation_config):
     contact_url = contact_page.get("url")
     if contact_page.get("fetchable") is True and contact_url:
         try:
-            contact_source = fetch_and_clean_html(contact_url)
+            contact_source, fetched_contact_url = fetch_and_clean_html(
+                contact_url,
+                include_source_url=True,
+                required_origin=contact_url,
+            )
         except Exception as error:
             print(f"[!] Contact page fetch failed for {contact_url}: {error}")
             print("[*] Falling back to homepage-section content for contact page.")
@@ -780,7 +1039,7 @@ def _generate_contact_page(site_json, contact_page, theme, generation_config):
             return generate_interior_page(
                 site_json,
                 "contact",
-                page_url=contact_url,
+                page_url=fetched_contact_url,
                 source_content=contact_source,
                 theme=theme,
                 generation_config=generation_config,
@@ -814,10 +1073,10 @@ def main(
     site_slug = domain.replace(".", "-")
     
     # 1. Fetch & Clean
-    html_content = fetch_and_clean_html(url)
+    html_content, fetched_url = fetch_and_clean_html(url, include_source_url=True)
     
     # 2. Analyze (Extract Info & JSON)
-    site_json = analyze_site(html_content)
+    site_json = analyze_site(html_content, source_url=fetched_url)
 
     # 2.1 Enrich with interior page content so the homepage redesign has
     # real services / team / contact data, not just whatever was on the

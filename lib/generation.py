@@ -29,6 +29,17 @@ from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
+from lib.site_extraction import (
+    SourceEvidence,
+    action_element_declared_destinations,
+    action_element_destinations,
+    action_element_labels,
+    action_element_submission_method,
+    has_invalid_explicit_form_owner,
+    is_render_suppressed_element,
+    is_labelled_action_element,
+    is_submit_action_element,
+)
 
 
 DEFAULT_LOCAL_MODEL = "qwen3-30b-a3b:latest"
@@ -276,6 +287,7 @@ _EXPECTED_FORM_ACTION_UNSET = object()
 _EXPECTED_REVIEWS_UNSET = object()
 _SOURCE_CONTACT_UNSET = object()
 _EXPECTED_LOCATION_UNSET = object()
+_EXPECTED_SERVICE_LOCATION_UNSET = object()
 _EXPECTED_IMAGES_UNSET = object()
 _EXPECTED_ACTION_URLS_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
@@ -391,8 +403,12 @@ class SourceContactAdmissionContract:
 @dataclass(frozen=True)
 class ActionUrlAdmissionContract:
     allowed_urls: tuple[str, ...] = ()
+    allowed_form_urls: tuple[str, ...] = ()
+    allowed_form_pairs: tuple[tuple[str, str], ...] = ()
     phones: tuple[str, ...] = ()
     emails: tuple[str, ...] = ()
+    allowed_labels: tuple[str, ...] = ()
+    allowed_pairs: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -401,6 +417,13 @@ class LocationAdmissionContract:
     state: str
     service_area: str | None = None
     addresses: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ServiceLocationAdmissionContract:
+    services: tuple[str, ...] = ()
+    locations: tuple[str, ...] = ()
+    allowed_claims: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -413,17 +436,38 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     if not isinstance(contract, ActionUrlAdmissionContract):
         raise GeneratedBodyError("Action URL admission contract is invalid.")
     allowed_urls = _contract_text_values(contract.allowed_urls, "Action URL")
+    allowed_form_urls = _contract_text_values(
+        contract.allowed_form_urls, "Form action URL"
+    )
+    allowed_form_pairs = _contract_form_pairs(contract.allowed_form_pairs)
+    _validate_form_pair_membership(allowed_form_pairs, allowed_form_urls)
     phones = _contract_text_values(contract.phones, "Action phone")
     emails = _contract_text_values(contract.emails, "Action email")
+    allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
+    allowed_pairs = _contract_action_pairs(contract.allowed_pairs)
+    _validate_action_pair_membership(allowed_pairs, allowed_labels)
+    neutral_labels = sorted(_NEUTRAL_ACTION_LABELS)
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
-        "are allowed. Every other generated anchor, form action, or submit "
-        "override must copy one exact source URL from "
-        f"{json.dumps(allowed_urls, ensure_ascii=False)}, use a `tel:` or `sms:` "
+        "are allowed. Every other generated anchor must copy one exact source "
+        f"URL from {json.dumps(allowed_urls, ensure_ascii=False)}, use a `tel:` "
         f"target matching one of {json.dumps(phones, ensure_ascii=False)}, or use "
         "a `mailto:` target matching one of "
-        f"{json.dumps(emails, ensure_ascii=False)}. Do not invent, shorten, or "
-        "substitute a booking, social, navigation, or form destination."
+        f"{json.dumps(emails, ensure_ascii=False)}. Every generated form action "
+        "or submit override must copy one exact source form endpoint from "
+        f"{json.dumps(allowed_form_urls, ensure_ascii=False)}. Do not invent, shorten, or "
+        "substitute a booking, social, navigation, or form destination. "
+        "When source form submission pairs are supplied, every form and submit "
+        "override must preserve one exact [endpoint, browser-effective method] pair "
+        f"from {json.dumps(allowed_form_pairs, ensure_ascii=False)}; an omitted or "
+        "invalid HTML method means GET. "
+        "Every generated action label must exactly copy one source label from "
+        f"{json.dumps(allowed_labels, ensure_ascii=False)}, display an admitted "
+        "phone/email value, or copy one exact capability-neutral navigational/contact "
+        "label from this bounded list: "
+        f"{json.dumps(neutral_labels, ensure_ascii=False)}. A source-owned label on "
+        "an action with a destination must preserve one exact label/destination "
+        f"pair from {json.dumps(allowed_pairs, ensure_ascii=False)}."
     )
 
 
@@ -1857,22 +1901,6 @@ def _claim_exposure_texts(
             and str(node.get("type") or "").casefold() == "hidden"
         )
 
-    def is_render_suppressed(node: Tag) -> bool:
-        if is_hidden_input(node) or node.has_attr("hidden"):
-            return True
-        style = node.get("style")
-        if not isinstance(style, str):
-            return False
-        return bool(
-            re.search(
-                r"(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|"
-                r"content-visibility\s*:\s*hidden)\s*"
-                r"(?:!\s*important\s*)?(?:;|$)",
-                style,
-                re.IGNORECASE,
-            )
-        )
-
     def replacement_text(node: Tag) -> str:
         if node.name.casefold() == "img":
             value = node.get("alt")
@@ -1898,7 +1926,7 @@ def _claim_exposure_texts(
             return
         if is_excluded(node):
             return
-        if is_render_suppressed(node):
+        if is_render_suppressed_element(node):
             return
         has_text_boundary = node.name.casefold() in DOM_ADJACENCY_BOUNDARY_TAGS
         if has_text_boundary:
@@ -1949,7 +1977,7 @@ def _claim_exposure_texts(
             return ""
         aria_hidden = node.get("aria-hidden")
         if not active_references and (
-            is_render_suppressed(node)
+            is_render_suppressed_element(node)
             or (
                 isinstance(aria_hidden, str)
                 and aria_hidden.strip().casefold() == "true"
@@ -2000,7 +2028,7 @@ def _claim_exposure_texts(
         ):
             return
         aria_hidden = node.get("aria-hidden")
-        if is_render_suppressed(node) or (
+        if is_render_suppressed_element(node) or (
             isinstance(aria_hidden, str)
             and aria_hidden.strip().casefold() == "true"
         ):
@@ -2398,7 +2426,6 @@ def _validate_review_summary(
             raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
         allowed_link_text = {
             "read all reviews on google",
-            "read all reviews on google →",
         }
     else:
         strong_elements = tuple(score_element.find_all("strong", recursive=False))
@@ -2430,7 +2457,6 @@ def _validate_review_summary(
             raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
         allowed_link_text = {
             "read all on google",
-            "read all on google →",
         }
     if _normalized_plain_review_text(link, owner) not in allowed_link_text:
         raise GeneratedBodyError(f"Generated body {owner} has invalid CTA text.")
@@ -2605,13 +2631,160 @@ def _contract_text_values(values: object, label: str) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _contract_action_pairs(values: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(values, tuple):
+        raise GeneratedBodyError("Action pair contract must be a tuple.")
+    normalized: list[tuple[str, str]] = []
+    for value in values:
+        if not isinstance(value, tuple) or len(value) != 2:
+            raise GeneratedBodyError("Action pair contract contains an invalid pair.")
+        label, destination = value
+        if (
+            not isinstance(label, str)
+            or not label.strip()
+            or not isinstance(destination, str)
+            or not destination.strip()
+        ):
+            raise GeneratedBodyError("Action pair contract contains an invalid pair.")
+        pair = (label.strip(), destination.strip())
+        if pair not in normalized:
+            normalized.append(pair)
+    return tuple(normalized)
+
+
+def _contract_form_pairs(values: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(values, tuple):
+        raise GeneratedBodyError("Form submission pair contract must be a tuple.")
+    normalized: list[tuple[str, str]] = []
+    for value in values:
+        if not isinstance(value, tuple) or len(value) != 2:
+            raise GeneratedBodyError(
+                "Form submission pair contract contains an invalid pair."
+            )
+        destination, method = value
+        if (
+            not isinstance(destination, str)
+            or not destination.strip()
+            or not isinstance(method, str)
+            or method.strip().casefold() not in {"dialog", "get", "post"}
+        ):
+            raise GeneratedBodyError(
+                "Form submission pair contract contains an invalid pair."
+            )
+        pair = (destination.strip(), method.strip().casefold())
+        if pair not in normalized:
+            normalized.append(pair)
+    return tuple(normalized)
+
+
+def _validate_form_pair_membership(
+    pairs: tuple[tuple[str, str], ...],
+    allowed_form_urls: tuple[str, ...],
+) -> None:
+    url_authority = set(allowed_form_urls)
+    if any(destination not in url_authority for destination, _method in pairs):
+        raise GeneratedBodyError(
+            "Form submission pair contract exceeds its URL authority."
+        )
+
+
+def _validate_action_pair_membership(
+    pairs: tuple[tuple[str, str], ...],
+    allowed_labels: tuple[str, ...],
+) -> None:
+    label_authority = set(allowed_labels)
+    if any(label not in label_authority for label, _destination in pairs):
+        raise GeneratedBodyError("Action pair contract exceeds its label authority.")
+
+
+_NEUTRAL_ACTION_LABELS = frozenset(
+    {
+        "back",
+        "call",
+        "call us",
+        "close",
+        "close menu",
+        "collapse",
+        "contact",
+        "contact us",
+        "details",
+        "email",
+        "email us",
+        "expand",
+        "explore",
+        "get in touch",
+        "home",
+        "learn more",
+        "main content",
+        "menu",
+        "message",
+        "more",
+        "navigation",
+        "next",
+        "open",
+        "open menu",
+        "previous",
+        "read more",
+        "see more",
+        "send",
+        "show",
+        "show more",
+        "skip to main content",
+        "submit",
+        "text",
+        "text us",
+        "view",
+        "view details",
+        "visit our website",
+        "visit website",
+        "website",
+    }
+)
+_CHANNEL_NEUTRAL_ACTION_SCHEMES = {
+    "call": "tel",
+    "call us": "tel",
+    "email": "mailto",
+    "email us": "mailto",
+    "text": "sms",
+    "text us": "sms",
+}
+
+
+def _is_neutral_action_label(value: str) -> bool:
+    return _normalize_claim_match_text(value) in _NEUTRAL_ACTION_LABELS
+
+
 def _validate_action_urls(
     body_root: Tag,
     contract: ActionUrlAdmissionContract,
 ) -> None:
     if not isinstance(contract, ActionUrlAdmissionContract):
         raise GeneratedBodyError("Action URL admission contract is invalid.")
-    allowed_urls = set(_contract_text_values(contract.allowed_urls, "Action URL"))
+    allowed_url_values = _contract_text_values(contract.allowed_urls, "Action URL")
+    allowed_form_url_values = _contract_text_values(
+        contract.allowed_form_urls, "Form action URL"
+    )
+    contract_form_pairs = _contract_form_pairs(contract.allowed_form_pairs)
+    _validate_form_pair_membership(contract_form_pairs, allowed_form_url_values)
+    allowed_label_values = _contract_text_values(
+        contract.allowed_labels, "Action label"
+    )
+    contract_pairs = _contract_action_pairs(contract.allowed_pairs)
+    _validate_action_pair_membership(
+        contract_pairs,
+        allowed_label_values,
+    )
+    allowed_urls = set(allowed_url_values)
+    allowed_form_urls = set(allowed_form_url_values)
+    allowed_form_pairs = set(contract_form_pairs)
+    allowed_labels = {
+        _normalize_claim_match_text(label)
+        for label in allowed_label_values
+    }
+    allowed_pairs = {
+        (_normalize_claim_match_text(label), destination)
+        for label, destination in contract_pairs
+    }
     allowed_phone_digits: set[str] = set()
     for phone in _contract_text_values(contract.phones, "Action phone"):
         phone_values = _phone_like_digit_values(phone)
@@ -2625,47 +2798,180 @@ def _validate_action_urls(
             raise GeneratedBodyError("Action email contract contains an invalid email.")
         allowed_emails.add(canonical)
 
-    action_values: list[str] = []
+    link_action_values: list[str] = []
+    form_action_values: list[str] = []
+    form_submission_pairs: list[tuple[str, str]] = []
+    action_entries: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
-        if tag_name in {"a", "area"}:
-            attributes = ("href", "xlink:href")
-        elif tag_name == "form":
-            attributes = ("action",)
-        elif tag_name in {"button", "input"}:
-            attributes = ("formaction",)
-        else:
+        if has_invalid_explicit_form_owner(element, body_root) and (
+            element.find_parent("form") is not None
+            or element.has_attr("formaction")
+            or element.has_attr("formmethod")
+        ):
+            raise GeneratedBodyError(
+                "Generated body submit control names no exact form owner."
+            )
+        is_labelled_action = is_labelled_action_element(element)
+        declared_destinations = action_element_declared_destinations(element)
+        if (
+            tag_name != "form"
+            and not is_labelled_action
+            and not declared_destinations
+        ):
             continue
-        action_values.extend(
-            value
-            for attribute in attributes
-            if isinstance((value := element.get(attribute)), str)
-        )
+        element_values = action_element_destinations(element, body_root)
+        if tag_name in {"a", "area"}:
+            link_action_values.extend(declared_destinations)
+        elif tag_name == "form":
+            form_action_values.extend(declared_destinations)
+        elif is_submit_action_element(element, body_root):
+            form_action_values.extend(element_values)
+        if tag_name == "form" and not declared_destinations:
+            raise GeneratedBodyError(
+                "Generated body form must declare one admitted action endpoint."
+            )
+        if is_submit_action_element(element, body_root) and not element_values:
+            raise GeneratedBodyError(
+                "Generated body submit control has no admitted effective form action."
+            )
+        if tag_name == "form" or is_submit_action_element(element, body_root):
+            submission_method = action_element_submission_method(element, body_root)
+            if submission_method is None:
+                raise GeneratedBodyError(
+                    "Generated body contains a form action without submission semantics."
+                )
+            for destination in element_values:
+                form_submission_pairs.append((destination, submission_method))
+        if is_labelled_action:
+            action_entries.append(
+                (action_element_labels(element, body_root), element_values)
+            )
 
-    for raw_value in action_values:
+    def validate_action_value(
+        raw_value: str,
+        admitted_urls: set[str],
+        *,
+        allow_contact_destinations: bool,
+    ) -> None:
         candidate = raw_value.strip()
         if not candidate:
             raise GeneratedBodyError(
                 "Generated body contains an empty actionable destination."
             )
-        if candidate.startswith("#") or candidate in allowed_urls:
-            continue
+        if candidate.startswith("#") or candidate in admitted_urls:
+            return
         scheme, separator, target = candidate.partition(":")
         if not separator:
             raise GeneratedBodyError(
                 "Generated body contains an action URL outside source-owned destinations."
             )
-        if scheme.casefold() in {"tel", "sms"}:
+        if allow_contact_destinations and scheme.casefold() == "tel":
             phone_digits = _canonical_phone_digits(target.split("?", 1)[0])
             if phone_digits and phone_digits in allowed_phone_digits:
-                continue
-        elif scheme.casefold() == "mailto":
+                return
+        elif allow_contact_destinations and scheme.casefold() == "mailto":
             mailbox = _canonical_email_value(target.split("?", 1)[0])
             if mailbox is not None and mailbox in allowed_emails:
-                continue
+                return
         raise GeneratedBodyError(
             "Generated body contains an action URL outside source-owned destinations."
         )
+
+    for raw_value in link_action_values:
+        validate_action_value(
+            raw_value,
+            allowed_urls,
+            allow_contact_destinations=True,
+        )
+    for raw_value in form_action_values:
+        validate_action_value(
+            raw_value,
+            allowed_form_urls,
+            allow_contact_destinations=False,
+        )
+    if allowed_form_pairs:
+        for raw_destination, method in form_submission_pairs:
+            pair = (raw_destination.strip(), method)
+            if pair not in allowed_form_pairs:
+                raise GeneratedBodyError(
+                    "Generated body form endpoint and method do not preserve one "
+                    "source-owned submission pair."
+                )
+
+    for action_labels, destinations in action_entries:
+        stripped_destinations = tuple(value.strip() for value in destinations)
+        for action_label in action_labels:
+            normalized_label = _normalize_claim_match_text(action_label)
+            phone_values = _phone_like_digit_values(action_label)
+            if len(phone_values) == 1 and not phone_values.isdisjoint(
+                allowed_phone_digits
+            ):
+                for destination in stripped_destinations:
+                    scheme, separator, target = destination.partition(":")
+                    if separator and scheme.casefold() == "tel":
+                        destination_phone = _canonical_phone_digits(
+                            target.split("?", 1)[0]
+                        )
+                        if destination_phone not in phone_values:
+                            raise GeneratedBodyError(
+                                "Generated body action phone label and destination do not match."
+                            )
+                    elif (normalized_label, destination) not in allowed_pairs:
+                        raise GeneratedBodyError(
+                            "Generated body action phone label and destination do not "
+                            "preserve source ownership."
+                        )
+                continue
+            mailbox = _canonical_email_value(action_label)
+            if mailbox is not None and mailbox in allowed_emails:
+                for destination in stripped_destinations:
+                    scheme, separator, target = destination.partition(":")
+                    if separator and scheme.casefold() == "mailto":
+                        destination_mailbox = _canonical_email_value(
+                            target.split("?", 1)[0]
+                        )
+                        if destination_mailbox != mailbox:
+                            raise GeneratedBodyError(
+                                "Generated body action email label and destination do not match."
+                            )
+                    elif (normalized_label, destination) not in allowed_pairs:
+                        raise GeneratedBodyError(
+                            "Generated body action email label and destination do not "
+                            "preserve source ownership."
+                        )
+                continue
+            if normalized_label in allowed_labels:
+                if stripped_destinations and any(
+                    (normalized_label, destination) not in allowed_pairs
+                    for destination in stripped_destinations
+                ):
+                    raise GeneratedBodyError(
+                        "Generated body does not preserve a source-owned action pair."
+                    )
+                continue
+            if _is_neutral_action_label(action_label):
+                expected_scheme = _CHANNEL_NEUTRAL_ACTION_SCHEMES.get(
+                    normalized_label
+                )
+                if expected_scheme is not None and (
+                    not stripped_destinations
+                    or any(
+                        destination.partition(":")[0].casefold()
+                        != expected_scheme
+                        for destination in stripped_destinations
+                    )
+                ):
+                    raise GeneratedBodyError(
+                        "Generated body channel-specific action label does not "
+                        "match its destination."
+                    )
+                continue
+            if normalized_label:
+                raise GeneratedBodyError(
+                    "Generated body contains a non-neutral action label that is not "
+                    f"an exact source-owned action label: {action_label!r}."
+                )
 
 
 def _validate_source_contacts(
@@ -2806,6 +3112,58 @@ def _validate_location_claims(
                 raise GeneratedBodyError(
                     "Generated body service location does not match verified location data."
                 )
+
+
+def _validate_service_location_claims(
+    body_root: Tag,
+    contract: ServiceLocationAdmissionContract,
+) -> None:
+    if not isinstance(contract, ServiceLocationAdmissionContract):
+        raise GeneratedBodyError("Service-location admission contract is invalid.")
+    services = _contract_text_values(contract.services, "Source service")
+    locations = _contract_text_values(contract.locations, "Source location")
+    allowed_claims = _contract_text_values(
+        contract.allowed_claims,
+        "Source service-location claim",
+    )
+    if not services or not locations:
+        return
+
+    def combines_service_and_location(value: str) -> bool:
+        return any(
+            _contains_complete_token_sequence(value, service)
+            for service in services
+        ) and any(
+            _contains_complete_token_sequence(value, location)
+            for location in locations
+        )
+
+    if any(not combines_service_and_location(claim) for claim in allowed_claims):
+        raise GeneratedBodyError(
+            "Service-location admission contract contains an unrelated claim."
+        )
+    normalized_allowed = {
+        _normalize_claim_match_text(claim) for claim in allowed_claims
+    }
+    evidence = SourceEvidence.from_html(
+        str(body_root),
+        None,
+        _include_records=False,
+        _include_content_sections=False,
+        _include_section_targets=False,
+    )
+    owners = tuple(
+        dict.fromkeys(owner for _local, owner in evidence.assertion_occurrences)
+    )
+    for owner in owners:
+        if (
+            combines_service_and_location(owner)
+            and _normalize_claim_match_text(owner) not in normalized_allowed
+        ):
+            raise GeneratedBodyError(
+                "Generated body combines a service and location without one "
+                "complete source-owned assertion."
+            )
 
 
 def _srcset_urls(value: str) -> tuple[str, ...]:
@@ -2970,6 +3328,7 @@ def validate_generated_body(
     expected_address: object = _EXPECTED_ADDRESS_UNSET,
     source_contacts: object = _SOURCE_CONTACT_UNSET,
     expected_location: object = _EXPECTED_LOCATION_UNSET,
+    expected_service_locations: object = _EXPECTED_SERVICE_LOCATION_UNSET,
     expected_images: object = _EXPECTED_IMAGES_UNSET,
     expected_tenure: object = _EXPECTED_TENURE_UNSET,
     expected_action_urls: object = _EXPECTED_ACTION_URLS_UNSET,
@@ -3220,6 +3579,8 @@ def validate_generated_body(
         )
     if expected_location is not _EXPECTED_LOCATION_UNSET:
         _validate_location_claims(exact_claim_surfaces, expected_location)
+    if expected_service_locations is not _EXPECTED_SERVICE_LOCATION_UNSET:
+        _validate_service_location_claims(body_root, expected_service_locations)
     if expected_images is not _EXPECTED_IMAGES_UNSET:
         _validate_image_sources(body_root, expected_images)
     if expected_tenure is not _EXPECTED_TENURE_UNSET:
@@ -3553,6 +3914,7 @@ def assemble_generated_html(
     expected_address: object = _EXPECTED_ADDRESS_UNSET,
     source_contacts: object = _SOURCE_CONTACT_UNSET,
     expected_location: object = _EXPECTED_LOCATION_UNSET,
+    expected_service_locations: object = _EXPECTED_SERVICE_LOCATION_UNSET,
     expected_images: object = _EXPECTED_IMAGES_UNSET,
     expected_tenure: object = _EXPECTED_TENURE_UNSET,
     expected_action_urls: object = _EXPECTED_ACTION_URLS_UNSET,
@@ -3588,6 +3950,7 @@ def assemble_generated_html(
         expected_address=expected_address,
         source_contacts=source_contacts,
         expected_location=expected_location,
+        expected_service_locations=expected_service_locations,
         expected_images=expected_images,
         expected_tenure=expected_tenure,
         expected_action_urls=expected_action_urls,

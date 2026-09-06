@@ -139,11 +139,11 @@ Above the fold:
 Main layout -- two column (60/40 split):
 
 LEFT COLUMN -- Contact form:
-- Headline: specific action label ("Request a Free Quote", "Book a Consultation",
-  "Send Us a Message" -- match the site's conversion_profile.primary_goal)
+- Headline: copy an admitted source action label, or use neutral contact wording
+  such as "Send Us a Message"
 - Form fields: name, phone, email, message/issue -- max 5 fields
-- CTA button: first-person, specific ("Send My Request", "Get My Free Quote")
-  NOT "Submit" or "Contact Us"
+- CTA button: copy an admitted source action label; otherwise use neutral source
+  wording such as "Submit" or "Contact Us"
 - Below the button: one trust signal line (review score or response time promise)
 
 RIGHT COLUMN -- Contact details:
@@ -271,7 +271,8 @@ CTA at bottom:
 
 Above the fold:
 - Restaurant name + "Menu"
-- Hours + "Order Online" or "Reserve" button
+- Hours + an exact admitted source action label when one exists; do not infer
+  ordering or reservation capability from the menu page type
 - Trust strip (rating + review count)
 
 Menu layout:
