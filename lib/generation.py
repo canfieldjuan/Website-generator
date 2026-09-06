@@ -26,6 +26,7 @@ from lib.site_extraction import (
     action_element_destinations,
     action_element_labels,
     action_element_submission_method,
+    has_invalid_explicit_form_owner,
     is_render_suppressed_element,
     is_labelled_action_element,
     is_submit_action_element,
@@ -2265,6 +2266,14 @@ def _validate_action_urls(
     action_entries: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
+        if has_invalid_explicit_form_owner(element, body_root) and (
+            element.find_parent("form") is not None
+            or element.has_attr("formaction")
+            or element.has_attr("formmethod")
+        ):
+            raise GeneratedBodyError(
+                "Generated body submit control names no exact form owner."
+            )
         is_labelled_action = is_labelled_action_element(element)
         declared_destinations = action_element_declared_destinations(element)
         if (

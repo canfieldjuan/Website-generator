@@ -19,6 +19,7 @@ from lib.site_extraction import (
     action_element_destinations,
     action_element_labels,
     action_element_submission_method,
+    has_invalid_explicit_form_owner,
     css_image_urls,
     SiteExtractionError,
     same_site_origin,
@@ -310,6 +311,8 @@ def _redesign_action_url_contract(
             ["a", "area", "form", "button", "input"]
         ):
             if not is_source_action_available(element):
+                continue
+            if has_invalid_explicit_form_owner(element, source_root):
                 continue
             destinations = tuple(
                 resolve_destination(destination)

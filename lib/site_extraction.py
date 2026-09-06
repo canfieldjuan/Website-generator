@@ -482,7 +482,10 @@ _CONTACT_FIELD_ABBREVIATION_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?P<token>[A-Z0-9]{1,4})$",
     re.I,
 )
-_CONTACT_FIELD_ABBREVIATIONS = frozenset({"dept", "no"})
+_CONTACT_FIELD_ABBREVIATION_CONTINUATIONS = {
+    "dept": frozenset({(), ("line",), ("number",)}),
+    "no": frozenset({()}),
+}
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
 _CSS_DECLARATION_PATTERN = re.compile(
     r"(?:^|[;{])\s*([\w-]+)\s*:\s*([^;{}]+)",
@@ -789,12 +792,27 @@ def _contact_field_gap_is_structural(
             abbreviation = _CONTACT_FIELD_ABBREVIATION_PATTERN.search(
                 gap[: boundary.start()]
             )
-            if abbreviation is not None and (
-                abbreviation.group("token").casefold()
-                in _CONTACT_FIELD_ABBREVIATIONS
-                or (not role_before_number and gap.lstrip().startswith("("))
-            ):
-                continue
+            if abbreviation is not None:
+                token = abbreviation.group("token").casefold()
+                if not role_before_number:
+                    # In a postfix label ("Regional Dept. Fax"), the role
+                    # itself follows this gap. The abbreviation is structural
+                    # only when no second field starts between it and the role.
+                    if not _WORD_PATTERN.findall(gap[boundary.end() :]):
+                        continue
+                else:
+                    # Prefix abbreviations are structural only inside a
+                    # bounded contact-label grammar. A larger remainder such
+                    # as "Main office:" starts a new field and makes the
+                    # period a real record boundary.
+                    continuation = tuple(
+                        word.casefold()
+                        for word in _WORD_PATTERN.findall(gap[boundary.end() :])
+                    )
+                    if continuation in _CONTACT_FIELD_ABBREVIATION_CONTINUATIONS.get(
+                        token, frozenset()
+                    ):
+                        continue
         if marker in {"–", "—"}:
             outside = (
                 gap[boundary.end() :]
@@ -1367,11 +1385,35 @@ def _source_form_owner(
     control: Tag,
     root: BeautifulSoup | Tag,
 ) -> Tag | None:
-    form_id = control.get("form")
-    if isinstance(form_id, str) and form_id.strip():
-        owners = root.find_all("form", id=form_id.strip(), limit=2)
+    if control.has_attr("form"):
+        form_id = control.get("form")
+        if not isinstance(form_id, str) or not form_id.strip():
+            return None
+        # HTML form-owner references are exact IDs. Trimming would turn an
+        # explicitly invalid association into authority for another form.
+        owners = root.find_all("form", id=form_id, limit=2)
         return owners[0] if len(owners) == 1 else None
     return control.find_parent("form")
+
+
+def _is_native_submit_control(element: Tag) -> bool:
+    tag_name = element.name.casefold()
+    control_type = str(element.get("type") or "").casefold()
+    return (
+        tag_name == "button" and control_type not in {"button", "reset"}
+    ) or (tag_name == "input" and control_type in {"submit", "image"})
+
+
+def has_invalid_explicit_form_owner(
+    element: Tag,
+    root: BeautifulSoup | Tag,
+) -> bool:
+    """Return whether a native submitter names no exact form owner."""
+    return (
+        _is_native_submit_control(element)
+        and element.has_attr("form")
+        and _source_form_owner(element, root) is None
+    )
 
 
 def action_element_declared_destinations(element: Tag) -> tuple[str, ...]:
@@ -1394,13 +1436,10 @@ def action_element_declared_destinations(element: Tag) -> tuple[str, ...]:
 
 def is_submit_action_element(element: Tag, root: BeautifulSoup | Tag) -> bool:
     """Return whether one button or input submits its owning form."""
-    tag_name = element.name.casefold()
-    control_type = str(element.get("type") or "").casefold()
-    if _source_form_owner(element, root) is None:
-        return False
     return (
-        tag_name == "button" and control_type not in {"button", "reset"}
-    ) or (tag_name == "input" and control_type in {"submit", "image"})
+        _is_native_submit_control(element)
+        and _source_form_owner(element, root) is not None
+    )
 
 
 def action_element_submission_method(

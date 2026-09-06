@@ -1597,6 +1597,37 @@ class BodyAssemblyTests(unittest.TestCase):
                     standalone,
                 )
 
+        invalid_owner_contract = ActionUrlAdmissionContract(
+            allowed_form_urls=("/other",),
+            allowed_form_pairs=(("/other", "get"),),
+            allowed_labels=("Send",),
+            allowed_pairs=(("Send", "/other"),),
+        )
+        for invalid_owner in ('form=""', 'form=" "', 'form=" owned "'):
+            with self.subTest(invalid_owner=invalid_owner), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "no exact form owner",
+            ):
+                validate_generated_body(
+                    body_result(
+                        '<body><form id="owned" action="/other">'
+                        f'<button {invalid_owner}>Send</button></form></body>'
+                    ),
+                    expected_action_urls=invalid_owner_contract,
+                )
+
+        exact_owner = (
+            '<body><form id="owned" action="/other">'
+            '<button form="owned">Send</button></form></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(exact_owner),
+                expected_action_urls=invalid_owner_contract,
+            ),
+            exact_owner,
+        )
+
         with self.assertRaisesRegex(
             GeneratedBodyError,
             "must declare one admitted action endpoint",

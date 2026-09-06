@@ -1211,6 +1211,15 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             base_phone,
         )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>"
+                "Fax inquiries go to billing dept. "
+                "Main office: 217-555-0100</p>",
+            ),
+            base_phone,
+        )
         with self.assertRaisesRegex(SiteExtractionError, "source phone"):
             validate_site_analysis(
                 base_phone,
@@ -3983,6 +3992,22 @@ class EnrichmentGroundingTests(unittest.TestCase):
         )
         self.assertEqual(submitter_admitted["form_action"], "https://acme.test/send")
         self.assertEqual(submitter_admitted["form_method"], "post")
+
+        for invalid_owner in ('form=""', 'form=" "', 'form=" external-form "'):
+            with self.subTest(invalid_owner=invalid_owner):
+                invalid_owner_admitted = validate_enrichment_result(
+                    {"form_fields": ["Email"]},
+                    page_type="contact",
+                    source_html=(
+                        '<form id="external-form"><label>Email<input name="email"></label>'
+                        f'<button {invalid_owner} formaction="/other">Send</button></form>'
+                    ),
+                    source_url="https://acme.test/contact",
+                )
+                self.assertNotEqual(
+                    invalid_owner_admitted["form_action"],
+                    "https://acme.test/other",
+                )
 
         same_endpoint_admitted = validate_enrichment_result(
             {"form_fields": ["Email"]},
