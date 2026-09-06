@@ -913,7 +913,10 @@ def _source_accessible_text(
     element: Tag,
     root: BeautifulSoup | Tag,
     active_references: frozenset[str],
+    excluded_element: Tag | None = None,
 ) -> str:
+    if element is excluded_element:
+        return ""
     if not is_source_semantic_element(element):
         return ""
     labelled_by = element.get("aria-labelledby")
@@ -932,6 +935,7 @@ def _source_accessible_text(
                 targets[0],
                 root,
                 active_references | {target_id},
+                excluded_element,
             )
             if not target_text:
                 return ""
@@ -949,16 +953,30 @@ def _source_accessible_text(
         if isinstance(child, NavigableString):
             parts.append(str(child))
         elif isinstance(child, Tag):
-            parts.append(_source_accessible_text(child, root, active_references))
+            parts.append(
+                _source_accessible_text(
+                    child,
+                    root,
+                    active_references,
+                    excluded_element,
+                )
+            )
     return " ".join(" ".join(part for part in parts if part).split())
 
 
 def source_accessible_name(
     element: Tag,
     root: BeautifulSoup | Tag,
+    *,
+    excluded_element: Tag | None = None,
 ) -> str:
     """Return one recursive browser-facing name for a source element."""
-    return _source_accessible_text(element, root, frozenset())
+    return _source_accessible_text(
+        element,
+        root,
+        frozenset(),
+        excluded_element,
+    )
 
 
 def is_source_semantic_element(element: Any) -> bool:
@@ -968,6 +986,30 @@ def is_source_semantic_element(element: Any) -> bool:
         or is_render_suppressed_element(candidate)
         for candidate in (element, *getattr(element, "parents", ()))
     )
+
+
+def is_source_action_available(element: Any) -> bool:
+    """Return whether source markup exposes one browser-available action."""
+    if not is_source_semantic_element(element):
+        return False
+    candidates = (element, *getattr(element, "parents", ()))
+    if any(candidate.has_attr("inert") for candidate in candidates):
+        return False
+
+    tag_name = str(getattr(element, "name", "") or "").casefold()
+    if tag_name not in {"button", "input"}:
+        return True
+    if element.has_attr("disabled"):
+        return False
+    for ancestor in getattr(element, "parents", ()):
+        if getattr(ancestor, "name", None) != "fieldset" or not ancestor.has_attr(
+            "disabled"
+        ):
+            continue
+        first_legend = ancestor.find("legend", recursive=False)
+        if first_legend is None or first_legend not in element.parents:
+            return False
+    return True
 
 
 def source_action_accessible_name(
@@ -1062,6 +1104,7 @@ def _marked_identity_text_parts(
     return tuple(parts)
 
 
+_ALL_HEADING_TAG_PATTERN = re.compile(r"h([1-6])", re.I)
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
 _TITLE_SEPARATOR_PATTERN = re.compile(r"(?:\s*[|–—•·]\s*|\s+-\s+)")
 _GENERIC_PAGE_IDENTITY_PARTS = frozenset(
@@ -1184,7 +1227,9 @@ def _heading_owned_fragment(
     *,
     stop_at_record_containers: bool = False,
 ) -> str:
-    match = _HEADING_TAG_PATTERN.fullmatch(getattr(heading, "name", "") or "")
+    match = _ALL_HEADING_TAG_PATTERN.fullmatch(
+        getattr(heading, "name", "") or ""
+    )
     if match is None:
         return str(heading)
     heading_level = int(match.group(1))
@@ -1198,14 +1243,14 @@ def _heading_owned_fragment(
         ):
             break
         sibling_heading = (
-            _HEADING_TAG_PATTERN.fullmatch(sibling_name)
+            _ALL_HEADING_TAG_PATTERN.fullmatch(sibling_name)
             if isinstance(sibling_name, str)
             else None
         )
         if sibling_heading is None and sibling_name is not None:
-            nested_heading = sibling.find(_HEADING_TAG_PATTERN)
+            nested_heading = sibling.find(_ALL_HEADING_TAG_PATTERN)
             sibling_heading = (
-                _HEADING_TAG_PATTERN.fullmatch(nested_heading.name or "")
+                _ALL_HEADING_TAG_PATTERN.fullmatch(nested_heading.name or "")
                 if nested_heading is not None
                 else None
             )
@@ -1267,6 +1312,16 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
                 break
             parts.append(str(sibling))
         append("".join(parts))
+
+    for main in soup.find_all("main", limit=MAX_ITEMS):
+        h1_candidates = main.find_all("h1", limit=2)
+        if len(h1_candidates) == 1:
+            append(
+                _heading_owned_fragment(
+                    h1_candidates[0],
+                    stop_at_record_containers=True,
+                )
+            )
 
     for heading in soup.find_all(_HEADING_TAG_PATTERN):
         if _HEADING_TAG_PATTERN.fullmatch(heading.name or "") is None:
@@ -1577,10 +1632,11 @@ class SourceEvidence:
         for element in soup.find_all(True):
             element_action_labels: tuple[str, ...] = ()
             element_image_urls: set[str] = set()
+            action_is_available = is_source_action_available(element)
             is_image_resource = element.name == "img" or (
                 element.name == "source" and element.find_parent("picture") is not None
             )
-            if is_labelled_action_element(element):
+            if action_is_available and is_labelled_action_element(element):
                 element_action_labels = tuple(
                     normalized
                     for label in action_element_labels(element, soup)
@@ -1601,7 +1657,8 @@ class SourceEvidence:
                     if name in _TEXT_ATTRIBUTES:
                         attribute_parts.append(value)
                     is_action_url = (
-                        name in _ACTION_URL_ATTRIBUTES
+                        action_is_available
+                        and name in _ACTION_URL_ATTRIBUTES
                         and element.name in {"a", "area"}
                     )
                     if is_action_url:
@@ -1748,7 +1805,13 @@ class SourceEvidence:
                     identity = id(label)
                     if identity not in seen_labels:
                         seen_labels.add(identity)
-                        labels.append(source_accessible_name(label, soup))
+                        labels.append(
+                            source_accessible_name(
+                                label,
+                                soup,
+                                excluded_element=control,
+                            )
+                        )
 
                 wrapping_label = control.find_parent("label")
                 if wrapping_label is not None:

@@ -19,7 +19,7 @@ from lib.site_extraction import (
     css_image_urls,
     SiteExtractionError,
     same_site_origin,
-    is_source_semantic_element,
+    is_source_action_available,
     validate_enrichment_result,
     validate_site_analysis,
 )
@@ -217,7 +217,7 @@ def _redesign_action_url_contract(
         for element in source_root.find_all(
             ["a", "area", "form", "button", "input"]
         ):
-            if not is_source_semantic_element(element):
+            if not is_source_action_available(element):
                 continue
             destinations = action_element_destinations(element, source_root)
             if element.name in {"a", "area"}:

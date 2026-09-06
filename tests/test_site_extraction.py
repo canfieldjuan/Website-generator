@@ -1633,6 +1633,27 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             valid["form_fields"],
         )
 
+        wrapped_select = (
+            "<label>Project Type"
+            "<select><option>Office</option></select></label>"
+        )
+        self.assertEqual(
+            validate_enrichment_result(
+                {"form_fields": ["Project Type"]},
+                page_type="contact",
+                source_html=wrapped_select,
+                source_url="https://acme.test/contact",
+            )["form_fields"],
+            ["Project Type"],
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "complete label"):
+            validate_enrichment_result(
+                {"form_fields": ["Project Type Office"]},
+                page_type="contact",
+                source_html=wrapped_select,
+                source_url="https://acme.test/contact",
+            )
+
         for source in (
             '<img id="email-label" alt="Email"><input aria-labelledby="email-label">',
             '<span id="email-label" aria-label="Email">Wrong</span>'
@@ -1881,6 +1902,58 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "https://acme.test/",
             ),
             action,
+        )
+
+        with self.assertRaisesRegex(SiteExtractionError, "cta"):
+            validate_site_analysis(
+                action,
+                (
+                    '<h1>Acme</h1><div inert>'
+                    '<a href="/book">Book Appointment</a></div>'
+                ),
+                "https://acme.test/",
+            )
+
+        label_only_action = {
+            "site": {"name": "Acme"},
+            "conversion_profile": {"existing_ctas": ["Book Appointment"]},
+        }
+        for disabled_action in (
+            '<button disabled>Book Appointment</button>',
+            '<fieldset disabled><button>Book Appointment</button></fieldset>',
+        ):
+            with (
+                self.subTest(disabled_action=disabled_action),
+                self.assertRaisesRegex(SiteExtractionError, "action label"),
+            ):
+                validate_site_analysis(
+                    label_only_action,
+                    f"<h1>Acme</h1>{disabled_action}",
+                    "https://acme.test/",
+                )
+        for available_action in (
+            "<button>Book Appointment</button>",
+            (
+                "<fieldset disabled><legend>"
+                "<button>Book Appointment</button></legend></fieldset>"
+            ),
+        ):
+            with self.subTest(available_action=available_action):
+                self.assertEqual(
+                    validate_site_analysis(
+                        label_only_action,
+                        f"<h1>Acme</h1>{available_action}",
+                        "https://acme.test/",
+                    ),
+                    label_only_action,
+                )
+        self.assertEqual(
+            validate_site_analysis(
+                claim,
+                '<h1>Acme</h1><div inert>Free Estimates</div>',
+                "https://acme.test/",
+            ),
+            claim,
         )
 
         with self.assertRaisesRegex(SiteExtractionError, "complete label"):
@@ -2423,6 +2496,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 '<noscript><a href="/fallback">Fallback</a></noscript>'
                 '<a hidden href="/hidden-attribute">Hidden</a>'
                 '<form style="display:none" action="/hidden-style"></form>'
+                '<div inert><a href="/inert">Inert Link</a></div>'
+                '<fieldset disabled><button formaction="/disabled">Disabled</button></fieldset>'
             ),
         )
 
@@ -2759,6 +2834,43 @@ class EnrichmentGroundingTests(unittest.TestCase):
             )["items"],
             document("Do you offer Free Estimates?")["items"],
         )
+
+    def test_h1_led_faq_record_is_bounded_to_its_main_content(self):
+        document = {
+            "type": "misc",
+            "headline": "FAQ",
+            "items": [
+                {
+                    "title": "Do you offer financing?",
+                    "url": None,
+                    "image_url": None,
+                    "tag": "faq",
+                    "meta": "Yes.",
+                }
+            ],
+        }
+        source = "<main><h1>Do you offer financing?</h1><p>Yes.</p></main>"
+        self.assertEqual(
+            validate_enrichment_result(
+                document,
+                page_type="faq",
+                source_html=source,
+                source_url="https://acme.test/faq",
+            )["items"],
+            document["items"],
+        )
+
+        separated = (
+            "<main><h1>Do you offer financing?</h1>"
+            "<section><p>No.</p></section><section><p>Yes.</p></section></main>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_enrichment_result(
+                document,
+                page_type="faq",
+                source_html=separated,
+                source_url="https://acme.test/faq",
+            )
 
     def test_composite_item_fields_must_share_one_source_container(self):
         document = {
