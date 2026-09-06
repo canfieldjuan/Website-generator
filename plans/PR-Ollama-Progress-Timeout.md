@@ -24,7 +24,7 @@ continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
 This five-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +1108 / -29. The native stream decoder is a new
+the final diff is +1328 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -61,16 +61,20 @@ existing generation timeout. Local config resolution accepts
 `LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS`; direct callers receive the same
 default. Both the one-token prompt probe and the full native `/api/chat` request
 use the same streaming request helper and explicitly request identity content
-encoding. One synchronous reader uses urllib3 `read1()` with decoding disabled,
-so each loop iteration performs at most one underlying receive before elapsed
-time is re-evaluated. Before every receive, it sets the live loopback socket
-timeout to the smaller of the remaining inactivity window and remaining total
-deadline. It then assembles bounded newline-delimited JSON frames, joins only
-assistant content, retains the terminal `done_reason` and token counts, and
-rejects malformed, error, reasoning, tool, oversized, duplicate-terminal, or
-incomplete streams through the existing error types. There is no unbounded
-buffered request, producer thread, concurrent response close, or unbounded
-handoff on either request path.
+encoding. A local-only Requests adapter arms one deadline timer before connect,
+request-body write, and response-header parsing; if that phase exceeds the
+smaller of the total and no-progress deadlines, it atomically marks the request
+expired and shuts down that request's socket. The timer is disarmed as soon as
+headers complete. The same synchronous request then uses urllib3 `read1()` with
+decoding disabled, so each body loop iteration performs at most one underlying
+receive before elapsed time is re-evaluated. Before every receive, it sets the
+live loopback socket timeout to the smaller of the remaining inactivity window
+and remaining total deadline. It assembles bounded newline-delimited JSON
+frames, joins only assistant content, retains the terminal `done_reason` and
+token counts, and rejects malformed, error, reasoning, tool, oversized,
+duplicate-terminal, or incomplete streams through the existing error types.
+There is no unbounded buffered request, producer thread, concurrent response
+close, or unbounded handoff on either request path.
 
 `requirements.txt` declares `urllib3>=2.2.0`, the release that introduced the
 `HTTPResponse.read1()` API used by this boundary. Existing environments are
@@ -190,29 +194,36 @@ Current shared-stream evidence, gathered from the final working tree based on
   0.15-second total deadline after 0.152 seconds and never started the full
   generation request. Log:
   `/dev/shm/website-generator-pr46-prompt-trickle-proof.log`.
-- The focused provider-boundary class passed 40 tests. The final repository
-  suite command `timeout 180s python -m unittest discover -s tests` passed 300
-  tests with 34 skipped in 18.541 seconds. An earlier verbose invocation was
+- A loopback regression sent the HTTP response status and headers one byte at a
+  time, each byte faster than the Requests read timeout. The connection-level
+  deadline watchdog interrupted header parsing within the configured total
+  deadline. The focused provider-boundary class passed 41 tests.
+- The final repository suite command
+  `timeout 180s python -m unittest discover -s tests` passed 301 tests with 34
+  skipped in 14.681 seconds. The immediately preceding run had one unrelated
+  Connect registration concurrency assertion fail; that isolated test passed,
+  and the unchanged full-suite rerun passed. An earlier verbose invocation was
   stopped after an unrelated test-runner deadlock; bounded reruns completed
-  normally and the deadlock did not recur.
+  normally and that deadlock did not recur.
 - `python -m pip install --dry-run -r requirements-release.txt` resolved the
   declared `urllib3>=2.2.0` floor to the installed urllib3 2.6.1 without a
   dependency conflict; that runtime exposes callable `HTTPResponse.read1`.
-- After the observed Document Summarizer compilation finished and `ollama ps`
-  was empty, the no-deploy fixture ran from the recorded pre-run envelope at
-  `2026-09-06T11:35:36-05:00` through the post-run envelope at
-  `2026-09-06T11:36:41-05:00`, with exit status 0. Before the run the artifact
-  timestamp was `1788712013`; afterward it was `1788712597`, proving this
-  invocation rewrote it. The resulting 71,983-byte artifact retained SHA-256
+- Immediately before the final fixture, `ollama ps` showed Document Summarizer's
+  `doc-sum-qwen35-9b:latest` resident on the only GPU. The fixture waited until
+  that keep-alive expired and `ollama ps` was empty. It then ran from the
+  recorded pre-run envelope at `2026-09-06T11:56:25-05:00` through the post-run
+  envelope at `2026-09-06T11:57:31-05:00`, with exit status 0. Before the run
+  the artifact timestamp was `1788712597`; afterward it was `1788713846`,
+  proving this invocation rewrote it. The resulting 71,983-byte artifact retained SHA-256
   `1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22`.
   Both required scans returned status 1 with zero matches. Log:
-  `/dev/shm/website-generator-pr46-fixture-final-shared-stream.log`; the output
-  is byte-identical to the fresh rendered spot-check at
+  `/dev/shm/website-generator-pr46-fixture-final-establishment-deadline.log`;
+  the output is byte-identical to the fresh rendered spot-check at
   `/dev/shm/website-generator-pr46-fixture-final-read1.png`.
 
 ## Estimated diff size
 
-Actual: five declared files, +1108 / -29. The stream decoder and
+Actual: five declared files, +1328 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.

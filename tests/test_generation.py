@@ -1,8 +1,10 @@
 import importlib
 import json
 import os
+import socketserver
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -1242,6 +1244,68 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertGreater(client.prompt_response.read_calls, 1)
         self.assertLess(elapsed, 0.5)
         self.assertEqual(client.prompt_response.close_calls, 1)
+
+    def test_local_prompt_probe_header_trickle_cannot_overrun_total_deadline(self):
+        class HeaderTrickleHandler(socketserver.StreamRequestHandler):
+            def handle(self):
+                content_length = 0
+                while True:
+                    line = self.rfile.readline()
+                    if not line or line == b"\r\n":
+                        break
+                    if line.lower().startswith(b"content-length:"):
+                        content_length = int(line.split(b":", 1)[1].strip())
+                if content_length:
+                    self.rfile.read(content_length)
+                response_headers = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/x-ndjson\r\n"
+                    b"Transfer-Encoding: chunked\r\n\r\n"
+                )
+                try:
+                    for byte in response_headers:
+                        self.wfile.write(bytes((byte,)))
+                        self.wfile.flush()
+                        time.sleep(0.01)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        server = socketserver.ThreadingTCPServer(
+            ("127.0.0.1", 0), HeaderTrickleHandler
+        )
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            selected = GenerationConfig(
+                provider="local",
+                model=DEFAULT_LOCAL_MODEL,
+                base_url=f"http://127.0.0.1:{server.server_address[1]}",
+                api_key="test-key",
+                timeout_seconds=0.05,
+                max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+                local_no_progress_timeout_seconds=1,
+            )
+
+            started = time.monotonic()
+            with self.assertRaisesRegex(
+                GenerationProviderUnavailable,
+                "exceeded its configured request deadline",
+            ):
+                generate_text(
+                    selected,
+                    system_prompt="system",
+                    user_parts=(PromptPart("input"),),
+                    temperature=0.4,
+                )
+            elapsed = time.monotonic() - started
+
+            self.assertGreaterEqual(elapsed, 0.04)
+            self.assertLess(elapsed, 0.2)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
 
     def test_local_stream_read_honors_no_progress_before_total_deadline(self):
         class BlockingResponse(FakeLocalResponse):

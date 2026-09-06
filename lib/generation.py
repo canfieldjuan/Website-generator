@@ -7,9 +7,12 @@ import json
 import math
 import os
 import re
+import socket
 import tempfile
+import threading
 import time
 import unicodedata
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from html import escape
 from html.parser import HTMLParser
@@ -20,6 +23,9 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from openai import DefaultHttpxClient, OpenAI
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
@@ -740,6 +746,119 @@ def create_generation_client(config: GenerationConfig) -> OpenAI:
     )
 
 
+@dataclass(frozen=True)
+class _LocalRequestDeadline:
+    expires_at: float
+    expired: threading.Event
+
+
+_LOCAL_REQUEST_DEADLINE: ContextVar[_LocalRequestDeadline | None] = ContextVar(
+    "local_request_deadline",
+    default=None,
+)
+
+
+class _LocalDeadlineConnectionMixin:
+    """Abort a local request socket when its establishment deadline expires."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._local_deadline_lock = threading.Lock()
+        self._local_deadline_token: object | None = None
+        self._local_deadline_timer: threading.Timer | None = None
+
+    def _expire_local_request(
+        self,
+        token: object,
+        deadline: _LocalRequestDeadline,
+    ) -> None:
+        with self._local_deadline_lock:
+            if self._local_deadline_token is not token:
+                return
+            deadline.expired.set()
+            active_socket = self.sock
+            if active_socket is None:
+                return
+            try:
+                active_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _disarm_local_deadline(self, token: object) -> None:
+        with self._local_deadline_lock:
+            if self._local_deadline_token is not token:
+                return
+            timer = self._local_deadline_timer
+            self._local_deadline_token = None
+            self._local_deadline_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def request(self, *args: Any, **kwargs: Any) -> None:
+        deadline = _LOCAL_REQUEST_DEADLINE.get()
+        if deadline is None:
+            return super().request(*args, **kwargs)
+        token = object()
+        timer = threading.Timer(
+            max(0.0, deadline.expires_at - time.monotonic()),
+            self._expire_local_request,
+            args=(token, deadline),
+        )
+        timer.daemon = True
+        with self._local_deadline_lock:
+            self._local_deadline_token = token
+            self._local_deadline_timer = timer
+        timer.start()
+        try:
+            super().request(*args, **kwargs)
+            if deadline.expired.is_set():
+                raise TimeoutError("Local request establishment deadline expired.")
+        except BaseException:
+            self._disarm_local_deadline(token)
+            raise
+
+    def getresponse(self) -> Any:
+        with self._local_deadline_lock:
+            token = self._local_deadline_token
+        try:
+            return super().getresponse()
+        finally:
+            if token is not None:
+                self._disarm_local_deadline(token)
+
+
+class _LocalDeadlineHTTPConnection(_LocalDeadlineConnectionMixin, HTTPConnection):
+    pass
+
+
+class _LocalDeadlineHTTPSConnection(_LocalDeadlineConnectionMixin, HTTPSConnection):
+    pass
+
+
+class _LocalDeadlineHTTPConnectionPool(HTTPConnectionPool):
+    ConnectionCls = _LocalDeadlineHTTPConnection
+
+
+class _LocalDeadlineHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = _LocalDeadlineHTTPSConnection
+
+
+class _LocalDeadlineHTTPAdapter(HTTPAdapter):
+    def init_poolmanager(
+        self,
+        connections: int,
+        maxsize: int,
+        block: bool = False,
+        **pool_kwargs: Any,
+    ) -> None:
+        super().init_poolmanager(connections, maxsize, block, **pool_kwargs)
+        self.poolmanager.pool_classes_by_scheme = {
+            **self.poolmanager.pool_classes_by_scheme,
+            "http": _LocalDeadlineHTTPConnectionPool,
+            "https": _LocalDeadlineHTTPSConnectionPool,
+        }
+
+
 def create_local_generation_client(config: GenerationConfig) -> requests.Session:
     session = requests.Session()
     # A loopback-only provider must not inherit HTTP(S)_PROXY from the shell:
@@ -747,6 +866,9 @@ def create_local_generation_client(config: GenerationConfig) -> requests.Session
     # the configured Ollama URL itself is local. OpenRouter continues to
     # honor GenerationConfig.trust_env through create_generation_client.
     session.trust_env = False
+    deadline_adapter = _LocalDeadlineHTTPAdapter(max_retries=0)
+    session.mount("http://", deadline_adapter)
+    session.mount("https://", deadline_adapter)
     session.headers.update(
         {
             "Accept-Encoding": "identity",
@@ -1042,16 +1164,39 @@ def _request_local_chat_stream(
     progress_stage: str,
 ) -> dict[str, Any]:
     request_timeout = _local_request_timeout(config, deadline)
+    phase_started = time.monotonic()
+    no_progress_deadline = phase_started + request_timeout[1]
+    establishment_deadline = min(deadline, no_progress_deadline)
+    deadline_state = _LocalRequestDeadline(
+        expires_at=establishment_deadline,
+        expired=threading.Event(),
+    )
+    deadline_token = _LOCAL_REQUEST_DEADLINE.set(deadline_state)
     try:
-        response = client.post(
-            endpoint,
-            json=request_body,
-            stream=True,
-            timeout=request_timeout,
-            allow_redirects=False,
-        )
-    except requests.Timeout as exc:
-        raise _local_no_progress_error(progress_stage, request_timeout[1]) from exc
+        try:
+            response = client.post(
+                endpoint,
+                json=request_body,
+                stream=True,
+                timeout=request_timeout,
+                allow_redirects=False,
+            )
+        except requests.RequestException as exc:
+            if deadline_state.expired.is_set():
+                if deadline <= no_progress_deadline:
+                    raise GenerationProviderUnavailable(
+                        "Local generation exceeded its configured request deadline."
+                    ) from exc
+                raise _local_no_progress_error(
+                    progress_stage, request_timeout[1]
+                ) from exc
+            if isinstance(exc, requests.Timeout):
+                raise _local_no_progress_error(
+                    progress_stage, request_timeout[1]
+                ) from exc
+            raise
+    finally:
+        _LOCAL_REQUEST_DEADLINE.reset(deadline_token)
     try:
         _raise_for_local_response_status(response)
     except Exception:
