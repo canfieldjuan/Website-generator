@@ -109,8 +109,11 @@ analysis may control presentation but may not authorize a visible business claim
 | Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `6ee2c00` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-6ee2c00.log`; `/dev/shm/website-generator-pr47-browser-render-6ee2c00.png` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 | `PRRT_kwDOTDYaKM6fpeiS`: class-based stylesheet suppression is not applied before evidence collection | Raw fetched HTML does not own browser-computed visibility; a correct computed-visibility policy must account for the CSS cascade, media state, viewport, and external stylesheets once at the fetch/render boundary. | The class-hidden claim is present in fetched HTML and is admitted; the equivalent inline-hidden claim rejects. A selector regex here would not establish computed visibility. | separate issue | `lib/site_extraction.py:805-815,1328-1335`; issue #48 |
-| `PRRT_kwDOTDYaKM6fpeiT`: an adjacent sibling disclaimer did not scope its claim | Claim ownership must preserve an adjacent qualifier owned by the same bounded record while leaving unrelated siblings independent. | `Free Estimates` followed by the sibling `Maintenance-plan members only.` now rejects; the complete combined claim and an unrelated `Call us today.` sibling pass. | fixed/superseded | `lib/site_extraction.py:624-631,1359-1408,1777-1812`; `tests/test_site_extraction.py:606-626` |
-| `PRRT_kwDOTDYaKM6fpeiU`: prompt-declared classifications were plain strings | Every bounded derived classification must be admitted by the executable schema, and the runtime prompt must name the same supported values. | Invalid site/section/image/page/layout/conversion classifications now reject locally; a document exercising valid values passes. Existing code-owned FAQ support was added to the stale prompt enum rather than removed. | fixed/superseded | `lib/site_extraction.py:51-132,156-306`; `references/01-site-analysis-prompt.md:64-164`; `tests/test_site_extraction.py:628-721` |
+| `PRRT_kwDOTDYaKM6fpeiT`: an adjacent sibling disclaimer did not scope its claim | Claim ownership must preserve every adjacent paragraph-like assertion owned by the same bounded record without using an English predicate list. | Adjacent paragraph/small runs now form one structural owner occurrence; a shortened claim rejects, the complete owner passes, and a separately contained assertion remains independent. | fixed/superseded | `lib/site_extraction.py:1278-1409,1778-1825`; `tests/test_site_extraction.py:606-647` |
+| `PRRT_kwDOTDYaKM6fpeiU`: prompt-declared classifications were plain strings | Every bounded derived classification must be admitted by the executable schema, and the runtime prompt must name the same supported values. | Invalid site/section/image/page/layout/conversion classifications now reject locally; a document exercising valid values passes. Existing code-owned FAQ support was added to the stale prompt enum rather than removed. | fixed/superseded | `lib/site_extraction.py:51-132,156-306`; `references/01-site-analysis-prompt.md:64-164`; `tests/test_site_extraction.py:675-768` |
+| `PRRT_kwDOTDYaKM6fplaH`: `Membership required` escaped the first sibling implementation | Sibling ownership must be structural, not dependent on enumerating qualifier vocabulary. | The semantic marker helper was removed. Both `Members only` and `Membership required` are rejected when shortened, and their complete structural owner passes. | fixed/superseded | `lib/site_extraction.py:1355-1409,1778-1825`; `tests/test_site_extraction.py:606-628,642-647` |
+| `PRRT_kwDOTDYaKM6fplaI`: normalized claim deduplication lost occurrence ownership | Equal text in different DOM records must retain distinct owners so one scoped occurrence cannot suppress a separate unrestricted occurrence. | Assertion occurrences are no longer deduplicated; a scoped `Free Estimates` card plus a separate unrestricted card admits from the unrestricted occurrence. | fixed/superseded | `lib/site_extraction.py:1280-1283,1355-1409,1778-1825`; `tests/test_site_extraction.py:630-640` |
+| `PRRT_kwDOTDYaKM6fplaJ`: contact presentation labels were treated as arbitrary claim prefixes | Schema-known contact fields may omit only their exact field-owned presentation label; the exception must not weaken general claims. | `Location:`, `Address:`, and `Hours:` admit their values through field-local contracts; `Former address:` still rejects. | fixed/superseded | `lib/site_extraction.py:687-695,1778-1825,1979-2005,2074-2087`; `tests/test_site_extraction.py:649-673` |
 
 ## Mechanism
 
@@ -387,6 +390,12 @@ business-specific claims.
   schema. Class-based computed visibility is tracked in issue #48 because a
   raw-HTML selector patch cannot establish cascade, media, viewport, or external
   stylesheet behavior.
+- The follow-up exact-head review proved that the first sibling implementation
+  still encoded qualifier vocabulary and collapsed equal strings across DOM
+  records. That mechanism was replaced: structural paragraph-like runs now own
+  ordered assertion occurrences, and validation evaluates each occurrence
+  independently. Schema-known contact presentation labels use a separate
+  field-local wrapper contract, so they do not weaken general claim admission.
 - Focused both-side regressions: `python -m unittest -q
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_recipient_and_purchase_qualifiers
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_complete_negated_claim_and_separate_positive_occurrence_are_admitted
@@ -395,9 +404,9 @@ business-specific claims.
   claims, rejected uncorroborated identities, and the uniquely corroborated
   identity. The first focused run exposed one old trailing-assertion positive
   control; that case was moved to complete-claim coverage before the passing run.
-- Affected module: `python -m unittest -q tests.test_site_extraction`: 74 tests
+- Affected module: `python -m unittest -q tests.test_site_extraction`: 75 tests
   passed.
-- Full suite: `python -m unittest discover -s tests -q`: 367 tests passed with
+- Full suite: `python -m unittest discover -s tests -q`: 368 tests passed with
   34 skipped.
 - Scoped static checks passed:
   `ruff check --ignore F401,F541 lib/site_extraction.py lib/generation.py pipeline.py
@@ -407,28 +416,28 @@ business-specific claims.
   Running without the established `F541` exclusion found five pre-existing
   findings on unchanged print calls in `pipeline.py`; they were not folded into
   this slice.
-- The final code revision `9490da802cd154d4dce3fd12d681a885eabdc67e`
+- The final code revision `c897c9e4fafb75b0a4b77a3c256d49a83f4a7728`
   used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-06T00:39:53-05:00` capture with no model
-  resident and exited 0 before the `2026-09-06T00:40:58-05:00` post-run capture;
+  invocation began after the `2026-09-06T01:01:42-05:00` capture with no model
+  resident and exited 0 before the `2026-09-06T01:03:00-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
-  path ran. Log: `/dev/shm/website-generator-pr47-fixture-9490da8.log`.
+  path ran. Log: `/dev/shm/website-generator-pr47-fixture-c897c9e.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`; size was 72027 bytes, inode
-  3311281, mtime was `2026-09-06 00:40:50.341331388 -0500`, and SHA-256 was
+  3311280, mtime was `2026-09-06 01:02:45.808786893 -0500`, and SHA-256 was
   `8991ac64600a198bcf5f14d6feae6fe33e0cbca5ee752d23da033dbaaaa2b309`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-9490da8.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-9490da8.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-c897c9e.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-c897c9e.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3180 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
   artifact has the same SHA-256 as the HTML used for that render. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-9490da8.png`,
+  `/dev/shm/website-generator-pr47-browser-render-c897c9e.png`,
   SHA-256
   `9dd618e9a0b6dc29b59f8c7fc25c0ee1c14fce35f02ab9ea93e54f26ab1632c9`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
