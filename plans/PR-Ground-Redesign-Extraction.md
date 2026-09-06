@@ -250,6 +250,69 @@ business-specific claims.
 
 ## Verification
 
+### Current revision evidence (2026-09-05)
+
+- Code revision under test: `5395569d656ebb060113a0afa1b810507685308e`.
+  The worktree was clean when the production-shaped fixture started. The plan
+  update that records these results is documentation-only and therefore a
+  descendant of this tested code revision.
+- Focused authority regressions: `python -m unittest -q
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_analyze_site_propagates_identity_authority
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_business_name_requires_assertive_identity_evidence
+  tests.test_generation.PromptContractTests.test_build_prompt_exposes_only_the_admitted_review_branch
+  tests.test_generation.BodyAssemblyTests.test_build_action_contract_binds_canonical_form_labels
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_aggregate_review_claims_to_source
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_review_cards_to_source_entries
+  tests.test_generation.BodyAssemblyTests.test_body_action_destinations_are_source_owned`:
+  7 tests passed. This covers identity propagation, shortened/expanded identity
+  rejection, true multi-component title rejection, controlled wrappers,
+  intrinsic hyphens, prompt/admission agreement, and both review modes.
+- Full suite: `python -m unittest discover -s tests -q`: 347 tests passed with
+  34 skipped. Log: `/dev/shm/website-generator-pr47-full-suite-5395569.log`.
+- Scoped static checks passed:
+  `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
+  tests/test_site_extraction.py tests/test_generation.py`;
+  `ruff check --select F821 pipeline.py build.py`;
+  `python -m compileall -q pipeline.py build.py lib tests`; and
+  `git diff --check`. Cache output was redirected to `/dev/shm` because the
+  repository filesystem had no general-purpose free space.
+- Required production-shaped fixture:
+  `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
+  examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
+  --skip-deploy` used `local:qwen3-30b-a3b:latest` through Ollama, resident
+  100% on the GPU at invocation. It started at
+  `2026-09-05T20:09:44-05:00`, ended at
+  `2026-09-05T20:10:17-05:00`, and exited 0. No email or deployment path ran.
+  Log: `/dev/shm/website-generator-pr47-fixture-5395569.log`.
+- The invocation rewrote
+  `outputs/builds/drees-plumbing-inc/index.html` at
+  `2026-09-05 20:10:17.260891849 -0500`; its SHA-256 is
+  `1952ff46a9511981d40a5e7637a5e96a1cf325c62555ee6b89c265eb7a6f305e`.
+  The pre-run artifact had a different modification time, inode, size, and
+  SHA-256, so it cannot be mistaken for the fresh output.
+- Exact required placeholder and case-insensitive forbidden-claim scans both
+  returned grep status 1 (zero matches); the scan harness converted that
+  expected no-match state to exit 0. Log:
+  `/dev/shm/website-generator-pr47-scans-5395569.log`.
+- Rendered spot-check: a loopback-only HTTP server returned HTTP 200 and
+  `wkhtmltoimage` produced a nonblank, styled page showing the Drees Plumbing
+  identity, verified phone, trust strip, hero, coverage band, services, and
+  trust content. Full render:
+  `/dev/shm/website-generator-pr47-render-full-5395569.png`, SHA-256
+  `01322b35caf5e9a3aa5c2c5beaa837447792f5b3ad7475cb564f8d6e8e4aa1b5`.
+  Chromium could not start under the host AppArmor namespace policy; no
+  `--no-sandbox` bypass was used.
+- `bash scripts/local_pr_review.sh`: passed against merge base
+  `826f0c8919615d4ed2849ebed8fb511bc6bc994b`. Log:
+  `/dev/shm/website-generator-pr47-local-review-5395569.log`.
+- Issue #46 was not reproduced by the final fixture: the full request returned
+  and the build completed. The issue remains separate and open because one
+  successful run does not resolve its historical stall.
+- Final-head GitHub unit, Windows packaging, and latest-review reconciliation
+  remain pending until this evidence update is pushed.
+
+### Historical evidence (earlier revisions; not final-head proof)
+
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
 - `python -m unittest -q tests.test_site_extraction`: 51 tests passed, including
