@@ -37,6 +37,7 @@ from lib.generation import (
     GenerationResponseError,
     GenerationResult,
     PromptPart,
+    ReviewAdmissionContract,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -1360,6 +1361,42 @@ class BodyAssemblyTests(unittest.TestCase):
             ),
             neutral_body,
         )
+
+    def test_build_action_contract_binds_canonical_form_labels(self):
+        form_action = "https://source.test/form"
+        contract = build.expected_build_action_url_contract(
+            {"formspree_endpoint": form_action},
+            ReviewAdmissionContract(mode="omit"),
+        )
+        self.assertEqual(contract.allowed_labels, build.BUILD_FORM_SUBMIT_LABELS)
+        self.assertEqual(
+            contract.allowed_pairs,
+            tuple((label, form_action) for label in build.BUILD_FORM_SUBMIT_LABELS),
+        )
+
+        for label in build.BUILD_FORM_SUBMIT_LABELS:
+            body = (
+                f'<body><form action="{form_action}">'
+                f'<button type="submit">{label}</button></form></body>'
+            )
+            with self.subTest(label=label):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=contract,
+                    ),
+                    body,
+                )
+
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            validate_generated_body(
+                body_result(
+                    f'<body><form action="{form_action}">'
+                    '<button type="submit">Send My Free Quote</button>'
+                    "</form></body>"
+                ),
+                expected_action_urls=contract,
+            )
 
     def test_body_action_labels_remain_bound_to_source_destinations(self):
         contract = ActionUrlAdmissionContract(
@@ -3109,7 +3146,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             build.expected_build_action_url_contract(
                 prospect, review_contract
             ).allowed_labels,
-            ("Read All Reviews on Google",),
+            (*build.BUILD_FORM_SUBMIT_LABELS, "Read All Reviews on Google"),
         )
         html = build.generate_build_html(
             prospect,
@@ -3262,7 +3299,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             build.expected_build_action_url_contract(
                 prospect, review_contract
             ).allowed_labels,
-            ("Read All on Google",),
+            (*build.BUILD_FORM_SUBMIT_LABELS, "Read All on Google"),
         )
         html = build.generate_build_html(
             prospect,

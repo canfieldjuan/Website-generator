@@ -91,6 +91,11 @@ BUILD_OUTPUT_ROOT = os.path.join("outputs", "builds")
 EMAIL_DRAFT_ROOT = os.path.join("outputs", "email_drafts")
 BUILD_TEMPERATURE = 0.4
 BUILD_USER_TRUNCATE = 200000
+BUILD_FORM_SUBMIT_LABELS = (
+    "Send My Request",
+    "Get My Estimate",
+    "Schedule My Service",
+)
 BUILD_RESPONSE_BOUNDARY_REMINDER = (
     "RESPONSE BOUNDARY: Begin your response immediately with <body. "
     "End immediately with </body>. Emit no leading comment, preamble, markdown "
@@ -351,9 +356,13 @@ def expected_build_form_action(prospect):
 
 
 def expected_build_action_url_contract(prospect, review_contract):
-    allowed_urls = [expected_build_form_action(prospect)]
-    allowed_labels = []
-    allowed_pairs = []
+    form_action = expected_build_form_action(prospect)
+    allowed_urls = [form_action]
+    allowed_labels = list(BUILD_FORM_SUBMIT_LABELS)
+    allowed_pairs = [
+        (label, form_action)
+        for label in BUILD_FORM_SUBMIT_LABELS
+    ]
     if review_contract.reviews_url:
         allowed_urls.append(review_contract.reviews_url)
         review_label = (
