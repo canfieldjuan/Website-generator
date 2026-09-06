@@ -122,6 +122,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fp4hy`: validated brand identity and home destination were authorized independently | A code-owned generated navigation action must bind its exact validated label to its exact code-owned destination, just as source actions do. | The redesign action contract carries the exact site name paired with the catalog-owned `/` home route. A linked brand to `/` admits; rebinding that name to another otherwise admitted URL rejects. | fixed/superseded | `pipeline.py:146-247`; `lib/generation.py:2218-2382`; `tests/test_generation.py:4720-4774`; `tests/test_site_extraction.py:2213-2377` |
 | `PRRT_kwDOTDYaKM6fp-5p`: list/wrapper restrictions fell outside a heading owner | An assertion owner must include the text-bearing sibling subtree, not only a sibling that is itself the nearest text context, while record and heading boundaries remain intact. | An H3 followed by a `ul/li` restriction now owns the list subtree; the shortened benefit rejects and the complete qualified assertion admits. Nested same-or-higher headings and independent semantic records stop the owner. | fixed/superseded | `lib/site_extraction.py:1394-1514`; `tests/test_site_extraction.py:688-714` |
 | `PRRT_kwDOTDYaKM6fp-5q`: content-bearing labels were classified as neutral actions | Neutral fallback wording cannot assert that an About, FAQ, gallery, map, service, team, or work destination exists. Those labels require exact source label/pair authority. | The content/capability category was removed from the bounded neutral set. `Meet Our Team` pointed at an otherwise admitted contact URL rejects; the exact source-owned `Meet Our Team` to `/team` pair admits. Truly generic `Contact Us`, `Learn More`, and `Request Service` controls remain neutral. | fixed/superseded | `lib/generation.py:2152-2200,2350-2366`; `tests/test_generation.py:1460-1528` |
+| `PRRT_kwDOTDYaKM6fqEKl`: admitted relative image resources remained relative | Source-relative image and logo evidence must become one usable source-resolved resource before mirroring and generation consume it. | Homepage and enrichment admission now canonicalize every validated `image_url`, `logo_url`, and `images[].url` against that document's source URL. The extraction integration test proves `/hero.jpg` reaches the mirror as `https://acme.test/hero.jpg`, while a relative action URL remains unchanged. | fixed/superseded | `lib/site_extraction.py:2361-2399,2488-2489`; `tests/test_site_extraction.py:78-160,2528-2533` |
+| `PRRT_kwDOTDYaKM6fqEKn`: final CTA checklist contradicted action admission | The model prompt and executable action contract must permit the same exact source-owned or bounded-neutral labels. | The checklist no longer forbids `Submit` or `Contact Us`; it repeats the shared exact-source-or-bounded-neutral rule and still prohibits invented capability wording. | fixed/superseded | `references/02-redesign-gen-prompt.md:254-258,601-620`; `tests/test_site_extraction.py:3145-3178`; `lib/generation.py:2152-2200,2350-2366` |
 
 ## Mechanism
 
@@ -436,6 +438,12 @@ business-specific claims.
   same-or-higher heading. The neutral-action fallback no longer contains labels
   that assert About, FAQ, gallery, map, service, team, or work content; those
   require an exact source-owned label/destination pair.
+- The final exact-head review exposed two consumer-boundary inconsistencies rather
+  than more vocabulary exceptions. Image admission accepted relative and resolved
+  forms as equivalent but returned the relative form to downstream consumers; all
+  admitted image-resource fields now resolve once against their source document.
+  The final CTA checklist also contradicted the executable action rule; it now
+  states the same exact-source-or-bounded-neutral contract as generation admission.
 - Focused ownership and action boundaries: `python -m unittest -q
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_adjacent_owned_disclaimers
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_keeps_only_action_owned_urls
@@ -451,37 +459,43 @@ business-specific claims.
   heading/block/list-owned claims, independent record and field boundaries, exact
   source action pairs including team content, genuinely neutral controls, and the
   catalog-owned business-name-to-`/` pair.
-- Full suite: `python -m unittest discover -s tests -q`: 368 tests passed with
-  34 skipped.
+- Current affected modules: `python -m unittest -q tests.test_site_extraction
+  tests.test_generation`: 226 tests passed. The image boundary covers relative and
+  absolute resources, source metadata, picture/source and CSS declarations, alt
+  pairing, enrichment, downstream mirroring, input immutability, and an unchanged
+  relative action URL. Prompt coverage proves its checklist no longer conflicts
+  with source-owned neutral controls.
+- Full suite on code revision `b05467e531165ce208d2304ddd968868c5da1c45`:
+  `python -m unittest discover -s tests -q`: 368 tests passed with 34 skipped.
 - Scoped static checks passed:
-  `ruff check --ignore F401,F541 lib/site_extraction.py lib/generation.py
-  tests/test_site_extraction.py tests/test_generation.py`;
-  `python -m compileall -q lib/site_extraction.py lib/generation.py
-  tests/test_site_extraction.py tests/test_generation.py`; and `git diff --check`.
-- The final code revision `910fd3629dd21a5b12e38e8d194877a1af7240ec`
+  `ruff check --ignore F401,F541 lib/site_extraction.py
+  tests/test_site_extraction.py references/02-redesign-gen-prompt.md`;
+  `python -m compileall -q lib/site_extraction.py tests/test_site_extraction.py`;
+  and `git diff --check`.
+- The final code revision `b05467e531165ce208d2304ddd968868c5da1c45`
   used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-06T02:22:02-05:00` capture with no model
-  resident and exited 0 before the `2026-09-06T02:23:34-05:00` post-run capture;
+  invocation began after the `2026-09-06T02:45:15-05:00` capture with no model
+  resident and exited 0 before the `2026-09-06T02:46:54-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
   path ran. The first generated body was correctly rejected for unsupported `Not
   a Franchise` wording; the bounded correction passed full admission. Log:
-  `/dev/shm/website-generator-pr47-fixture-910fd36.log`.
+  `/dev/shm/website-generator-pr47-fixture-b05467e.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`; size was 71986 bytes, inode
-  3309963, mtime was `2026-09-06 02:23:31.396653758 -0500`, and SHA-256 was
+  3320504, mtime was `2026-09-06 02:46:44.927200098 -0500`, and SHA-256 was
   `428c54d54bea2aabbef294a979d679a211c5daea0896210a4ac3b40ec6817959`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-910fd36.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-910fd36.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-b05467e.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-b05467e.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3180 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
   artifact was served directly from this invocation's output. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-910fd36.png`,
+  `/dev/shm/website-generator-pr47-browser-render-b05467e.png`,
   SHA-256
   `896f42996ae08d4efa93d63574dd196f939aadf13dcd8153a1c59f4b879bfe1f`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
