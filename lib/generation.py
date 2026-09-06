@@ -2408,7 +2408,9 @@ def _validate_action_urls(
             if normalized_label:
                 raise GeneratedBodyError(
                     "Generated body contains a non-neutral action label that is not "
-                    f"an exact source-owned action label: {action_label!r}."
+                    f"an exact source-owned action label: {action_label!r}. "
+                    "Exact allowed labels: "
+                    f"{json.dumps(allowed_label_values, ensure_ascii=False)}."
                 )
 
 
