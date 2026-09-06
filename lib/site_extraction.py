@@ -762,15 +762,39 @@ def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
     return _occurrence_is_negated(without_affirmative_idiom, start, length)
 
 
-def _contact_occurrence_is_noncallable(text: str, start: int) -> bool:
+def _contact_occurrence_is_noncallable(
+    text: str,
+    start: int,
+    length: int,
+) -> bool:
     """Return whether the nearest source field marks a number as non-callable."""
     preceding = text[:start]
     sentence_start = max(
         (match.end() for match in _SENTENCE_BREAK_PATTERN.finditer(preceding)),
         default=0,
     )
-    roles = tuple(_PHONE_ROLE_PATTERN.finditer(preceding[sentence_start:]))
-    return bool(roles and roles[-1].group("role").casefold() in {"fax", "facsimile"})
+    following = text[start + length :]
+    following_break = _SENTENCE_BREAK_PATTERN.search(following)
+    sentence_end = (
+        start + length + following_break.start()
+        if following_break is not None
+        else len(text)
+    )
+    occurrence_start = start - sentence_start
+    occurrence_end = occurrence_start + length
+    roles = tuple(_PHONE_ROLE_PATTERN.finditer(text[sentence_start:sentence_end]))
+    if not roles:
+        return False
+
+    def distance(role: re.Match[str]) -> int:
+        if role.end() <= occurrence_start:
+            return occurrence_start - role.end()
+        if role.start() >= occurrence_end:
+            return role.start() - occurrence_end
+        return 0
+
+    nearest = min(roles, key=distance)
+    return nearest.group("role").casefold() in {"fax", "facsimile"}
 
 
 def _contact_destination(value: str) -> tuple[str, str] | None:
@@ -1859,7 +1883,22 @@ class SourceEvidence:
                                     for sibling in siblings[first : last + 1]
                                 )
                             )
-            if local_segment and owner_segment:
+            local_context_is_owned_by_child = (
+                isinstance(context, Tag)
+                and context.name in claim_scope_parent_tags
+                and is_claim_scope_context(context)
+                and any(
+                    isinstance(child, Tag)
+                    and any(
+                        id(candidate) in assertion_context_ids
+                        for candidate in (child, *child.find_all(True))
+                    )
+                    and is_owned_claim_component(child, None)
+                    and not _starts_presentation_field(claim_component_text(child))
+                    for child in context.children
+                )
+            )
+            if local_segment and owner_segment and not local_context_is_owned_by_child:
                 assertion_occurrences.append((local_segment, owner_segment))
         assertion_segments = tuple(
             dict.fromkeys(owner for _, owner in assertion_occurrences)
@@ -2148,7 +2187,11 @@ class SourceEvidence:
                     segment, match.start(), len(match.group(0))
                 ):
                     continue
-                if _contact_occurrence_is_noncallable(segment, match.start()):
+                if _contact_occurrence_is_noncallable(
+                    segment,
+                    match.start(),
+                    len(match.group(0)),
+                ):
                     continue
                 if _occurrence_is_nonassertive(
                     segment, match.start(), len(match.group(0))

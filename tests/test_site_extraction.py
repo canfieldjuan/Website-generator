@@ -748,6 +748,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
 
         for shell in (
             "<main><h3>Free Estimates</h3><p>Members only.</p></main>",
+            "<main>Free Estimates<p>Members only.</p></main>",
         ):
             shell_scope = '<meta property="og:site_name" content="Acme">' + shell
             with (
@@ -1115,6 +1116,18 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 base_phone,
                 "<h1>Acme Cleaning</h1><p>Our fax is 217-555-0100</p>",
             )
+        for postfix_fax in (
+            "217-555-0100 is our fax",
+            "217-555-0100 (fax)",
+        ):
+            with (
+                self.subTest(postfix_fax=postfix_fax),
+                self.assertRaisesRegex(SiteExtractionError, "source phone"),
+            ):
+                validate_site_analysis(
+                    base_phone,
+                    f"<h1>Acme Cleaning</h1><p>{postfix_fax}</p>",
+                )
         with self.assertRaisesRegex(SiteExtractionError, "source phone"):
             validate_site_analysis(
                 base_phone,
@@ -1134,6 +1147,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(
                 base_phone,
                 "<h1>Acme Cleaning</h1><p>Our phone is 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>217-555-0100 is our phone</p>",
             ),
             base_phone,
         )
