@@ -177,6 +177,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fr0Cn`: an acronym-ending fax sentence swallowed the following office phone | Completed prose punctuation must remain a group boundary regardless of capitalization, while the explicitly bounded field abbreviations remain structural. | `Fax inquiries are handled by IT. Main office: 217-555-0100` now admits the office phone; `Dept.`/`No.` fax fields still reject and their phone controls admit. | fixed/superseded | `lib/site_extraction.py:481-485,780-818`; `tests/test_site_extraction.py:1125-1220` |
 | `PRRT_kwDOTDYaKM6fsB38`: explicit invalid form-owner values fell back to an ancestor form | Browser form ownership is exact: the presence of `form` must prevent ancestor fallback, and extraction, contract construction, and generated-output validation must consume that same result. | Empty, whitespace-only, and whitespace-padded owner references cannot authorize the submitter endpoint or label and a generated broken submitter rejects; an exact owner still admits, while a genuinely standalone neutral button remains non-submit UI. | fixed/superseded | `lib/site_extraction.py:1384-1442`; `pipeline.py:309-350`; `lib/generation.py:2267-2276`; `tests/test_site_extraction.py:3996-4010`; `tests/test_generation.py:1585-1629` |
 | `PRRT_kwDOTDYaKM6fsB3-`: an unconditional `Dept.` exception swallowed a real sentence boundary | Abbreviation punctuation is structural only when the remaining text fits the bounded contact-field grammar; it cannot suppress a boundary across a second field. | `Fax inquiries go to billing dept. Main office: 217-555-0100` admits the office phone, while both `Fax Dept. Line` and `Fax Dept. Number` still reject and the existing phone controls remain admissible. | fixed/superseded | `lib/site_extraction.py:481-488,781-825`; `tests/test_site_extraction.py:1188-1233,1304-1327` |
+| `PRRT_kwDOTDYaKM6fsKH4`: form-only ID lookup skipped an earlier non-form collision | Browser form ownership resolves the first exact matching ID in document order, then requires that element to be a form; searching only forms invents ownership. | A preceding non-form with the target ID prevents the later form from granting its submitter endpoint or generated behavior; the same exact owner with no collision remains admissible. | fixed/superseded | `lib/site_extraction.py:1380-1392`; `tests/test_site_extraction.py:4020-4030`; `tests/test_generation.py:1619-1638` |
+| `PRRT_kwDOTDYaKM6fsKH6`: consecutive abbreviations split one fax field | Recognized field abbreviations are a structural class and may repeat; they stop only at an independently labelled contact field rather than at an enumerated continuation tuple. | `Fax Dept. No. 217-555-0100` rejects and the phone equivalent admits; `Fax Dept. Line` still rejects and `billing dept. Main office:` still admits the office phone. | fixed/superseded | `lib/site_extraction.py:481-488,782-817`; `tests/test_site_extraction.py:1214-1233,1304-1342` |
 
 ## Mechanism
 
@@ -385,10 +387,10 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `9613143ee55b4ecd21d183c3ff193f6f528520e2`.
+- Code revision under test: `f6c0bfd343d5e067b401533ad13c9c32b25bb012`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
-- Root-cause boundary probes cover the seven latest review paths without adding
+- Root-cause boundary probes cover the nine latest review paths without adding
   tag- or phrase-specific exceptions. Lowercase prefix/postfix fax fields reject,
   their phone equivalents admit, and the office phone after the acronym-ending
   `IT.` sentence admits. Exact class token `logo` admits while existing alt-only
@@ -401,13 +403,15 @@ business-specific claims.
   authorize neither their endpoint nor label and a generated broken submitter
   rejects, while exact ownership and standalone neutral UI controls still pass.
   `Dept.` punctuation preserves the bounded `Line`/`Number` field grammar but no
-  longer swallows a following `Main office:` field.
+  longer swallows a following `Main office:` field. Form-owner lookup now honors
+  the first exact matching element regardless of tag, and consecutive field
+  abbreviations remain one field without adding sequence-specific cases.
 - Affected boundary suite: `python -m unittest -q
   tests.test_site_extraction tests.test_generation` exited 0 with 239 tests passed
-  in 7.745 seconds.
+  in 7.601 seconds. Log: `/dev/shm/pr47-affected-final.log`.
 - Full suite: `python -m unittest -q` exited 0; the saved log reports 381 tests
-  passed with 34 skipped in 13.945 seconds. Log:
-  `/dev/shm/pr47-full-suite-current.log`.
+  passed with 34 skipped in 13.761 seconds. Log:
+  `/dev/shm/pr47-full-suite-final.log`.
 - Static evidence: `python -m ruff check lib/site_extraction.py
   lib/generation.py pipeline.py tests/test_site_extraction.py
   tests/test_generation.py --ignore F401,F541`, `python -m compileall
@@ -416,28 +420,31 @@ business-specific claims.
   red on 14 pre-existing F401/F541 findings outside this boundary change; they were
   not auto-fixed or folded into this PR.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T08:41:04,022923691-05:00`, completed at
-  `2026-09-06T08:41:54,738451922-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T08:53:21,220825649-05:00`, completed at
+  `2026-09-06T08:54:11,653274448-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-9613143.log`.
-- The invocation replaced artifact inode 3325017 with inode 3309618 and set mtime
-  `2026-09-06 08:41:54.648032274 -0500`, proving this invocation rewrote
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-f6c0bfd.log`.
+- The invocation replaced artifact inode 3309618 with inode 3309502 and set mtime
+  `2026-09-06 08:54:11.568232154 -0500`, proving this invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71858-byte artifact
   has SHA-256
   `13f7b426c17c17ff620ee92214e4f7404bcd11fef48582124a6381b2286d640f`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-9613143.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-9613143.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-f6c0bfd.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-f6c0bfd.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
   loaded a 1440x3300 screenshot with title `DREES PLUMBING INC` and 2481
   body-text characters. The screenshot was visually inspected and shows the
   styled navigation, hero, service grid, trust content, and beginning of the
   reviews section without an obvious render break. Screenshot:
-  `/dev/shm/website-generator-pr47-browser-render-9613143.png`,
+  `/dev/shm/website-generator-pr47-browser-render-f6c0bfd.png`,
   SHA-256
   `9ed1d5d9d93580de5aafd10e149c88b112053c3d551104f318dbb2882724a3de`.
+  The visually inspected downscaled copy is
+  `/dev/shm/website-generator-pr47-browser-render-f6c0bfd-small.png`, SHA-256
+  `6326c8a7ae2905f7b9b8cb6a7abc054a1ec021145fe6fab54be72d8110152c30`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
   separate open issue because one successful run does not resolve its historical
   stall.
