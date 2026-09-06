@@ -21,10 +21,9 @@ from openai import DefaultHttpxClient, OpenAI
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 from lib.site_extraction import (
+    action_element_labels,
     is_render_suppressed_element,
     is_labelled_action_element,
-    source_action_accessible_name,
-    source_visible_text,
 )
 
 
@@ -413,7 +412,7 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
     allowed_pairs = _contract_action_pairs(contract.allowed_pairs)
     _validate_action_pair_membership(allowed_pairs, allowed_labels)
-    neutral_terms = sorted(_NEUTRAL_ACTION_LABEL_TERMS)
+    neutral_labels = sorted(_NEUTRAL_ACTION_LABELS)
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
         "are allowed. Every other generated anchor must copy one exact source "
@@ -426,9 +425,9 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
         "substitute a booking, social, navigation, or form destination. "
         "Every generated action label must exactly copy one source label from "
         f"{json.dumps(allowed_labels, ensure_ascii=False)}, display an admitted "
-        "phone/email value, or use plainly navigational/contact wording composed "
-        "only from these neutral terms: "
-        f"{json.dumps(neutral_terms, ensure_ascii=False)}. A source-owned label on "
+        "phone/email value, or copy one exact capability-neutral navigational/contact "
+        "label from this bounded list: "
+        f"{json.dumps(neutral_labels, ensure_ascii=False)}. A source-owned label on "
         "an action with a destination must preserve one exact label/destination "
         f"pair from {json.dumps(allowed_pairs, ensure_ascii=False)}."
     )
@@ -2150,63 +2149,62 @@ def action_element_destinations(element: Tag, root: Tag) -> tuple[str, ...]:
     return (action,) if isinstance(action, str) else ()
 
 
-_NEUTRAL_ACTION_LABEL_TERMS = frozenset(
+_NEUTRAL_ACTION_LABELS = frozenset(
     {
         "about",
-        "action",
-        "all",
-        "area",
+        "about us",
         "back",
-        "blog",
         "call",
+        "call us",
         "close",
+        "close menu",
         "collapse",
         "contact",
-        "content",
-        "coverage",
+        "contact us",
+        "coverage area",
         "details",
         "directions",
         "email",
+        "email us",
         "expand",
         "explore",
         "faq",
         "gallery",
-        "get",
+        "get in touch",
         "home",
-        "in",
-        "learn",
-        "main",
+        "learn more",
+        "main content",
         "map",
-        "meet",
+        "meet our team",
         "menu",
         "message",
         "more",
         "navigation",
         "next",
-        "on",
         "open",
-        "our",
+        "open menu",
+        "our services",
         "previous",
-        "read",
-        "request",
-        "reviews",
-        "see",
+        "read more",
+        "request service",
+        "see more",
         "send",
-        "services",
         "service",
+        "service area",
+        "services",
         "show",
-        "site",
-        "skip",
-        "source",
+        "show more",
+        "skip to main content",
         "submit",
         "team",
         "text",
-        "the",
-        "to",
-        "touch",
-        "us",
+        "text us",
         "view",
-        "visit",
+        "view details",
+        "view our services",
+        "view services",
+        "visit our website",
+        "visit website",
         "website",
         "work",
     }
@@ -2214,26 +2212,7 @@ _NEUTRAL_ACTION_LABEL_TERMS = frozenset(
 
 
 def _is_neutral_action_label(value: str) -> bool:
-    tokens = _alphanumeric_tokens(value)
-    return bool(tokens) and all(
-        token in _NEUTRAL_ACTION_LABEL_TERMS for token in tokens
-    )
-
-
-def _generated_action_labels(element: Tag) -> tuple[str, ...]:
-    root = element.find_parent("body")
-    labels: list[str] = []
-
-    def append(value: object) -> None:
-        if isinstance(value, str):
-            candidate = value.strip()
-            if candidate and candidate not in labels:
-                labels.append(candidate)
-
-    append(source_action_accessible_name(element, root or element))
-    append(source_visible_text(element))
-    append(element.get("title"))
-    return tuple(labels)
+    return _normalize_claim_match_text(value) in _NEUTRAL_ACTION_LABELS
 
 
 def _validate_action_urls(
@@ -2296,7 +2275,9 @@ def _validate_action_urls(
             form_action_values.extend(declared_destinations)
         element_values = action_element_destinations(element, body_root)
         if is_labelled_action:
-            action_entries.append((_generated_action_labels(element), element_values))
+            action_entries.append(
+                (action_element_labels(element, body_root), element_values)
+            )
 
     def validate_action_value(
         raw_value: str,

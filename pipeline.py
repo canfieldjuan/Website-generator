@@ -15,10 +15,10 @@ from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
 from lib.site_extraction import (
+    action_element_labels,
     css_image_urls,
     SiteExtractionError,
     same_site_origin,
-    source_action_accessible_name,
     is_source_semantic_element,
     validate_enrichment_result,
     validate_site_analysis,
@@ -225,12 +225,13 @@ def _redesign_action_url_contract(
                 element.get("type") or ""
             ).casefold() not in {"submit", "image"}:
                 continue
-            label = source_action_accessible_name(element, source_root)
-            _append_source_value(allowed_labels, label)
-            for destination in destinations:
-                if element.name in {"button", "input"}:
-                    _append_source_value(allowed_form_urls, destination)
-                _append_source_pair(allowed_pairs, label, destination)
+            labels = action_element_labels(element, source_root)
+            for label in labels:
+                _append_source_value(allowed_labels, label)
+                for destination in destinations:
+                    if element.name in {"button", "input"}:
+                        _append_source_value(allowed_form_urls, destination)
+                    _append_source_pair(allowed_pairs, label, destination)
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
         allowed_form_urls=tuple(allowed_form_urls),

@@ -2047,6 +2047,30 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(contract.allowed_labels, ("Acme Cleaning",))
         self.assertEqual(contract.allowed_pairs, ())
 
+    def test_generation_action_contract_preserves_every_source_label_surface(self):
+        contract = pipeline._redesign_action_url_contract(
+            {"site": {"name": "Acme Cleaning"}},
+            pipeline._redesign_contact_contract({}),
+            source_content=(
+                '<form action="/contact">'
+                '<input type="submit" value="Book Appointment" '
+                'aria-label="Contact Us"></form>'
+            ),
+        )
+
+        self.assertEqual(
+            contract.allowed_labels,
+            ("Acme Cleaning", "Contact Us", "Book Appointment"),
+        )
+        self.assertEqual(contract.allowed_form_urls, ("/contact",))
+        self.assertEqual(
+            contract.allowed_pairs,
+            (
+                ("Contact Us", "/contact"),
+                ("Book Appointment", "/contact"),
+            ),
+        )
+
     def test_inert_formaction_attributes_do_not_create_source_authority(self):
         contract = pipeline._redesign_action_url_contract(
             {"site": {"name": "Acme Cleaning"}},

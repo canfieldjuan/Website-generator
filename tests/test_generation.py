@@ -1424,6 +1424,73 @@ class BodyAssemblyTests(unittest.TestCase):
             data_input,
         )
 
+    def test_body_input_actions_validate_every_rendered_label_surface(self):
+        contact_only = ActionUrlAdmissionContract(
+            allowed_form_urls=("/contact",),
+            allowed_labels=("Contact Us",),
+            allowed_pairs=(("Contact Us", "/contact"),),
+        )
+        conflicting = (
+            '<body><form action="/contact">'
+            '<input type="submit" value="Book Appointment" '
+            'aria-label="Contact Us"></form></body>'
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            validate_generated_body(
+                body_result(conflicting),
+                expected_action_urls=contact_only,
+            )
+
+        source_owned = ActionUrlAdmissionContract(
+            allowed_form_urls=("/contact",),
+            allowed_labels=("Contact Us", "Book Appointment"),
+            allowed_pairs=(
+                ("Contact Us", "/contact"),
+                ("Book Appointment", "/contact"),
+            ),
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(conflicting),
+                expected_action_urls=source_owned,
+            ),
+            conflicting,
+        )
+
+    def test_neutral_action_labels_are_bounded_complete_phrases(self):
+        destination_only = ActionUrlAdmissionContract(allowed_urls=("/contact",))
+        for label in ("Contact Us", "Learn More", "Request Service"):
+            body = f'<body><a href="/contact">{label}</a></body>'
+            with self.subTest(label=label):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=destination_only,
+                    ),
+                    body,
+                )
+
+        fabricated_reviews = '<body><a href="/contact">Read All Reviews</a></body>'
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            validate_generated_body(
+                body_result(fabricated_reviews),
+                expected_action_urls=destination_only,
+            )
+
+        source_owned_reviews = ActionUrlAdmissionContract(
+            allowed_urls=("/reviews",),
+            allowed_labels=("Read All Reviews",),
+            allowed_pairs=(("Read All Reviews", "/reviews"),),
+        )
+        owned = '<body><a href="/reviews">Read All Reviews</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(owned),
+                expected_action_urls=source_owned_reviews,
+            ),
+            owned,
+        )
+
     def test_body_aria_actions_enforce_label_authority(self):
         allowed = ActionUrlAdmissionContract(
             allowed_labels=("Book Appointment",),
@@ -4704,7 +4771,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         fetched_source_url = "https://current.test/source-only-action"
         fetched_body = COMPLETE_PAGE_BODY.replace(
             "</main>",
-            f'<a href="{fetched_source_url}">Source action</a></main>',
+            f'<a href="{fetched_source_url}">Learn More</a></main>',
         )
         html = pipeline.generate_interior_page(
             {"site": {"name": "Current Business"}},

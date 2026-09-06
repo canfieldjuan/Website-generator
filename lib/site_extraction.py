@@ -743,8 +743,16 @@ def _source_action_replacement_text(element: Tag) -> str:
     tag_name = element.name.casefold()
     if tag_name in {"img", "area"}:
         value = element.get("alt")
-    elif tag_name == "input" and str(element.get("type") or "").casefold() == "image":
-        value = element.get("alt") or element.get("value")
+    elif tag_name == "input":
+        input_type = str(element.get("type") or "").casefold()
+        if input_type == "image":
+            value = element.get("alt") or element.get("value")
+        elif input_type in {"button", "reset", "submit"}:
+            value = element.get("value")
+            if value is None:
+                value = {"reset": "Reset", "submit": "Submit"}.get(input_type, "")
+        else:
+            value = ""
     else:
         value = ""
     return value if isinstance(value, str) else ""
@@ -843,6 +851,29 @@ def source_action_accessible_name(
             return " ".join(value.split())
     title = element.get("title")
     return " ".join(title.split()) if isinstance(title, str) else ""
+
+
+def action_element_labels(
+    element: Tag,
+    root: BeautifulSoup | Tag,
+) -> tuple[str, ...]:
+    """Return every independently rendered or exposed label on one action."""
+    accessible_name = source_action_accessible_name(element, root)
+    labelled_by = element.get("aria-labelledby")
+    if isinstance(labelled_by, str) and labelled_by.strip() and not accessible_name:
+        return ()
+    labels: list[str] = []
+    for value in (
+        accessible_name,
+        source_visible_text(element),
+        element.get("title"),
+    ):
+        if not isinstance(value, str):
+            continue
+        candidate = " ".join(value.split())
+        if candidate and candidate not in labels:
+            labels.append(candidate)
+    return tuple(labels)
 
 
 def is_labelled_action_element(element: Any) -> bool:
@@ -1220,20 +1251,24 @@ class SourceEvidence:
                 )
 
         for element in soup.find_all(True):
-            action_label = ""
+            element_action_labels: tuple[str, ...] = ()
             element_image_urls: set[str] = set()
             is_image_resource = element.name == "img" or (
                 element.name == "source" and element.find_parent("picture") is not None
             )
             if is_labelled_action_element(element):
-                action_label = _normalize_text(
-                    source_action_accessible_name(element, soup)
+                element_action_labels = tuple(
+                    normalized
+                    for label in action_element_labels(element, soup)
+                    if (normalized := _normalize_text(label))
                 )
-            if action_label:
-                action_labels.add(action_label)
+            if element_action_labels:
+                action_labels.update(element_action_labels)
                 raw_href = element.get("href")
                 if element.name in {"a", "area"} and isinstance(raw_href, str):
-                    raw_action_pairs.add((action_label, raw_href))
+                    raw_action_pairs.update(
+                        (label, raw_href) for label in element_action_labels
+                    )
             for name, raw_value in element.attrs.items():
                 for value in _attribute_values(raw_value):
                     if name in _TEXT_ATTRIBUTES:
