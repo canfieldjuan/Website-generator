@@ -23,6 +23,12 @@ have a production-usable no-progress bound, while a healthy long generation may
 continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
+This four-file slice necessarily exceeds the repository's 400-line soft cap:
+the final diff is +772 / -28. The native stream decoder is a new
+trusted provider boundary, and splitting its malformed-frame, terminal,
+size-limit, inactivity, and total-deadline regressions into a later PR would
+ship that boundary without its required negative proof.
+
 ## Scope (this PR)
 
 1. Add a bounded local no-progress timeout with a safe default and an explicit
@@ -92,7 +98,7 @@ Ollama clients cannot be required to participate.
 
 ## Verification
 
-Current local evidence, recorded 2026-09-06 against base
+Initial local evidence, recorded 2026-09-06 against base
 `826f0c8919615d4ed2849ebed8fb511bc6bc994b` plus only the four declared working
 files:
 
@@ -124,10 +130,10 @@ files:
   at 1440x1200; the header, phone/CTA, hero, coverage prompt, and service cards
   were visible without raw placeholders or an obvious broken layout. The local
   screenshot is `/dev/shm/website-generator-pr46-fixture.png`.
-- Focused timeout and exact byte-boundary regressions passed: 3 tests, 0
+- Focused timeout and exact byte-boundary regressions passed: 5 tests, 0
   failures. An earlier complete generation-module run passed 150 tests. After
-  the effective-deadline correction, the full repository suite passed: 294
-  tests, 34 skipped, 0 failures; log:
+  the deadline-aware stream-reader correction, the final full repository suite
+  passed: 296 tests, 34 skipped, 0 failures; log:
   `/dev/shm/website-generator-pr46-full-tests.log`.
 - `python -m ruff check lib/generation.py tests/test_generation.py --ignore F401`,
   `python -m compileall -q lib/generation.py tests/test_generation.py`, and
@@ -139,9 +145,24 @@ against merge base `826f0c8919615d4ed2849ebed8fb511bc6bc994b`: committed-diff wh
 and plan-presence checks both passed. GitHub CI and review remain to be
 reconciled against the exact published head.
 
+Review-correction evidence: the shared reader was changed to deliver streamed
+frames through a deadline-aware queue. Deterministic blocked-stream probes prove
+both directions: a 0.05-second total deadline interrupts a longer inactivity
+window, and a 0.05-second inactivity window interrupts a longer total deadline;
+each closes the response and returns in less than 0.5 seconds. The final-code
+fixture ran after the observed Document Summarizer test exited, from
+`2026-09-06T10:38:04-05:00` through `2026-09-06T10:38:59-05:00`, with exit
+status 0. Its pre-run modification timestamp was `1788708188`; the post-run
+timestamp was `1788709138`, proving this invocation rewrote the artifact. The
+new artifact remained byte-identical to the rendered and scanned artifact above
+at 71,983 bytes and SHA-256
+`1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22`.
+Both required scans again returned status 1. Log:
+`/dev/shm/website-generator-pr46-fixture-final.log`.
+
 ## Estimated diff size
 
-Target: exactly the four declared files. The stream decoder and its negative-path
-tests are indivisible because streaming changes the trusted response boundary;
-the final line count is secondary to keeping that transport boundary and its
-negative cases together.
+Actual: four declared files, +772 / -28. The stream decoder and
+its negative-path tests are indivisible because streaming changes the trusted
+response boundary; the final line count is secondary to keeping that transport
+boundary and its negative cases together.

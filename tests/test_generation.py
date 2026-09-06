@@ -3,6 +3,8 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -209,6 +211,7 @@ class FakeLocalResponse:
         self.status_error = status_error
         self.status_code = status_code
         self.json_calls = 0
+        self.close_calls = 0
 
     def raise_for_status(self):
         if self.status_error:
@@ -230,6 +233,9 @@ class FakeLocalResponse:
             yield b"not-json"
             return
         yield json.dumps(self.payload).encode("utf-8")
+
+    def close(self):
+        self.close_calls += 1
 
 
 class FakeLocalClient:
@@ -985,6 +991,88 @@ class ProviderBoundaryTests(unittest.TestCase):
                 )
 
         self.assertEqual(client.calls[0][2]["timeout"], (3.0, 3.0))
+
+    def test_local_stream_read_cannot_overrun_total_deadline(self):
+        gate = threading.Event()
+
+        class BlockingResponse(FakeLocalResponse):
+            def iter_lines(self):
+                gate.wait()
+                yield json.dumps(local_chat_payload()).encode("utf-8")
+
+            def close(self):
+                super().close()
+                gate.set()
+
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            timeout_seconds=0.05,
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+            local_no_progress_timeout_seconds=1,
+        )
+        client = FakeLocalClient()
+        client.chat_response = BlockingResponse()
+
+        started = time.monotonic()
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "exceeded its configured request deadline",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=client,
+            )
+        elapsed = time.monotonic() - started
+
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(client.chat_response.close_calls, 1)
+
+    def test_local_stream_read_honors_no_progress_before_total_deadline(self):
+        gate = threading.Event()
+
+        class BlockingResponse(FakeLocalResponse):
+            def iter_lines(self):
+                gate.wait()
+                yield json.dumps(local_chat_payload()).encode("utf-8")
+
+            def close(self):
+                super().close()
+                gate.set()
+
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            timeout_seconds=1,
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+            local_no_progress_timeout_seconds=0.05,
+        )
+        client = FakeLocalClient()
+        client.chat_response = BlockingResponse()
+
+        started = time.monotonic()
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "no generation progress within 0.05 seconds",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=client,
+            )
+        elapsed = time.monotonic() - started
+
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(client.chat_response.close_calls, 1)
 
     def test_direct_local_config_rejects_invalid_no_progress_timeout(self):
         for value in (0, False, float("nan"), 901):

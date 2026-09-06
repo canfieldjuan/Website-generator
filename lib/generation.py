@@ -6,8 +6,10 @@ import ipaddress
 import json
 import math
 import os
+import queue
 import re
 import tempfile
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass, replace
@@ -842,67 +844,121 @@ def _local_no_progress_error(
     )
 
 
-def _read_local_chat_stream(response: Any, *, deadline: float) -> dict[str, Any]:
+def _read_local_chat_stream(
+    response: Any,
+    *,
+    deadline: float,
+    no_progress_timeout_seconds: float,
+) -> dict[str, Any]:
     content_parts: list[str] = []
     content_bytes = 0
     terminal: dict[str, Any] | None = None
 
-    for raw_line in response.iter_lines():
-        if time.monotonic() >= deadline:
-            raise GenerationProviderUnavailable(
-                "Local generation exceeded its configured request deadline."
-            )
-        if not raw_line:
-            continue
+    events: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+    def pump_stream() -> None:
         try:
-            frame = json.loads(raw_line)
-        except (TypeError, ValueError) as exc:
-            raise GenerationResponseError(
-                "Local generation provider returned invalid streaming JSON."
-            ) from exc
-        if not isinstance(frame, dict):
-            raise GenerationResponseError(
-                "Local generation provider returned a non-object stream frame."
+            for raw_line in response.iter_lines():
+                events.put(("line", raw_line))
+        except Exception as exc:
+            events.put(("error", exc))
+        finally:
+            events.put(("eof", None))
+
+    threading.Thread(
+        target=pump_stream,
+        name="ollama-response-stream",
+        daemon=True,
+    ).start()
+    last_progress = time.monotonic()
+
+    try:
+        while True:
+            now = time.monotonic()
+            total_remaining = deadline - now
+            progress_remaining = no_progress_timeout_seconds - (
+                now - last_progress
             )
-        if frame.get("error") is not None:
-            raise GenerationProviderUnavailable(
-                "Ollama reported an error during streamed local generation."
-            )
-        if terminal is not None:
-            raise GenerationResponseError(
-                "Ollama returned data after its terminal stream frame."
-            )
-        message = frame.get("message")
-        if not isinstance(message, dict):
-            raise GenerationResponseError(
-                "Local generation provider returned a stream frame without a message."
-            )
-        content = message.get("content")
-        if not isinstance(content, str):
-            raise GenerationResponseError(
-                "Local generation provider returned a message without text content."
-            )
-        if message.get("thinking") not in (None, ""):
-            raise GenerationResponseError(
-                "Local generation provider returned reasoning despite thinking being disabled."
-            )
-        if message.get("tool_calls") not in (None, []):
-            raise GenerationResponseError(
-                "Local generation provider returned tool calls when none were requested."
-            )
-        content_parts.append(content)
-        content_bytes += len(content.encode("utf-8"))
-        if content_bytes > MAX_HTML_BYTES:
-            raise GenerationResponseError(
-                "Local generation provider returned an oversized streamed response."
-            )
-        done = frame.get("done")
-        if done is True:
-            terminal = frame
-        elif done is not False:
-            raise GenerationResponseError(
-                "Ollama returned a stream frame without completion state."
-            )
+            if total_remaining <= 0:
+                raise GenerationProviderUnavailable(
+                    "Local generation exceeded its configured request deadline."
+                )
+            if progress_remaining <= 0:
+                raise _local_no_progress_error(
+                    "generation", no_progress_timeout_seconds
+                )
+            try:
+                event, value = events.get(
+                    timeout=min(total_remaining, progress_remaining)
+                )
+            except queue.Empty as exc:
+                if time.monotonic() >= deadline:
+                    raise GenerationProviderUnavailable(
+                        "Local generation exceeded its configured request deadline."
+                    ) from exc
+                raise _local_no_progress_error(
+                    "generation", no_progress_timeout_seconds
+                ) from exc
+
+            if event == "error":
+                raise value
+            if event == "eof":
+                break
+            raw_line = value
+            if not raw_line:
+                continue
+            last_progress = time.monotonic()
+            try:
+                frame = json.loads(raw_line)
+            except (TypeError, ValueError) as exc:
+                raise GenerationResponseError(
+                    "Local generation provider returned invalid streaming JSON."
+                ) from exc
+            if not isinstance(frame, dict):
+                raise GenerationResponseError(
+                    "Local generation provider returned a non-object stream frame."
+                )
+            if frame.get("error") is not None:
+                raise GenerationProviderUnavailable(
+                    "Ollama reported an error during streamed local generation."
+                )
+            if terminal is not None:
+                raise GenerationResponseError(
+                    "Ollama returned data after its terminal stream frame."
+                )
+            message = frame.get("message")
+            if not isinstance(message, dict):
+                raise GenerationResponseError(
+                    "Local generation provider returned a stream frame without a message."
+                )
+            content = message.get("content")
+            if not isinstance(content, str):
+                raise GenerationResponseError(
+                    "Local generation provider returned a message without text content."
+                )
+            if message.get("thinking") not in (None, ""):
+                raise GenerationResponseError(
+                    "Local generation provider returned reasoning despite thinking being disabled."
+                )
+            if message.get("tool_calls") not in (None, []):
+                raise GenerationResponseError(
+                    "Local generation provider returned tool calls when none were requested."
+                )
+            content_parts.append(content)
+            content_bytes += len(content.encode("utf-8"))
+            if content_bytes > MAX_HTML_BYTES:
+                raise GenerationResponseError(
+                    "Local generation provider returned an oversized streamed response."
+                )
+            done = frame.get("done")
+            if done is True:
+                terminal = frame
+            elif done is not False:
+                raise GenerationResponseError(
+                    "Ollama returned a stream frame without completion state."
+                )
+    finally:
+        response.close()
 
     if terminal is None:
         raise GenerationResponseError(
@@ -1225,7 +1281,11 @@ def _generate_local_text(
             raise _local_no_progress_error("generation", generation_timeout[1]) from exc
         _raise_for_local_response_status(response)
         try:
-            payload = _read_local_chat_stream(response, deadline=deadline)
+            payload = _read_local_chat_stream(
+                response,
+                deadline=deadline,
+                no_progress_timeout_seconds=generation_timeout[1],
+            )
         except requests.RequestException as exc:
             raise _local_no_progress_error("generation", generation_timeout[1]) from exc
     except GenerationResponseError:
