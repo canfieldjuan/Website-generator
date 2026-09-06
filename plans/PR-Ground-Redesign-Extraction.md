@@ -107,7 +107,12 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fpOBr`: neutral action tokens composed an unsupported review claim | Capability-neutral fallback labels must be bounded complete phrases; token membership cannot authorize a new semantic assertion. | `Read All Reviews` now rejects without source label/pair authority while exact neutral `Contact Us` and `Learn More` labels admit; the same review label admits when source-owned. | fixed/superseded | `lib/generation.py:404-432,2152-2215,2367-2382`; `tests/test_generation.py:1460-1492` |
 | `PRRT_kwDOTDYaKM6fpZkx`: unknown trailing claim predicates could be discarded | Asserted fields may omit only an explicit meaning-preserving leading wrapper; every unknown trailing clause remains part of the assertion regardless of its vocabulary. | `Free Estimates` from `Free Estimates require membership` rejects without adding `require` to a denylist; the complete qualified claim admits. Other trailing assertions now follow the same fail-closed rule. | fixed/superseded | `lib/site_extraction.py:557-592,1623-1648`; `tests/test_site_extraction.py:386-462,553-590` |
 | `PRRT_kwDOTDYaKM6fpZk0`: conflicting explicit identity metadata independently authorized both names | Identity authority must resolve one uniquely best-supported canonical identity across independent metadata, structured DOM, title, and H1 channels; a tied conflict authorizes neither candidate. | Conflicting `application-name` and `og:site_name` now select the name corroborated by title/H1 and reject the other; without corroboration both reject. | fixed/superseded | `lib/site_extraction.py:1010-1052,1260-1446,1580-1594`; `tests/test_site_extraction.py:1051-1078` |
-| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `759d227` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-759d227.log`; `/dev/shm/website-generator-pr47-browser-render-759d227.png` |
+| `PRRT_kwDOTDYaKM6fqWKW`: independent service and location facts were composed into one coverage claim | Generation may publish a service/location relationship only when one complete source-owned assertion already relates those values. | Separate `Drain Cleaning` and `Effingham, IL` facts no longer admit `Drain Cleaning in Effingham, IL`; the independent facts remain renderable and an exact complete source claim remains admissible. | fixed/superseded | `pipeline.py:148-201`; `lib/generation.py:2529-2580`; `tests/test_generation.py:1445-1491`; `tests/test_site_extraction.py:2420-2458` |
+| `PRRT_kwDOTDYaKM6fqWKX`: source `<base href>` was ignored | Relative source resources and page destinations must use the browser-effective document base before same-origin and source-ownership checks. | A document fetched from `/subdir/index.html` with `<base href="/">` now admits `services` and `hero.jpg` as root-relative absolute URLs, while fetchability still requires the source origin. | fixed/superseded | `lib/site_extraction.py:1000-1033,1408-1454,1887-1900,2423-2435,2508-2543`; `tests/test_site_extraction.py:1459-1500` |
+| `PRRT_kwDOTDYaKM6fqWKY`: a generated form without an action passed | Generated forms and submit controls must have one explicit, admitted effective endpoint; deployment location cannot silently become form authority. | `<form><button type="submit">Submit</button></form>` now rejects, while an explicit admitted form and its submit control pass. | fixed/superseded | `lib/generation.py:2136-2164,2214-2307`; `tests/test_generation.py:1195-1280` |
+| `PRRT_kwDOTDYaKM6fqc2K`: source-relative form endpoints were copied into a new deployment | Source action collection must resolve relative endpoints against the source document's effective base before generated-output admission. | `<base href="/"><form action="submit">` from `/contact/index.html` now grants only `https://acme.test/submit`, preserving the source endpoint after deployment. | fixed/superseded | `pipeline.py:204-310`; `tests/test_site_extraction.py:2572-2591` |
+| `PRRT_kwDOTDYaKM6fqc2Q`: an ordinary phone number authorized SMS | A phone fact grants generic call authority only; SMS requires an explicit source-owned SMS destination and label/destination pair. | `sms:2175550100` now rejects when only the phone is known; the exact admitted `Text` plus `sms:2175550100?body=Hello` pair still passes. | fixed/superseded | `lib/generation.py:425-436,2214-2360`; `tests/test_generation.py:1195-1280` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `be0104c` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-be0104c.log`; `/dev/shm/website-generator-pr47-browser-render-be0104c.png` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 | `PRRT_kwDOTDYaKM6fpeiS`: class-based stylesheet suppression is not applied before evidence collection | Raw fetched HTML does not own browser-computed visibility; a correct computed-visibility policy must account for the CSS cascade, media state, viewport, and external stylesheets once at the fetch/render boundary. | The class-hidden claim is present in fetched HTML and is admitted; the equivalent inline-hidden claim rejects. A selector regex here would not establish computed visibility. | separate issue | `lib/site_extraction.py:805-815,1328-1335`; issue #48 |
 | `PRRT_kwDOTDYaKM6fpeiT`: an adjacent sibling disclaimer did not scope its claim | Claim ownership must preserve every adjacent paragraph-like assertion owned by the same bounded record without using an English predicate list. | Adjacent paragraph/small runs now form one structural owner occurrence; a shortened claim rejects, the complete owner passes, and a separately contained assertion remains independent. | fixed/superseded | `lib/site_extraction.py:1278-1409,1778-1825`; `tests/test_site_extraction.py:606-647` |
@@ -337,10 +342,69 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `759d2275cedb541dd9b060690fb3708624d7a942`.
+- Code revision under test: `be0104cc9d7fc04b83206b87b5454b1a6cf1676a`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
+- Five isolated current-head probes reproduced the remaining review paths before
+  implementation: browser-effective `<base href>` was ignored for a relative
+  image and form endpoint, a generated form without an action passed, an ordinary
+  phone authorized SMS, and independent service/location facts admitted a new
+  coverage assertion. The implementation closes those paths through three shared
+  policies rather than five exceptions: one effective source-document base for
+  URL consumers, one explicit endpoint/capability action contract for extraction
+  and output, and one record-owned complete-assertion contract for service/location
+  relationships.
+- Boundary probe: `python -m unittest -v
+  tests.test_generation.BodyAssemblyTests.test_body_action_destinations_are_source_owned
+  tests.test_generation.BodyAssemblyTests.test_service_location_claims_require_one_complete_source_assertion
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_source_base_controls_relative_resource_and_page_resolution
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_resolves_source_form_against_base
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_redesign_service_location_contract_preserves_only_complete_claims`
+  passed 5 tests. Negative sides reject an implicit form endpoint, phone-derived
+  SMS, and a composed service/location assertion. Positive sides preserve an
+  explicit admitted form/SMS pair, separate independently rendered facts, one
+  complete source relationship, and root-relative image/page/form resolution.
+- Current affected modules: `python -m unittest -q tests.test_site_extraction
+  tests.test_generation` passed 232 tests.
+- Full suite: `python -m unittest discover -s tests` passed 374 tests with 34
+  skipped.
+- Static evidence: `python -m ruff check --ignore F401,F541
+  lib/site_extraction.py lib/generation.py pipeline.py
+  tests/test_site_extraction.py tests/test_generation.py`, `python -m compileall
+  -q pipeline.py lib tests`, and `git diff --check` passed. The unscoped Ruff run
+  reported 8 pre-existing F401/F541 findings, and `ruff format --check` would
+  mechanically rewrite all 5 inspected Python files; neither unrelated rewrite is
+  included in this PR.
+- The exact required fixture command used `local:qwen3-30b-a3b:latest` through
+  Ollama. It began after `2026-09-06T04:12:34,006882309-05:00`, completed before
+  `2026-09-06T04:13:35,515293984-05:00`, exited 0, and left the model resident
+  100% on the GPU. No correction attempt, email, or deployment path ran. Log:
+  `/dev/shm/website-generator-pr47-fixture-be0104c.log`.
+- The invocation replaced the prior artifact inode with inode 3325019 at mtime
+  `2026-09-06 04:13:32.057274494 -0500`; the resulting 71939-byte
+  `outputs/builds/drees-plumbing-inc/index.html` has SHA-256
+  `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
+- Exact required placeholder and case-insensitive forbidden-claim scans each
+  returned status 1 with zero matches. Logs:
+  `/dev/shm/website-generator-pr47-placeholder-scan-be0104c.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-be0104c.log`.
+- Rendered spot-check: the committed artifact returned HTTP 200 with 71939 bytes;
+  headless Chrome reported title `DREES PLUMBING INC` and 2441 body-text
+  characters. The inspected full-page render is a nonblank styled Drees Plumbing
+  page with navigation, hero and CTAs, services, trust/reviews, contact form, and
+  footer. Screenshot:
+  `/dev/shm/website-generator-pr47-browser-render-be0104c.png`, SHA-256
+  `bbd0dbe929f645f5b0a3830d69cc20f82c575c9f729346433999d2683136a4b7`.
+- Issue #46 was not reproduced: the full local request completed. It remains a
+  separate open issue because one successful run does not resolve its historical
+  stall.
+- `bash scripts/local_pr_review.sh` and final-head GitHub/review reconciliation
+  follow on the plan-only descendant so evidence is not claimed against a dirty
+  or superseded head.
+
+### Historical evidence (earlier revisions; not final-head proof)
+
 - The earlier three current-review reproductions first admitted a shortened
   recipient-qualified claim, ignored an unsupported `input[type=button]` label,
   and rejected the correct identity from a WordPress-style `site-identity`
@@ -526,7 +590,7 @@ business-specific claims.
   exact head, tested merge revision where applicable, check results, unresolved
   thread count, and review outcome.
 
-### Historical evidence (earlier revisions; not final-head proof)
+#### Earlier command evidence
 
 - Expected-failing-before phone regression: reproduced the original unguarded
   acceptance before implementation; the same case now fails closed.
