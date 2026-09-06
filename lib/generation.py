@@ -854,16 +854,27 @@ def _read_local_chat_stream(
     content_bytes = 0
     terminal: dict[str, Any] | None = None
 
-    events: queue.Queue[tuple[str, Any]] = queue.Queue()
+    events: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+    cancelled = threading.Event()
+
+    def emit(event: tuple[str, Any]) -> bool:
+        while not cancelled.is_set():
+            try:
+                events.put(event, timeout=0.05)
+                return True
+            except queue.Full:
+                continue
+        return False
 
     def pump_stream() -> None:
         try:
             for raw_line in response.iter_lines():
-                events.put(("line", raw_line))
+                if not emit(("line", raw_line)):
+                    return
         except Exception as exc:
-            events.put(("error", exc))
+            emit(("error", exc))
         finally:
-            events.put(("eof", None))
+            emit(("eof", None))
 
     threading.Thread(
         target=pump_stream,
@@ -958,6 +969,7 @@ def _read_local_chat_stream(
                     "Ollama returned a stream frame without completion state."
                 )
     finally:
+        cancelled.set()
         response.close()
 
     if terminal is None:

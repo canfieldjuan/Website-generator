@@ -212,6 +212,7 @@ class FakeLocalResponse:
         self.status_code = status_code
         self.json_calls = 0
         self.close_calls = 0
+        self.closed = False
 
     def raise_for_status(self):
         if self.status_error:
@@ -236,6 +237,7 @@ class FakeLocalResponse:
 
     def close(self):
         self.close_calls += 1
+        self.closed = True
 
 
 class FakeLocalClient:
@@ -885,6 +887,40 @@ class ProviderBoundaryTests(unittest.TestCase):
                         temperature=0.4,
                         client=client,
                     )
+
+    def test_local_stream_bounds_and_cancels_producer_handoff(self):
+        class FloodingResponse(FakeLocalResponse):
+            def __init__(self):
+                super().__init__()
+                self.extra_frames_produced = 0
+                self.finished = threading.Event()
+
+            def iter_lines(self):
+                try:
+                    yield b"not-json"
+                    for _ in range(1000):
+                        self.extra_frames_produced += 1
+                        yield json.dumps(
+                            {"message": {"content": "x"}, "done": False}
+                        ).encode("utf-8")
+                finally:
+                    self.finished.set()
+
+        client = FakeLocalClient()
+        client.chat_response = FloodingResponse()
+
+        with self.assertRaisesRegex(GenerationResponseError, "streaming JSON"):
+            generate_text(
+                config(),
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=client,
+            )
+
+        self.assertTrue(client.chat_response.finished.wait(timeout=0.5))
+        self.assertLess(client.chat_response.extra_frames_produced, 1000)
+        self.assertEqual(client.chat_response.close_calls, 1)
 
     def test_local_request_rejects_reasoning_or_tools_in_any_stream_frame(self):
         invalid_messages = (
