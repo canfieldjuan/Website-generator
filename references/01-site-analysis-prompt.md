@@ -111,7 +111,7 @@ matching this exact schema:
 
   "sections": [
     {
-      "type": "string -- one of: hero, news, sports, calendar, promo-grid, services, menu, testimonials, team, contact, ad-block, social, misc",
+      "type": "string -- one of: hero, news, sports, calendar, promo-grid, services, menu, testimonials, team, contact, faq, ad-block, social, misc",
       "headline": "string or null",
       "items": [
         {

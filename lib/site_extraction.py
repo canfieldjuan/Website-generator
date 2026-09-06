@@ -48,10 +48,88 @@ def _object(properties: dict[str, dict], *, required: Iterable[str] = ()) -> dic
     }
 
 
+def _enum(*values: str) -> dict:
+    return {"type": "string", "enum": list(values)}
+
+
 TEXT = _string()
 NULLABLE_TEXT = _string(nullable=True)
 URL = _string(max_length=8_192)
 NULLABLE_URL = _string(nullable=True, max_length=8_192)
+
+SITE_TYPES = (
+    "radio",
+    "news",
+    "local-business",
+    "restaurant",
+    "church",
+    "civic",
+    "nonprofit",
+    "ecommerce",
+    "portfolio",
+    "services",
+    "other",
+)
+SECTION_TYPES = (
+    "hero",
+    "news",
+    "sports",
+    "calendar",
+    "promo-grid",
+    "services",
+    "menu",
+    "testimonials",
+    "team",
+    "contact",
+    "faq",
+    "ad-block",
+    "social",
+    "misc",
+)
+IMAGE_CONTEXTS = (
+    "logo",
+    "hero",
+    "promo",
+    "ad",
+    "show",
+    "team",
+    "content",
+    "icon",
+    "background",
+)
+PAGE_TYPES = (
+    "contact",
+    "about",
+    "services",
+    "single-service",
+    "menu",
+    "team",
+    "faq",
+    "gallery",
+    "blog",
+    "location",
+    "other",
+)
+HOMEPAGE_SECTION_TYPES = (
+    "hero",
+    "inline-form",
+    "services-grid",
+    "services-list",
+    "services-featured-row",
+    "team-grid",
+    "team-list",
+    "testimonial-block",
+    "map-block",
+    "hours-block",
+    "cta-band",
+    "gallery-grid",
+    "news-feed",
+    "stats-band",
+    "partner-logos",
+    "social-block",
+    "about-text",
+    "video-block",
+)
 
 CONTACT_SCHEMA = _object(
     {
@@ -81,7 +159,7 @@ SITE_ANALYSIS_SCHEMA = _object(
             {
                 "name": TEXT,
                 "tagline": NULLABLE_TEXT,
-                "type": TEXT,
+                "type": _enum(*SITE_TYPES),
                 "location": NULLABLE_TEXT,
                 "contact": CONTACT_SCHEMA,
             },
@@ -102,7 +180,7 @@ SITE_ANALYSIS_SCHEMA = _object(
                         "button_bg": NULLABLE_TEXT,
                     }
                 ),
-                "color_mode": TEXT,
+                "color_mode": _enum("light", "dark", "unknown"),
                 "fonts": _object({"display": NULLABLE_TEXT, "body": NULLABLE_TEXT}),
                 "style_notes": _array(TEXT),
             }
@@ -112,7 +190,7 @@ SITE_ANALYSIS_SCHEMA = _object(
         "sections": _array(
             _object(
                 {
-                    "type": TEXT,
+                    "type": _enum(*SECTION_TYPES),
                     "headline": NULLABLE_TEXT,
                     "items": _array(CONTENT_ITEM_SCHEMA),
                 },
@@ -121,7 +199,7 @@ SITE_ANALYSIS_SCHEMA = _object(
         ),
         "images": _array(
             _object(
-                {"url": URL, "alt": NULLABLE_TEXT, "context": TEXT},
+                {"url": URL, "alt": NULLABLE_TEXT, "context": _enum(*IMAGE_CONTEXTS)},
                 required=("url", "context"),
             )
         ),
@@ -137,14 +215,14 @@ SITE_ANALYSIS_SCHEMA = _object(
                 {
                     "label": TEXT,
                     "url": URL,
-                    "page_type": TEXT,
+                    "page_type": _enum(*PAGE_TYPES),
                     "priority": {"type": "integer", "minimum": 1, "maximum": 3},
                     "fetchable": {"type": "boolean"},
                 },
                 required=("label", "url", "page_type", "priority", "fetchable"),
             )
         ),
-        "site_structure": TEXT,
+        "site_structure": _enum("multi-page", "single-page", "mixed"),
         "single_page_sections": _array(
             _object(
                 {
@@ -166,8 +244,8 @@ SITE_ANALYSIS_SCHEMA = _object(
         ),
         "conversion_profile": _object(
             {
-                "urgency_type": TEXT,
-                "primary_goal": TEXT,
+                "urgency_type": _enum("emergency", "planned", "both"),
+                "primary_goal": _enum("call", "form", "booking", "order", "inquiry"),
                 "has_emergency_service": {"type": "boolean"},
                 "phone": NULLABLE_TEXT,
                 "booking_platform": NULLABLE_TEXT,
@@ -184,10 +262,23 @@ SITE_ANALYSIS_SCHEMA = _object(
         ),
         "homepage_blueprint": _object(
             {
-                "hero_type": TEXT,
+                "hero_type": _enum(
+                    "hero-image",
+                    "hero-split",
+                    "hero-typography",
+                    "hero-video",
+                    "hero-carousel",
+                    "none",
+                ),
                 "above_fold_form": {"type": "boolean"},
-                "section_sequence": _array(TEXT),
-                "footer_layout": TEXT,
+                "section_sequence": _array(_enum(*HOMEPAGE_SECTION_TYPES)),
+                "footer_layout": _enum(
+                    "footer-1col",
+                    "footer-2col",
+                    "footer-3col",
+                    "footer-4col",
+                    "footer-stack",
+                ),
                 "notes": NULLABLE_TEXT,
             }
         ),
@@ -207,7 +298,7 @@ ENRICHMENT_ITEM_SCHEMA = _object(
 
 CONTENT_ENRICHMENT_SCHEMA = _object(
     {
-        "type": TEXT,
+        "type": _enum("services", "team", "misc"),
         "headline": NULLABLE_TEXT,
         "items": _array(ENRICHMENT_ITEM_SCHEMA),
         "source_url": URL,
@@ -528,6 +619,16 @@ def _words_contain_scope_qualifier(words: list[str]) -> bool:
                 continue
             return True
     return False
+
+
+def _text_carries_claim_scope(value: str) -> bool:
+    words = [word.replace("’", "'") for word in _WORD_PATTERN.findall(value)]
+    return (
+        _words_contain_negation(words)
+        or _words_contain_negation(words, postposed=True)
+        or _words_contain_restriction(words)
+        or _words_contain_scope_qualifier(words)
+    )
 
 
 def _preceding_clause_scopes_claim(words: list[str]) -> bool:
@@ -1177,6 +1278,7 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
 class SourceEvidence:
     text_segments: tuple[str, ...]
     assertion_segments: tuple[str, ...]
+    assertion_scope_segments: tuple[tuple[str, str], ...]
     identity_segments: tuple[str, ...]
     identity_exact_segments: tuple[str, ...]
     heading_segments: tuple[str, ...]
@@ -1233,6 +1335,7 @@ class SourceEvidence:
             ignored_container.decompose()
 
         context_parts: dict[int, list[str]] = {}
+        context_elements: dict[int, Any] = {}
         for node in soup.find_all(string=True):
             if isinstance(node, Comment):
                 continue
@@ -1245,14 +1348,64 @@ class SourceEvidence:
             context = parent
             while context is not None and context.name not in _ASSERTION_CONTEXT_TAGS:
                 context = context.parent
-            context_parts.setdefault(id(context or node), []).append(value)
-        assertion_segments = tuple(
-            dict.fromkeys(
-                segment
-                for parts in context_parts.values()
-                if (segment := _normalize_text(" ".join(parts)))
+            context_key = id(context or node)
+            context_parts.setdefault(context_key, []).append(value)
+            context_elements.setdefault(context_key, context or node)
+        assertion_segments_list = [
+            segment
+            for parts in context_parts.values()
+            if (segment := _normalize_text(" ".join(parts)))
+        ]
+        assertion_scope_segments: list[tuple[str, str]] = []
+        claim_scope_parent_tags = {
+            "article",
+            "details",
+            "div",
+            "figure",
+            "li",
+            "section",
+            "td",
+            "th",
+        }
+        for context_key, local_parts in context_parts.items():
+            context = context_elements[context_key]
+            if not isinstance(context, Tag):
+                continue
+            parent = context.parent
+            if not isinstance(parent, Tag) or parent.name not in claim_scope_parent_tags:
+                continue
+            siblings = [child for child in parent.children if isinstance(child, Tag)]
+            context_index = next(
+                (index for index, sibling in enumerate(siblings) if sibling is context),
+                None,
             )
-        )
+            if context_index is None:
+                continue
+            adjacent_indexes = range(
+                max(0, context_index - 1),
+                min(len(siblings), context_index + 2),
+            )
+            scope_indexes = {
+                index
+                for index in adjacent_indexes
+                if index != context_index
+                and _text_carries_claim_scope(
+                    siblings[index].get_text(" ", strip=True)
+                )
+            }
+            if not scope_indexes:
+                continue
+            local_segment = _normalize_text(" ".join(local_parts))
+            owner_segment = _normalize_text(
+                " ".join(
+                    siblings[index].get_text(" ", strip=True)
+                    for index in sorted(scope_indexes | {context_index})
+                )
+            )
+            if local_segment and owner_segment and local_segment != owner_segment:
+                assertion_scope_segments.append((local_segment, owner_segment))
+                assertion_segments_list.append(owner_segment)
+        assertion_segments = tuple(dict.fromkeys(assertion_segments_list))
         attribute_parts: list[str] = []
         raw_action_urls: set[str] = set()
         raw_action_pairs: set[tuple[str, str]] = set()
@@ -1577,6 +1730,7 @@ class SourceEvidence:
         return cls(
             text_segments=tuple(dict.fromkeys(assertion_segments + attribute_segments)),
             assertion_segments=assertion_segments,
+            assertion_scope_segments=tuple(dict.fromkeys(assertion_scope_segments)),
             identity_segments=tuple(
                 dict.fromkeys(
                     segment
@@ -1638,6 +1792,16 @@ class SourceEvidence:
                     index,
                     len(normalized),
                     strict_claim=True,
+                ):
+                    continue
+                if asserted and any(
+                    source_text in {local_segment, owner_segment}
+                    and normalized != owner_segment
+                    and any(
+                        True
+                        for _ in _phrase_occurrences(local_segment, normalized)
+                    )
+                    for local_segment, owner_segment in self.assertion_scope_segments
                 ):
                     continue
                 return

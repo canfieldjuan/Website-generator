@@ -603,6 +603,123 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     shortened,
                 )
 
+    def test_claim_text_preserves_adjacent_owned_disclaimers(self):
+        shortened = {"site": {"name": "Acme", "tagline": "Free Estimates"}}
+        scoped_source = (
+            "<h1>Acme</h1><div><p>Free Estimates</p>"
+            "<p>Maintenance-plan members only.</p><p>Call us today.</p></div>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(shortened, scoped_source)
+
+        complete = {
+            "site": {
+                "name": "Acme",
+                "tagline": "Free Estimates Maintenance-plan members only.",
+            }
+        }
+        self.assertEqual(validate_site_analysis(complete, scoped_source), complete)
+
+        unscoped_source = (
+            "<h1>Acme</h1><div><p>Free Estimates</p><p>Call us today.</p></div>"
+        )
+        self.assertEqual(validate_site_analysis(shortened, unscoped_source), shortened)
+
+    def test_prompt_declared_classifications_are_schema_enforced(self):
+        base = {"site": {"name": "Acme"}}
+        invalid_documents = (
+            {"site": {"name": "Acme", "type": "plubming-typo"}},
+            {"site": {"name": "Acme"}, "brand": {"color_mode": "bright"}},
+            {"site": {"name": "Acme"}, "sections": [{"type": "unknown"}]},
+            {
+                "site": {"name": "Acme"},
+                "images": [{"url": "/hero.jpg", "context": "masthead"}],
+            },
+            {
+                "site": {"name": "Acme"},
+                "pages_to_fetch": [
+                    {
+                        "label": "Contact",
+                        "url": "/contact",
+                        "page_type": "lead-form",
+                        "priority": 1,
+                        "fetchable": True,
+                    }
+                ],
+            },
+            {"site": {"name": "Acme"}, "site_structure": "hybrid"},
+            {
+                "site": {"name": "Acme"},
+                "conversion_profile": {"urgency_type": "sometimes"},
+            },
+            {
+                "site": {"name": "Acme"},
+                "conversion_profile": {"primary_goal": "browse"},
+            },
+            {
+                "site": {"name": "Acme"},
+                "homepage_blueprint": {"hero_type": "hero-standard"},
+            },
+            {
+                "site": {"name": "Acme"},
+                "homepage_blueprint": {"section_sequence": ["pricing-table"]},
+            },
+            {
+                "site": {"name": "Acme"},
+                "homepage_blueprint": {"footer_layout": "footer-wide"},
+            },
+        )
+        for document in invalid_documents:
+            with (
+                self.subTest(document=document),
+                self.assertRaisesRegex(SiteExtractionError, "schema rejected"),
+            ):
+                validate_site_analysis(document, "<h1>Acme</h1>")
+
+        self.assertEqual(validate_site_analysis(base, "<h1>Acme</h1>"), base)
+
+        valid_document = {
+            "site": {"name": "Acme", "type": "local-business"},
+            "brand": {"color_mode": "light"},
+            "sections": [{"type": "faq"}],
+            "images": [{"url": "/hero.jpg", "context": "hero"}],
+            "pages_to_fetch": [
+                {
+                    "label": "Contact",
+                    "url": "https://acme.test/contact",
+                    "page_type": "contact",
+                    "priority": 1,
+                    "fetchable": True,
+                }
+            ],
+            "site_structure": "multi-page",
+            "single_page_sections": [
+                {"nav_label": "About", "anchor": "#about", "page_type": "about"}
+            ],
+            "conversion_profile": {
+                "urgency_type": "planned",
+                "primary_goal": "form",
+            },
+            "homepage_blueprint": {
+                "hero_type": "hero-image",
+                "section_sequence": ["hero", "services-grid"],
+                "footer_layout": "footer-3col",
+            },
+        }
+        valid_source = (
+            '<h1>Acme</h1><img src="/hero.jpg">'
+            '<a href="/contact">Contact</a><a href="#about">About</a>'
+            '<section id="about"><h2>About</h2></section>'
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                valid_document,
+                valid_source,
+                "https://acme.test/",
+            ),
+            valid_document,
+        )
+
     def test_existing_cta_requires_an_exact_source_action_label(self):
         document = {
             "site": {"name": "Acme Cleaning"},
