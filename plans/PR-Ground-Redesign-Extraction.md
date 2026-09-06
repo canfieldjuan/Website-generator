@@ -166,6 +166,7 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6frggD`: one role's descriptor consumed a later role | A contact role token cannot be reclassified as free-form descriptor text for a preceding role. | `Call Center Fax Number: 217-555-0100` admitted the fax as callable on `a65d7c3`. Descriptor matching now stops before any contact-role token, so the terminal fax role owns and rejects the number. | fixed/superseded | `lib/site_extraction.py:471-479`; `tests/test_site_extraction.py:1243-1257` |
 | `PRRT_kwDOTDYaKM6frggE`: descriptor punctuation split a complete role label | Bounded descriptor punctuation belongs to the field token and cannot become a group boundary before role ownership. | `Fax Dept. Number: 217-555-0100` admitted the fax as callable on `a65d7c3`. The shared descriptor grammar now retains a terminal abbreviation period and the number rejects. | fixed/superseded | `lib/site_extraction.py:471-484`; `tests/test_site_extraction.py:1243-1257` |
 | `PRRT_kwDOTDYaKM6frggG`: `<br>` was erased before contact grouping | Contact ownership must preserve rendered structural boundaries without changing general claim text. | A stacked phone followed by a fax on the next rendered line rejected the phone on `a65d7c3`. A contact-only DOM text projection now preserves `<br>` as an internal boundary, feeds only phone evidence, admits the phone, and rejects both following fax values. | fixed/superseded | `lib/site_extraction.py:1085-1097,1829-1830,1912-1933,1982-1987,2075-2120`; `tests/test_site_extraction.py:1266-1282` |
+| `PRRT_kwDOTDYaKM6frm_H`: descriptor-word matching left new terminal labels outside the protected field | Contact field ownership must depend on bounded role/number structure, not an enumeration of descriptor words or terminal labels. | `Fax Dept. Line: 217-555-0100` reproduced as callable on `d8fa02c`. The descriptor regex has been removed: primitive role tokens are found independently, then a bounded field-like span to the next number is protected only when no intervening role or hard group boundary exists. Both `Line` and an unseen `Regional Office Desk` terminal reject for fax and admit for phone; sentence-delimited mixed roles retain their own numbers. | fixed/superseded | `lib/site_extraction.py:471-479,771-813`; `tests/test_site_extraction.py:1243-1273` |
 
 ## Mechanism
 
@@ -371,51 +372,55 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `3316c4fe5cf0011a180a6ca2550f0ba511687815`.
+- Code revision under test: `29468da128bb32cab73542730218601e1f35abb7`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
-- Four isolated validation probes exercise the latest exact-head review paths:
+- Isolated validation probes exercise the latest exact-head review paths:
   role-to-value em dash, a later fax role following `Call Center`, a punctuated
   `Fax Dept. Number` descriptor, and a phone/fax pair separated by `<br>`. Every
   fax value rejected and the stacked phone admitted. Positive controls retained
-  ordinary and ASCII-dash phone labels. The correction is structural rather than
-  example-specific: role tokens cannot be swallowed as descriptors, punctuation
-  remains inside complete role fields, and a contact-only DOM projection preserves
-  rendered line boundaries without altering general claim text.
+  ordinary and ASCII-dash phone labels. A follow-up `Fax Dept. Line` reproduction
+  proved that terminal-descriptor matching itself was the remaining category bug,
+  so that regex was removed rather than extended. Primitive role tokens are now
+  identified independently and a bounded role-to-number field span is protected
+  only when no intervening role or hard group boundary exists. Both `Line` and an
+  unseen `Regional Office Desk` terminal reject for fax and admit for phone. The
+  contact-only DOM projection separately preserves rendered line boundaries without
+  altering general claim text.
 - Boundary probe: `python -m unittest -q tests.test_site_extraction
   tests.test_generation` passed 236 tests. The negative side covers every reproduced
   fax-authority bypass and the existing ambiguous/conflicting role cases; the
   positive side retains callable phone fields across inline spans, extensions,
   dotted numbers, textual and visual group separators, and structural line breaks.
 - Full suite: `timeout 600s python -m unittest discover -s tests -q` exited 0;
-  the saved log reports 378 tests passed with 34 skipped in 13.915 seconds. Log:
-  `/dev/shm/website-generator-pr47-full-suite-3316c4f.log`.
+  the saved log reports 378 tests passed with 34 skipped in 14.416 seconds. Log:
+  `/dev/shm/website-generator-pr47-full-suite-29468da.log`.
 - Static evidence: `python -m ruff check lib/site_extraction.py
   tests/test_site_extraction.py`, `python -m compileall -q
   build.py pipeline.py connect_provider.py lib tests`, and `git diff --check`
   passed. A repository-wide formatter invocation was intentionally not retained
   because it rewrote pre-existing lines outside this correction.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T07:15:01,122932788-05:00`, completed at
-  `2026-09-06T07:15:51,740397981-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T07:28:50,734234682-05:00`, completed at
+  `2026-09-06T07:29:41,709960098-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-3316c4f.log`.
-- The invocation replaced artifact inode 3309502 with inode 3311297 and set mtime
-  `2026-09-06 07:15:51.649347980 -0500`, proving this invocation rewrote
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-29468da.log`.
+- The invocation replaced artifact inode 3311297 with inode 3325015 and set mtime
+  `2026-09-06 07:29:41.605387879 -0500`, proving this invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71939-byte artifact
   has SHA-256
   `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-3316c4f.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-3316c4f.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-29468da.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-29468da.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
   loaded a 1440x3040 screenshot with title `DREES PLUMBING INC` and 2468
   body-text characters. The screenshot was visually inspected and shows the
   styled navigation, hero, service grid, trust content, and review content
   without an obvious render break. Screenshot:
-  `/dev/shm/website-generator-pr47-browser-render-3316c4f.png`,
+  `/dev/shm/website-generator-pr47-browser-render-29468da.png`,
   SHA-256
   `12bd0bd8b1e07d030a3bdaa4a3345e94345f8b951619a8333b563c1c40371efb`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
