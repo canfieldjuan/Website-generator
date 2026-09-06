@@ -1195,6 +1195,9 @@ class BodyAssemblyTests(unittest.TestCase):
         contract = ActionUrlAdmissionContract(
             allowed_urls=(
                 "https://source.test/book",
+            ),
+            allowed_form_urls=(
+                "https://source.test/book",
                 "https://source.test/form",
             ),
             phones=("217-555-0100",),
@@ -1481,6 +1484,10 @@ class BodyAssemblyTests(unittest.TestCase):
                 "https://source.test/contact",
                 "https://source.test/order",
             ),
+            allowed_form_urls=(
+                "https://source.test/contact",
+                "https://source.test/order",
+            ),
             allowed_labels=("Contact Us", "Order Online"),
             allowed_pairs=(
                 ("Contact Us", "https://source.test/contact"),
@@ -1551,6 +1558,33 @@ class BodyAssemblyTests(unittest.TestCase):
                 validate_generated_body(
                     body_result(body),
                     expected_action_urls=contact_contract,
+                )
+
+    def test_body_keeps_link_and_form_destination_authority_separate(self):
+        contract = ActionUrlAdmissionContract(
+            allowed_urls=("/contact",),
+            allowed_form_urls=("/submit",),
+            allowed_labels=("Contact", "Send"),
+            allowed_pairs=(("Contact", "/contact"), ("Send", "/submit")),
+        )
+        valid = (
+            '<body><a href="/contact">Contact</a>'
+            '<form action="/submit"><button type="submit">Send</button>'
+            "</form></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(body_result(valid), expected_action_urls=contract),
+            valid,
+        )
+        for invalid in (
+            '<body><a href="/submit">Contact</a></body>',
+            '<body><form action="/contact"><button>Send</button></form></body>',
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                GeneratedBodyError, "outside source-owned destinations"
+            ):
+                validate_generated_body(
+                    body_result(invalid), expected_action_urls=contract
                 )
 
     def test_body_action_pair_contract_cannot_exceed_component_authority(self):

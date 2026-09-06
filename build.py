@@ -357,7 +357,7 @@ def expected_build_form_action(prospect):
 
 def expected_build_action_url_contract(prospect, review_contract):
     form_action = expected_build_form_action(prospect)
-    allowed_urls = [form_action]
+    allowed_urls = []
     allowed_labels = list(BUILD_FORM_SUBMIT_LABELS)
     allowed_pairs = [
         (label, form_action)
@@ -376,6 +376,7 @@ def expected_build_action_url_contract(prospect, review_contract):
     email = prospect.get("owner_email")
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(dict.fromkeys(allowed_urls)),
+        allowed_form_urls=(form_action,),
         phones=(phone.strip(),) if isinstance(phone, str) and phone.strip() else (),
         emails=(email.strip(),) if isinstance(email, str) and email.strip() else (),
         allowed_labels=tuple(allowed_labels),

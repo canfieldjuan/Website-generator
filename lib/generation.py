@@ -375,6 +375,7 @@ class SourceContactAdmissionContract:
 @dataclass(frozen=True)
 class ActionUrlAdmissionContract:
     allowed_urls: tuple[str, ...] = ()
+    allowed_form_urls: tuple[str, ...] = ()
     phones: tuple[str, ...] = ()
     emails: tuple[str, ...] = ()
     allowed_labels: tuple[str, ...] = ()
@@ -399,6 +400,9 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     if not isinstance(contract, ActionUrlAdmissionContract):
         raise GeneratedBodyError("Action URL admission contract is invalid.")
     allowed_urls = _contract_text_values(contract.allowed_urls, "Action URL")
+    allowed_form_urls = _contract_text_values(
+        contract.allowed_form_urls, "Form action URL"
+    )
     phones = _contract_text_values(contract.phones, "Action phone")
     emails = _contract_text_values(contract.emails, "Action email")
     allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
@@ -407,12 +411,13 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     neutral_terms = sorted(_NEUTRAL_ACTION_LABEL_TERMS)
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
-        "are allowed. Every other generated anchor, form action, or submit "
-        "override must copy one exact source URL from "
-        f"{json.dumps(allowed_urls, ensure_ascii=False)}, use a `tel:` or `sms:` "
+        "are allowed. Every other generated anchor must copy one exact source "
+        f"URL from {json.dumps(allowed_urls, ensure_ascii=False)}, use a `tel:` or `sms:` "
         f"target matching one of {json.dumps(phones, ensure_ascii=False)}, or use "
         "a `mailto:` target matching one of "
-        f"{json.dumps(emails, ensure_ascii=False)}. Do not invent, shorten, or "
+        f"{json.dumps(emails, ensure_ascii=False)}. Every generated form action "
+        "or submit override must copy one exact source form endpoint from "
+        f"{json.dumps(allowed_form_urls, ensure_ascii=False)}. Do not invent, shorten, or "
         "substitute a booking, social, navigation, or form destination. "
         "Every generated action label must exactly copy one source label from "
         f"{json.dumps(allowed_labels, ensure_ascii=False)}, display an admitted "
@@ -2300,6 +2305,9 @@ def _validate_action_urls(
     if not isinstance(contract, ActionUrlAdmissionContract):
         raise GeneratedBodyError("Action URL admission contract is invalid.")
     allowed_url_values = _contract_text_values(contract.allowed_urls, "Action URL")
+    allowed_form_url_values = _contract_text_values(
+        contract.allowed_form_urls, "Form action URL"
+    )
     allowed_label_values = _contract_text_values(
         contract.allowed_labels, "Action label"
     )
@@ -2309,6 +2317,7 @@ def _validate_action_urls(
         allowed_label_values,
     )
     allowed_urls = set(allowed_url_values)
+    allowed_form_urls = set(allowed_form_url_values)
     allowed_labels = {
         _normalize_claim_match_text(label)
         for label in allowed_label_values
@@ -2330,7 +2339,8 @@ def _validate_action_urls(
             raise GeneratedBodyError("Action email contract contains an invalid email.")
         allowed_emails.add(canonical)
 
-    action_values: list[str] = []
+    link_action_values: list[str] = []
+    form_action_values: list[str] = []
     action_entries: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
@@ -2342,19 +2352,22 @@ def _validate_action_urls(
             and not declared_destinations
         ):
             continue
-        action_values.extend(declared_destinations)
+        if tag_name in {"a", "area"}:
+            link_action_values.extend(declared_destinations)
+        else:
+            form_action_values.extend(declared_destinations)
         element_values = action_element_destinations(element, body_root)
         if is_labelled_action:
             action_entries.append((_generated_action_labels(element), element_values))
 
-    for raw_value in action_values:
+    def validate_action_value(raw_value: str, admitted_urls: set[str]) -> None:
         candidate = raw_value.strip()
         if not candidate:
             raise GeneratedBodyError(
                 "Generated body contains an empty actionable destination."
             )
-        if candidate.startswith("#") or candidate in allowed_urls:
-            continue
+        if candidate.startswith("#") or candidate in admitted_urls:
+            return
         scheme, separator, target = candidate.partition(":")
         if not separator:
             raise GeneratedBodyError(
@@ -2363,14 +2376,19 @@ def _validate_action_urls(
         if scheme.casefold() in {"tel", "sms"}:
             phone_digits = _canonical_phone_digits(target.split("?", 1)[0])
             if phone_digits and phone_digits in allowed_phone_digits:
-                continue
+                return
         elif scheme.casefold() == "mailto":
             mailbox = _canonical_email_value(target.split("?", 1)[0])
             if mailbox is not None and mailbox in allowed_emails:
-                continue
+                return
         raise GeneratedBodyError(
             "Generated body contains an action URL outside source-owned destinations."
         )
+
+    for raw_value in link_action_values:
+        validate_action_value(raw_value, allowed_urls)
+    for raw_value in form_action_values:
+        validate_action_value(raw_value, allowed_form_urls)
 
     for action_labels, destinations in action_entries:
         stripped_destinations = tuple(value.strip() for value in destinations)

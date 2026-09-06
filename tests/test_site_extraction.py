@@ -1755,6 +1755,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
+            contract.allowed_form_urls,
+            ("/submit", "/pay", "/external"),
+        )
+        self.assertEqual(
             contract.allowed_labels,
             (
                 "Acme Cleaning",

@@ -149,6 +149,7 @@ def _redesign_action_url_contract(
     extra_urls=(),
 ):
     allowed_urls = []
+    allowed_form_urls = []
     allowed_labels = []
     allowed_pairs = []
 
@@ -213,6 +214,8 @@ def _redesign_action_url_contract(
                 for destination in destinations:
                     _append_source_value(allowed_urls, destination)
             if element.name == "form":
+                for destination in destinations:
+                    _append_source_value(allowed_form_urls, destination)
                 continue
             if element.name == "input" and str(
                 element.get("type") or ""
@@ -221,9 +224,12 @@ def _redesign_action_url_contract(
             label = source_action_accessible_name(element, source_root)
             _append_source_value(allowed_labels, label)
             for destination in destinations:
+                if element.name in {"button", "input"}:
+                    _append_source_value(allowed_form_urls, destination)
                 _append_source_pair(allowed_pairs, label, destination)
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
+        allowed_form_urls=tuple(allowed_form_urls),
         phones=contact_contract.phones,
         emails=contact_contract.emails,
         allowed_labels=tuple(allowed_labels),
