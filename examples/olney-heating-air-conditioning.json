@@ -1,5 +1,5 @@
 {
-  "_comment": "FRAMEWORK TEST PROSPECT for HVAC trade expansion (Phase 1 validation). Verified data sourced from Outscraper's Google Business Profile snapshot (place_id ChIJPd9IqQQscogRsKGhnyOPlhg, verified=TRUE, business_status=OPERATIONAL). Unknown fields left null intentionally to exercise the new 07 HVAC defaults end-to-end -- services:[] forces the HVAC canonical catalog to fire, service_radius:null forces the 25-mile default, no owner_first_name forces the cold-open salutation path. Trade Mismatch warning should NOT fire (hvac is in SKILL.md's supported list after the downstream cleanups). Olney Heating IL is distinct from olneyheatingandairconditioning.com (Maryland business, different entity).",
+  "_comment": "FRAMEWORK TEST PROSPECT for HVAC trade expansion (Phase 1 validation). Verified data sourced from Outscraper's Google Business Profile snapshot (place_id ChIJPd9IqQQscogRsKGhnyOPlhg, verified=TRUE, business_status=OPERATIONAL). Unknown fields remain null. Heating and Air Conditioning are copied from the verified business name; no canonical service or service-radius default is permitted. Olney Heating IL is distinct from olneyheatingandairconditioning.com (Maryland business, different entity).",
   "business_name": "Olney Heating & Air Conditioning",
   "trade": "hvac",
   "city": "Olney",
@@ -14,7 +14,7 @@
   "has_24_7": null,
   "service_radius": null,
   "hours": "Daily 7:00 AM - 9:00 PM",
-  "services": [],
+  "services": ["Heating", "Air Conditioning"],
   "address": "120 S Washington St, Olney, IL 62450",
   "google_business_url": null,
   "google_review_score": 5.0,

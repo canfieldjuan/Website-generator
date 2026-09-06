@@ -36,6 +36,11 @@ mandatory `services` field; unrelated cleanup remains excluded.
 5. Add deterministic regressions for arbitrary business types, variable service
    counts, universal-only generation guidance, unsupported location rejection,
    and the EOM cleaning brief.
+6. Make each service card's visible name case-exact and its description
+   deterministic from that same source service, so free model prose cannot add
+   an unsupported offering.
+7. Bring checked-in runnable prospects across the new required-services
+   boundary using only evidence already present in each fixture.
 
 ### Files touched
 
@@ -48,6 +53,8 @@ mandatory `services` field; unrelated cleanup remains excluded.
 - `references/07-industry-defaults.md`
 - `tests/test_generation.py`
 - `tests/test_connect_provider.py`
+- `examples/althoff-plumbing-effingham.json`
+- `examples/olney-heating-air-conditioning.json`
 
 ## Mechanism
 
@@ -58,11 +65,12 @@ non-empty string instead of enforcing a TypeScript union.
 `prepare_prospect()` validates and normalizes a non-empty list of non-empty
 service strings. The required class-count and child-sequence contracts derive
 their service-card count from that normalized list, and the response scaffold
-contains one tokenized card per submitted service. The prompt requires every
-card name to correspond to the supplied list and forbids adding or dropping
-entries. The shared HTML admission API gains an optional exact-services
-contract and verifies the direct name owned by each service card, so prompt
-noncompliance cannot add, omit, or duplicate an offered service.
+contains one code-owned card per submitted service. Each card uses the exact
+source casing and a deterministic `Ask us about <service>` description. The
+prompt requires the scaffold verbatim. The shared HTML admission API gains an
+optional exact-services contract and verifies both direct fields, so prompt
+noncompliance cannot add, omit, duplicate, rename, or smuggle another offering
+through free description prose.
 
 Industry-guidance prompt assembly extracts only the universal preamble. The
 trade sections remain inputs to deterministic code-owned visual selection, but
@@ -70,6 +78,12 @@ their mixed operational assumptions do not enter body generation. Universal
 benefit fallbacks describe source facts or page functions rather than assuming
 ownership, crew, dispatch, availability, or franchise status. Verified prospect
 fields remain the only authority for customer facts.
+
+The two checked-in prospects that previously depended on canonical trade
+defaults receive only services evidenced in their own documents: Althoff's
+review records sanitary lift-pump replacement, while Olney's verified business
+name directly supplies Heating and Air Conditioning. Their comments no longer
+claim that an empty list triggers defaults.
 
 ## Intentional
 
@@ -110,7 +124,7 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 370 passed, 34 skipped, 647 subtests passed
+# 372 passed, 34 skipped, 650 subtests passed
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
@@ -118,21 +132,23 @@ PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
 # Exit 0; local:qwen3-30b-a3b:latest; no deploy, email, or image generation
 ```
 
-The final fixture invocation rejected one unsupported service-location claim,
-used the existing single bounded correction, and then wrote
+The final fixture invocation completed without a correction and wrote
 `outputs/builds/drees-plumbing-inc/index.html` at
-`2026-09-06 15:05:46.720175865 -0500`. The artifact is 72,516 bytes with
-SHA-256 `917e7a7837700f3949eeed7bc83cd3ec91efaa0a8ff3577530f9116514110b3d`.
+`2026-09-06 15:27:44.311697513 -0500`. The artifact is 72,058 bytes with
+SHA-256 `3551345cd8aa55d614a2674ae903fda8f29c29dc1fee992a06badc9aff321364`.
 Both the required placeholder pattern and the case-insensitive forbidden-claim
-pattern returned zero matches. A headless Chrome render wrote
-`/tmp/website-generator-drees-slice1-final.png` (346,749 bytes), and visual
-inspection confirmed a rendered hero, verified contact/service-area content,
-and the source service-card grid.
+pattern returned zero matches. Parsed artifact inspection confirmed all eight
+source-cased service names and their exact code-owned descriptions. A headless
+Chrome render wrote `/tmp/website-generator-drees-pr50-review.png` (327,272
+bytes); visual inspection confirmed the card names and descriptions render in
+the service grid.
 
 The production-shaped desktop request used the EOM form values, the local
 provider, and the real `execute_desktop_request()` path. It returned an admitted
-`effingham-office-maids-homepage.html` artifact of 69,145 bytes with SHA-256
-`5ada2e34e9fb43e8cad38a18c2f3302e08db1f3be6f97497d732bbcb9efb78b8`.
+`effingham-office-maids-homepage.html` artifact of 68,625 bytes with SHA-256
+`d668836e3a727947057c36c71c6bf7274e93dd2c2d1cfea7668191b4e94bb4e7`.
+Its first response invented an unsupported radius; the existing single bounded
+correction removed it and returned an admitted artifact.
 Before the shared location-boundary correction, that same request was rejected
 because the city/state scanner parsed adjacent UI text such as `Serving` as part
 of the city. The focused regression now passes together with 14 negative/edge
@@ -148,7 +164,7 @@ final revision.
 
 ## Estimated diff size
 
-The tracked implementation/test diff is 485 changed lines before this plan is
+The tracked implementation/test diff is 594 changed lines before this plan is
 counted, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,

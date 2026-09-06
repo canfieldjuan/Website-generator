@@ -24,6 +24,7 @@ import argparse
 import copy
 import sys
 from datetime import date
+from html import escape
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -58,6 +59,7 @@ from lib.generation import (
     require_complete_text,
     resolve_generation_config,
     short_text_generation_config,
+    source_owned_service_description,
     validate_document_colors,
 )
 # lib.email.send_pitch_email is intentionally NOT imported here. The
@@ -403,7 +405,7 @@ def expected_build_action_url_contract(prospect, review_contract):
     )
 
 
-def build_services_response_scaffold(service_count):
+def build_services_response_scaffold(services):
     return (
         '<div class="page-wrap section-gap">\n'
         '  <div class="sec-hd">\n'
@@ -412,10 +414,11 @@ def build_services_response_scaffold(service_count):
         '  <div class="services-grid">\n'
         + "\n".join(
             '    <div class="service-card">\n'
-            f'      <div class="service-card-name">[SERVICE_{index}_NAME]</div>\n'
-            f'      <p class="service-card-desc">[SERVICE_{index}_DESCRIPTION]</p>\n'
+            f'      <div class="service-card-name">{escape(service)}</div>\n'
+            f'      <p class="service-card-desc">'
+            f'{escape(source_owned_service_description(service))}</p>\n'
             '    </div>'
-            for index in range(1, service_count + 1)
+            for service in services
         )
         + '\n  </div>\n'
         '</div>'
@@ -1460,7 +1463,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
     required_class_counts = required_build_class_counts(prospect)
     required_child_class_sequences = required_build_child_class_sequences(prospect)
     services_response_scaffold = build_services_response_scaffold(
-        len(prospect["services"])
+        prospect["services"]
     )
     if logo_url:
         logo_instruction = (
@@ -1477,11 +1480,9 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{json.dumps(dict(required_class_counts), ensure_ascii=False)}\n"
         "MANDATORY SERVICES: At the position required by "
         "prospect._computed_section_order, reproduce the exact scaffold below. "
-        "Use every prospect.services entry exactly once, in source order. Do not "
-        "add, omit, merge, or rename a service. Replace each square-bracket name "
-        "token with its corresponding exact prospect service; descriptions may "
-        "explain that service without adding another offering. Do not emit the "
-        "tokens themselves.\n"
+        "Its names and descriptions are code-owned source text. Copy every card "
+        "exactly in source order; do not add, omit, merge, rename, re-case, or "
+        "rewrite any service text.\n"
         f"MANDATORY SERVICE NAMES: {json.dumps(prospect['services'], ensure_ascii=False)}\n"
         f"{services_response_scaffold}\n"
         "MANDATORY EXACT SUBSTITUTIONS: "

@@ -1773,6 +1773,18 @@ def _normalize_claim_match_text(value: str) -> str:
     return " ".join(normalized.split()).casefold()
 
 
+def _normalize_source_owned_text(value: str) -> str:
+    """Canonicalize browser whitespace without changing source casing."""
+    return " ".join(unicodedata.normalize("NFKC", value).split())
+
+
+def source_owned_service_description(service: str) -> str:
+    """Return capability-neutral service copy derived only from its source name."""
+    if not isinstance(service, str) or not service.strip():
+        raise ValueError("Source-owned service must be non-empty text.")
+    return f"Ask us about {_normalize_source_owned_text(service)}"
+
+
 def _compact_claim_match_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     return "".join(character for character in normalized if character.isalnum())
@@ -2567,10 +2579,11 @@ def _required_child_sequence_mismatches(
     return mismatches
 
 
-def _validate_service_card_names(body_root: Tag, expected_services: object) -> None:
+def _validate_service_cards(body_root: Tag, expected_services: object) -> None:
     services = _contract_text_values(expected_services, "Expected service")
     cards = _elements_with_class(body_root, "service-card")
     actual_names: list[str] = []
+    actual_descriptions: list[str] = []
     for card in cards:
         names = [
             child
@@ -2586,11 +2599,37 @@ def _validate_service_card_names(body_root: Tag, expected_services: object) -> N
             raise GeneratedBodyError("Generated body service card names cannot be empty.")
         actual_names.append(value)
 
-    normalized_expected = tuple(_normalize_claim_match_text(value) for value in services)
-    normalized_actual = tuple(_normalize_claim_match_text(value) for value in actual_names)
+        descriptions = [
+            child
+            for child in card.find_all(True, recursive=False)
+            if "service-card-desc" in _exact_class_names(child)
+        ]
+        if len(descriptions) != 1:
+            raise GeneratedBodyError(
+                "Generated body service card descriptions do not have one direct owner per card."
+            )
+        value = descriptions[0].get_text(" ", strip=True)
+        if not value:
+            raise GeneratedBodyError(
+                "Generated body service card descriptions cannot be empty."
+            )
+        actual_descriptions.append(value)
+
+    normalized_expected = tuple(_normalize_source_owned_text(value) for value in services)
+    normalized_actual = tuple(_normalize_source_owned_text(value) for value in actual_names)
     if normalized_actual != normalized_expected:
         raise GeneratedBodyError(
             "Generated body service card names do not match the supplied services."
+        )
+    expected_descriptions = tuple(
+        source_owned_service_description(service) for service in services
+    )
+    normalized_descriptions = tuple(
+        _normalize_source_owned_text(value) for value in actual_descriptions
+    )
+    if normalized_descriptions != expected_descriptions:
+        raise GeneratedBodyError(
+            "Generated body service card descriptions do not match code-owned source text."
         )
 
 
@@ -3803,7 +3842,7 @@ def validate_generated_body(
             f"Generated body contains unresolved prompt placeholders: {leaked}."
         )
     if expected_services is not _EXPECTED_SERVICES_UNSET:
-        _validate_service_card_names(body_root, expected_services)
+        _validate_service_cards(body_root, expected_services)
     return body
 
 

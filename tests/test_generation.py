@@ -85,7 +85,7 @@ COMPLETE_SERVICES_GRID = (
     + "".join(
         '<div class="service-card">'
         f'<div class="service-card-name">Service {index}</div>'
-        f'<p class="service-card-desc">Description {index}</p>'
+        f'<p class="service-card-desc">Ask us about Service {index}</p>'
         '</div>'
         for index in range(1, 7)
     )
@@ -93,13 +93,16 @@ COMPLETE_SERVICES_GRID = (
 )
 
 
-def services_grid(services):
+def services_grid(services, descriptions=None):
+    descriptions = descriptions or tuple(
+        f"Ask us about {service}" for service in services
+    )
     return (
         '<div class="services-grid">'
         + "".join(
             '<div class="service-card">'
             f'<div class="service-card-name">{service}</div>'
-            f'<p class="service-card-desc">Description {index}</p>'
+            f'<p class="service-card-desc">{descriptions[index - 1]}</p>'
             '</div>'
             for index, service in enumerate(services, start=1)
         )
@@ -3069,6 +3072,7 @@ class BodyAssemblyTests(unittest.TestCase):
             ("Deep Cleaning", "Window Cleaning"),
             ("Deep Cleaning",),
             ("Deep Cleaning", "Deep Cleaning"),
+            ("deep cleaning", "Office Cleaning"),
         ):
             with self.subTest(services=services), self.assertRaisesRegex(
                 GeneratedBodyError,
@@ -3078,6 +3082,16 @@ class BodyAssemblyTests(unittest.TestCase):
                     body_result(f"<body>{services_grid(services)}</body>"),
                     expected_services=expected,
                 )
+
+        unsupported_description = services_grid(
+            expected,
+            ("Ask us about Deep Cleaning", "We also offer Window Cleaning"),
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "service card descriptions"):
+            validate_generated_body(
+                body_result(f"<body>{unsupported_description}</body>"),
+                expected_services=expected,
+            )
 
     def test_body_admission_accepts_one_plain_body(self):
         self.assertEqual(validate_generated_body(body_result()), COMPLETE_BODY)
@@ -3968,8 +3982,16 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertEqual(user_content.count('<div class="service-card">'), 6)
         self.assertEqual(user_content.count('<div class="service-card-name">'), 6)
         self.assertEqual(user_content.count('<p class="service-card-desc">'), 6)
-        self.assertIn("[SERVICE_1_NAME]", user_content)
-        self.assertIn("[SERVICE_6_DESCRIPTION]", user_content)
+        self.assertIn(
+            '<div class="service-card-name">Service 1</div>',
+            user_content,
+        )
+        self.assertIn(
+            '<p class="service-card-desc">Ask us about Service 6</p>',
+            user_content,
+        )
+        self.assertNotIn("[SERVICE_1_NAME]", user_content)
+        self.assertNotIn("[SERVICE_6_DESCRIPTION]", user_content)
         self.assertIn("SOURCE-GATED CLAIM ALLOWLIST (EXHAUSTIVE): []", user_content)
         self.assertIn("TENURE CLAIM CONTRACT (OPTIONAL OUTPUT)", user_content)
         self.assertNotIn("Use it freely", request_prompt)
@@ -3986,6 +4008,18 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 "No logo URL was supplied. Omit the nav-logo image entirely, show "
                 "the text business name, and do not invent a logo URL."
             )
+        )
+
+    def test_service_scaffold_escapes_source_owned_text(self):
+        scaffold = build.build_services_response_scaffold(
+            ['HVAC <script>alert("x")</script>']
+        )
+
+        self.assertNotIn("<script>", scaffold)
+        self.assertIn("HVAC &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;", scaffold)
+        self.assertIn(
+            "Ask us about HVAC &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;",
+            scaffold,
         )
 
     def test_uncatalogued_cleaning_brief_uses_only_supplied_services(self):
@@ -4142,7 +4176,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
     def test_build_generator_rejects_unresolved_services_scaffold_token(self):
         leaked_body = COMPLETE_BUILD_BODY.replace(
             "Service 1",
-            "[SERVICE_1_NAME]",
+            "[EXACT_SOURCE_SERVICE]",
         )
         prospect = {
             "business_name": "Test Business",
@@ -4153,7 +4187,10 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "services": list(DEFAULT_BUILD_SERVICES),
         }
 
-        with self.assertRaisesRegex(GeneratedBodyError, r"\[SERVICE_1_NAME\]"):
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            r"\[EXACT_SOURCE_SERVICE\]",
+        ):
             build.generate_build_html(
                 prospect,
                 config(),

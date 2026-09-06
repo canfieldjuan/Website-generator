@@ -278,10 +278,9 @@ The per-section rules:
    stripped (for the `tel:` link).
 5. Services grid (`.services-grid` / `.service-card`) -- render exactly one
    card for every entry in `prospect.services`, in source order. Do not add,
-   omit, merge, rename, or rank services. The final response boundary supplies
-   the exact source-sized scaffold and service-name list. Each card contains
-   the exact supplied service name plus one generic explanatory sentence that
-   does not introduce another offering.
+   omit, merge, rename, re-case, or rank services. The final response boundary
+   supplies the exact source-sized scaffold with code-owned names and
+   descriptions. Copy every card verbatim; do not generate service-card prose.
 
    Per-card markup (the response boundary repeats it to the required count):
    ```html
@@ -291,8 +290,8 @@ The per-section rules:
      </div>
      <div class="services-grid">
        <div class="service-card">
-         <div class="service-card-name">[SERVICE_1_NAME]</div>
-         <p class="service-card-desc">[SERVICE_1_DESCRIPTION]</p>
+         <div class="service-card-name">[EXACT_SOURCE_SERVICE]</div>
+         <p class="service-card-desc">Ask us about [EXACT_SOURCE_SERVICE]</p>
        </div>
      </div>
    </div>
