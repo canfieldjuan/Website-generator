@@ -70,7 +70,9 @@ non-empty string instead of enforcing a TypeScript union.
 
 `prepare_prospect()` validates and canonicalizes a non-empty list of non-empty
 service strings with Unicode compatibility and browser-whitespace normalization
-before duplicate detection. The required class-count and child-sequence contracts derive
+before duplicate detection. Intake also caps the one-page surface at 12 services,
+80 characters per service, and 600 characters total so every accepted list is
+representable inside the fixed generation-output budget. The required class-count and child-sequence contracts derive
 their service-card count from that normalized list, and the response scaffold
 contains one code-owned card per submitted service. Each card uses the exact
 source casing and a deterministic `Ask us about <service>` description. The
@@ -106,6 +108,8 @@ and all four supported indirect ARIA reference attributes use the same resolver
 and exact catalog. Native control labels and the complete standard set of
 text-valued ARIA properties come from one shared enumerator used by claim and
 copy admission, including the standards-defined table-header abbreviation.
+Current numeric ARIA values plus native input, meter, and progress values use
+the same source-owned catalog.
 The no-radius service-area prompt uses the same exact `Service Area` casing as
 the code-owned catalog.
 
@@ -134,7 +138,7 @@ the code-owned catalog.
 ## Verification
 
 Current implementation evidence is based on commit
-`c6301804f1ef49c8b112a76aa5085bbf999be3b3`. The generated artifact and evidence logs are
+`2988de6fd000519b6cb12e482a97b4d94c801ca8`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -149,7 +153,7 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 392 passed, 34 skipped, 668 subtests passed in 39.44s
+# 395 passed, 34 skipped, 677 subtests passed in 44.26s
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
@@ -188,7 +192,7 @@ block after this evidence note is committed.
 
 ## Estimated diff size
 
-The current PR diff is 2,119 changed lines across the 11 declared source files
+The current PR diff is 2,250 changed lines across the 11 declared source files
 plus this plan, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
