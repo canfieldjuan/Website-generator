@@ -749,6 +749,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for shell in (
             "<main><h3>Free Estimates</h3><p>Members only.</p></main>",
             "<main>Free Estimates<p>Members only.</p></main>",
+            "<main>Free Estimates<div>Members only.<h2>Details</h2></div></main>",
         ):
             shell_scope = '<meta property="og:site_name" content="Acme">' + shell
             with (
@@ -1119,6 +1120,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for postfix_fax in (
             "217-555-0100 is our fax",
             "217-555-0100 (fax)",
+            "Fax No. 217-555-0100",
+            "Fax No. 217.555.0100",
         ):
             with (
                 self.subTest(postfix_fax=postfix_fax),
@@ -1156,6 +1159,26 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "<h1>Acme Cleaning</h1><p>217-555-0100 is our phone</p>",
             ),
             base_phone,
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>Phone No. 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+
+        mixed_roles = copy.deepcopy(base_phone)
+        mixed_roles["site"]["contact"]["phone"] = "217-555-0101"
+        mixed_source = (
+            "<h1>Acme Cleaning</h1>"
+            "<p>Fax No. 217-555-0100. Phone No. 217-555-0101.</p>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+            validate_site_analysis(base_phone, mixed_source)
+        self.assertEqual(
+            validate_site_analysis(mixed_roles, mixed_source),
+            mixed_roles,
         )
 
         replacement_source = (

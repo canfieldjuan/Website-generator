@@ -469,7 +469,8 @@ _PHONE_EXTENSION_SUFFIX_PATTERN = re.compile(
     re.I,
 )
 _PHONE_ROLE_PATTERN = re.compile(
-    r"\b(?P<role>fax|facsimile|phone|telephone|mobile|cell|call)\b",
+    r"\b(?P<role>fax|facsimile|phone|telephone|mobile|cell|call)\b"
+    r"(?:\s+(?:number|no)\.?)?\s*(?:[:#-]\s*)?",
     re.I,
 )
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
@@ -767,33 +768,44 @@ def _contact_occurrence_is_noncallable(
     start: int,
     length: int,
 ) -> bool:
-    """Return whether the nearest source field marks a number as non-callable."""
-    preceding = text[:start]
-    sentence_start = max(
-        (match.end() for match in _SENTENCE_BREAK_PATTERN.finditer(preceding)),
-        default=0,
-    )
-    following = text[start + length :]
-    following_break = _SENTENCE_BREAK_PATTERN.search(following)
-    sentence_end = (
-        start + length + following_break.start()
-        if following_break is not None
-        else len(text)
-    )
-    occurrence_start = start - sentence_start
-    occurrence_end = occurrence_start + length
-    roles = tuple(_PHONE_ROLE_PATTERN.finditer(text[sentence_start:sentence_end]))
+    """Return whether the nearest role in this bounded assertion is non-callable."""
+    occurrence_end = start + length
+    roles = tuple(_PHONE_ROLE_PATTERN.finditer(text))
     if not roles:
         return False
 
-    def distance(role: re.Match[str]) -> int:
-        if role.end() <= occurrence_start:
-            return occurrence_start - role.end()
-        if role.start() >= occurrence_end:
-            return role.start() - occurrence_end
+    def span_distance(
+        first_start: int,
+        first_end: int,
+        second_start: int,
+        second_end: int,
+    ) -> int:
+        if first_end <= second_start:
+            return second_start - first_end
+        if first_start >= second_end:
+            return first_start - second_end
         return 0
 
-    nearest = min(roles, key=distance)
+    numbers = tuple(_PHONE_PATTERN.finditer(text))
+    assigned_roles = tuple(
+        role
+        for role in roles
+        if min(
+            numbers,
+            key=lambda number: span_distance(
+                role.start(), role.end(), number.start(), number.end()
+            ),
+        ).start()
+        == start
+    )
+    if not assigned_roles:
+        return False
+    nearest = min(
+        assigned_roles,
+        key=lambda role: span_distance(
+            role.start(), role.end(), start, occurrence_end
+        ),
+    )
     return nearest.group("role").casefold() in {"fax", "facsimile"}
 
 
@@ -1759,9 +1771,11 @@ class SourceEvidence:
             if direct_level is not None or not isinstance(element, Tag):
                 return direct_level
             nested_heading = element.find(_HEADING_TAG_PATTERN)
+            if nested_heading is not None and claim_component_prefix(element, nested_heading):
+                return None
             return _assertion_heading_level(nested_heading)
 
-        def claim_component_text(element: Any) -> str:
+        def raw_claim_component_text(element: Any) -> str:
             if isinstance(element, Comment):
                 return ""
             if isinstance(element, NavigableString):
@@ -1769,6 +1783,27 @@ class SourceEvidence:
             if isinstance(element, Tag):
                 return _normalize_text(element.get_text(" ", strip=True))
             return ""
+
+        def claim_component_prefix(element: Tag, heading: Tag) -> str:
+            parts: list[str] = []
+            for descendant in element.descendants:
+                if descendant is heading:
+                    break
+                if isinstance(descendant, NavigableString) and not isinstance(
+                    descendant, Comment
+                ):
+                    parts.append(str(descendant))
+            return _normalize_text(" ".join(parts))
+
+        def claim_component_text(element: Any) -> str:
+            if not isinstance(element, Tag) or _assertion_heading_level(element) is not None:
+                return raw_claim_component_text(element)
+            nested_heading = element.find(_HEADING_TAG_PATTERN)
+            if nested_heading is not None:
+                prefix = claim_component_prefix(element, nested_heading)
+                if prefix:
+                    return prefix
+            return raw_claim_component_text(element)
 
         def is_owned_claim_component(
             element: Any, owner_heading_level: int | None
