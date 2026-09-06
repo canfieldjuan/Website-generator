@@ -1185,6 +1185,61 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             mixed_roles,
         )
 
+        grouped_source = (
+            "<h1>Acme Cleaning</h1>"
+            "<p>Fax: 217-555-0100 or 217-555-0101. "
+            "Phone: 217-555-0199</p>"
+        )
+        for fax_number in ("217-555-0100", "217-555-0101"):
+            fax_document = copy.deepcopy(base_phone)
+            fax_document["site"]["contact"]["phone"] = fax_number
+            with (
+                self.subTest(grouped_fax_number=fax_number),
+                self.assertRaisesRegex(SiteExtractionError, "source phone"),
+            ):
+                validate_site_analysis(fax_document, grouped_source)
+        grouped_phone = copy.deepcopy(base_phone)
+        grouped_phone["site"]["contact"]["phone"] = "217-555-0199"
+        self.assertEqual(
+            validate_site_analysis(grouped_phone, grouped_source),
+            grouped_phone,
+        )
+
+        postfix_grouped_source = (
+            "<h1>Acme Cleaning</h1>"
+            "<p>217-555-0100 or 217-555-0101 (fax). "
+            "Phone: 217-555-0199</p>"
+        )
+        for fax_number in ("217-555-0100", "217-555-0101"):
+            fax_document = copy.deepcopy(base_phone)
+            fax_document["site"]["contact"]["phone"] = fax_number
+            with (
+                self.subTest(postfix_grouped_fax_number=fax_number),
+                self.assertRaisesRegex(SiteExtractionError, "source phone"),
+            ):
+                validate_site_analysis(fax_document, postfix_grouped_source)
+        self.assertEqual(
+            validate_site_analysis(grouped_phone, postfix_grouped_source),
+            grouped_phone,
+        )
+
+        reverse_grouped_source = (
+            "<h1>Acme Cleaning</h1>"
+            "<p>Phone: 217-555-0100 or 217-555-0101. "
+            "Fax: 217-555-0199</p>"
+        )
+        for phone_number in ("217-555-0100", "217-555-0101"):
+            phone_document = copy.deepcopy(base_phone)
+            phone_document["site"]["contact"]["phone"] = phone_number
+            self.assertEqual(
+                validate_site_analysis(phone_document, reverse_grouped_source),
+                phone_document,
+            )
+        reverse_grouped_fax = copy.deepcopy(base_phone)
+        reverse_grouped_fax["site"]["contact"]["phone"] = "217-555-0199"
+        with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+            validate_site_analysis(reverse_grouped_fax, reverse_grouped_source)
+
         for shared_fax in (
             "Fax: 217-555-0100 or 217-555-0101",
             "217-555-0100 or 217-555-0101 (fax)",

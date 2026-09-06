@@ -768,11 +768,13 @@ def _contact_occurrence_is_noncallable(
     start: int,
     length: int,
 ) -> bool:
-    """Return whether the nearest role in this bounded assertion is non-callable."""
+    """Return whether the owning role in this bounded assertion is non-callable."""
     occurrence_end = start + length
     roles = tuple(_PHONE_ROLE_PATTERN.finditer(text))
     if not roles:
         return False
+
+    numbers = tuple(_PHONE_PATTERN.finditer(text))
 
     def span_distance(
         first_start: int,
@@ -789,13 +791,47 @@ def _contact_occurrence_is_noncallable(
     role_kinds = {role.group("role").casefold() for role in roles}
     if len(role_kinds) == 1:
         return next(iter(role_kinds)) in {"fax", "facsimile"}
-    nearest = min(
-        roles,
+
+    def is_prefix_role(role: re.Match[str]) -> bool:
+        label = role.group(0).rstrip()
+        if label.endswith((":", "#", "-")):
+            return True
+        previous = next(
+            (number for number in reversed(numbers) if number.end() <= role.start()),
+            None,
+        )
+        following = next(
+            (number for number in numbers if number.start() >= role.end()),
+            None,
+        )
+        if previous is None:
+            return True
+        if following is None:
+            return False
+        return (following.start() - role.end()) <= (role.start() - previous.end())
+
+    governed_roles: list[re.Match[str]] = []
+    preceding = next(
+        (role for role in reversed(roles) if role.end() <= start),
+        None,
+    )
+    if preceding is not None and is_prefix_role(preceding):
+        governed_roles.append(preceding)
+    following = next(
+        (role for role in roles if role.start() >= occurrence_end),
+        None,
+    )
+    if following is not None and not is_prefix_role(following):
+        governed_roles.append(following)
+    if not governed_roles:
+        return False
+    owner = min(
+        governed_roles,
         key=lambda role: span_distance(
             role.start(), role.end(), start, occurrence_end
         ),
     )
-    return nearest.group("role").casefold() in {"fax", "facsimile"}
+    return owner.group("role").casefold() in {"fax", "facsimile"}
 
 
 def _contact_destination(value: str) -> tuple[str, str] | None:
