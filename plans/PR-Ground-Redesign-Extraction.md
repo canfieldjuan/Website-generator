@@ -327,7 +327,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `bb8a52c6ca24c77ce5ee6b438eeea35bce57e01b`.
+- Code revision under test: `910fd3629dd21a5b12e38e8d194877a1af7240ec`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -430,51 +430,60 @@ business-specific claims.
   internal home route. Direct source contexts now define claim owners within the
   existing record/heading/field boundaries, and the action contract carries the
   exact validated site name plus `/` as one code-owned pair.
+- The next exact-head review proved both policies still had a category boundary,
+  not a missing example. Heading owners now include adjacent text-bearing wrapper
+  subtrees such as lists until an independent record, schema field, or
+  same-or-higher heading. The neutral-action fallback no longer contains labels
+  that assert About, FAQ, gallery, map, service, team, or work content; those
+  require an exact source-owned label/destination pair.
 - Focused ownership and action boundaries: `python -m unittest -q
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_adjacent_owned_disclaimers
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_keeps_only_action_owned_urls
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_excludes_inert_source_actions
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_preserves_every_source_label_surface
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_inert_formaction_attributes_do_not_create_source_authority
+  tests.test_generation.BodyAssemblyTests.test_neutral_action_labels_are_bounded_complete_phrases
   tests.test_generation.AtomicWriteAndCliTests.test_redesign_generators_bind_identity_and_action_destinations`:
-  6 tests passed. The negative side covers shortened claims across `h1` through
-  `h6` and adjacent leaf `div` blocks, peer heading boundaries, and rebinding the
-  business identity to another admitted destination. The positive side covers
-  complete heading/block-owned claims, independent record and field boundaries,
-  exact source action pairs, and the catalog-owned business-name-to-`/` pair.
-- Affected module: `python -m unittest -q tests.test_site_extraction`: 75 tests
-  passed.
+  7 tests passed. The negative side covers shortened claims across `h1` through
+  `h6`, adjacent leaf `div` blocks, and list wrappers; peer heading/record
+  boundaries; content-bearing fallback labels; and rebinding the business identity
+  to another admitted destination. The positive side covers complete
+  heading/block/list-owned claims, independent record and field boundaries, exact
+  source action pairs including team content, genuinely neutral controls, and the
+  catalog-owned business-name-to-`/` pair.
 - Full suite: `python -m unittest discover -s tests -q`: 368 tests passed with
   34 skipped.
 - Scoped static checks passed:
-  `ruff check --ignore F401,F541 lib/site_extraction.py pipeline.py
+  `ruff check --ignore F401,F541 lib/site_extraction.py lib/generation.py
   tests/test_site_extraction.py tests/test_generation.py`;
-  `python -m compileall -q lib/site_extraction.py pipeline.py
+  `python -m compileall -q lib/site_extraction.py lib/generation.py
   tests/test_site_extraction.py tests/test_generation.py`; and `git diff --check`.
-- The final code revision `bb8a52c6ca24c77ce5ee6b438eeea35bce57e01b`
+- The final code revision `910fd3629dd21a5b12e38e8d194877a1af7240ec`
   used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-06T02:03:01-05:00` capture with no model
-  resident and exited 0 before the `2026-09-06T02:04:04-05:00` post-run capture;
+  invocation began after the `2026-09-06T02:22:02-05:00` capture with no model
+  resident and exited 0 before the `2026-09-06T02:23:34-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
-  path ran. Log: `/dev/shm/website-generator-pr47-fixture-bb8a52c.log`.
+  path ran. The first generated body was correctly rejected for unsupported `Not
+  a Franchise` wording; the bounded correction passed full admission. Log:
+  `/dev/shm/website-generator-pr47-fixture-910fd36.log`.
 - The successful invocation rewrote
-  `outputs/builds/drees-plumbing-inc/index.html`; size was 72027 bytes, inode
-  3311281, mtime was `2026-09-06 02:04:01.321281103 -0500`, and SHA-256 was
-  `8991ac64600a198bcf5f14d6feae6fe33e0cbca5ee752d23da033dbaaaa2b309`.
+  `outputs/builds/drees-plumbing-inc/index.html`; size was 71986 bytes, inode
+  3309963, mtime was `2026-09-06 02:23:31.396653758 -0500`, and SHA-256 was
+  `428c54d54bea2aabbef294a979d679a211c5daea0896210a4ac3b40ec6817959`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-bb8a52c.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-bb8a52c.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-910fd36.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-910fd36.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3180 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
   artifact was served directly from this invocation's output. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-bb8a52c.png`,
+  `/dev/shm/website-generator-pr47-browser-render-910fd36.png`,
   SHA-256
-  `06cb49e006365b4e31f2b71f072f8ce5dd2e0b48e47469d60adc3221e8761945`.
+  `896f42996ae08d4efa93d63574dd196f939aadf13dcd8153a1c59f4b879bfe1f`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
   after this evidence block is committed; the handoff records that exact result
   rather than claiming a dirty-tree advisory run as final proof.
