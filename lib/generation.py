@@ -296,6 +296,7 @@ _EXPECTED_SERVICES_UNSET = object()
 _EXPECTED_VISIBLE_COPY_UNSET = object()
 DIRECT_USER_FACING_TEXT_ATTRIBUTES = (
     "alt",
+    "abbr",
     "title",
     "placeholder",
     "label",

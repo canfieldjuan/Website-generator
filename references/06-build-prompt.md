@@ -626,10 +626,12 @@ as concentric dashed/solid circles with a center pin in --accent. The
 inside label text reads "[N]-MILE RADIUS" where N is the numeric mile
 count extracted from `prospect.service_radius` (a free-form string).
 Look for patterns like "within 25 miles", "25-mile radius", or
-"25mi"; pull the integer. If `prospect.service_radius` is absent or
-no number is found, render "SERVICE AREA" instead of "[N]-MILE
-RADIUS" so the label stays honest. (Do NOT default to a fabricated
-mile count like 20 -- that misrepresents coverage.) Markup:
+"25mi"; pull the integer. If `prospect.service_radius` is present but
+no number is found, render the exact code-owned text "Service Area" in
+both the SVG `<title>` and visible label instead of either `[N]` string.
+If `prospect.service_radius` is absent, omit this column as required by
+the source-string rule above. Do NOT default to a fabricated mile count
+like 20 -- that misrepresents coverage. Markup:
 
 ```html
 <div>

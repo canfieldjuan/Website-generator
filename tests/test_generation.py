@@ -4345,6 +4345,63 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
         self.assertIn('label="Services"', html)
 
+    def test_build_generator_rejects_unsupported_table_header_abbreviation(self):
+        unsupported = COMPLETE_BUILD_BODY.replace(
+            '<p class="form-trust">',
+            '<table><tr><th abbr="Window cleaning">Services</th></tr></table>'
+            '<p class="form-trust">',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unsupported)),
+            )
+
+    def test_build_generator_allows_source_owned_table_header_abbreviation(self):
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<p class="form-trust">',
+            '<table><tr><th abbr="Services">Services</th></tr></table>'
+            '<p class="form-trust">',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+
+        self.assertIn('abbr="Services"', html)
+
+    def test_build_prompt_uses_exact_no_radius_service_area_copy(self):
+        prompt = Path("references/06-build-prompt.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'render the exact code-owned text "Service Area"',
+            prompt,
+        )
+        self.assertNotIn('render "SERVICE AREA"', prompt)
+
     def test_build_generator_rejects_all_unsupported_text_aria_properties(self):
         prospect = {
             "business_name": "Test Business",
