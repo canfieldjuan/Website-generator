@@ -98,7 +98,11 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fo8_z`: non-image `src` values became image authority | Image evidence attributes belong only to image-bearing elements; metadata and CSS resources retain their separate bounded paths. | `video[src]` and video `source[src]` reject as image URLs while `picture > source[srcset]` remains admissible. | fixed/superseded | `lib/site_extraction.py:1149-1206`; `tests/test_site_extraction.py:1387-1415` |
 | `PRRT_kwDOTDYaKM6fpAf9`: mixed nested record types could donate fields | Atomic records must yield ownership to nested semantic record containers as well as nested instances of their own tag. | A `<details>` wrapping separate `<article>` FAQ records can no longer pair one article's question with another's answer; leaf details and existing nested-list boundaries remain valid. | fixed/superseded | `lib/site_extraction.py:877-980`; `tests/test_site_extraction.py:2316-2377` |
 | `PRRT_kwDOTDYaKM6fpAf_`: native labels discarded image replacement text | Every form-label association must use the same replacement-text-aware accessible-name resolver as ARIA references. | `<label for=email><img alt=Email></label>` now admits `Email`; conflicting and partial labels still reject. | fixed/superseded | `lib/site_extraction.py:689-785,1277-1314`; `tests/test_site_extraction.py:1245-1342` |
-| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `3ccc697` invocation rewrote the artifact, exited 0, and both required scans found zero matches; its bytes equal the inspected rendered artifact. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-3ccc697.log`; `/dev/shm/website-generator-pr47-browser-render-74b2a74.png` |
+| `PRRT_kwDOTDYaKM6fpGr5`: explicitly hidden source subtrees became visible evidence | One renderedness rule must exclude browser-inert tags, hidden inputs/attributes, and inline render suppression from every source collector and generated claim scanner. | Claims/actions under `<template>`, `hidden`, `noscript`, and `display:none` now reject; visible equivalents remain admissible. | fixed/superseded | `lib/site_extraction.py:697-707,820-826,1134-1152`; `lib/generation.py:1359-1483`; `tests/test_site_extraction.py:1472-1531,2032-2048` |
+| `PRRT_kwDOTDYaKM6fpGr7`: fetchable relative URLs stayed relative | A URL marked fetchable must be the resolved, same-origin HTTP(S) URL that the fetcher can request. | `/services` is admitted as `https://acme.test/services`; same-page fragments and cross-origin destinations remain non-fetchable. | fixed/superseded | `lib/site_extraction.py:648-670,1838-1843`; `tests/test_site_extraction.py:1039-1091` |
+| `PRRT_kwDOTDYaKM6fpGr8`: font URLs became image authority through CSS | CSS resources must be admitted by declaration type, and the fetch inventory plus verifier must share that classifier. | `@font-face src: url('/brand.woff2')` rejects as image evidence while `background-image: url('/hero.jpg')` admits. | fixed/superseded | `lib/site_extraction.py:252-267,688-694,1143-1144,1270-1272`; `pipeline.py:495-500`; `tests/test_site_extraction.py:1420-1444` |
+| `PRRT_kwDOTDYaKM6fpGr9`: metadata image alt lost its image owner | Bounded Open Graph/Twitter image metadata must preserve ordered URL/alt ownership rather than admit unrelated page-wide text. | `og:image` followed by its `og:image:alt` admits the exact pair; a different alt rejects. | fixed/superseded | `lib/site_extraction.py:241-251,1198-1220`; `tests/test_site_extraction.py:1446-1470` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `bfe0105` invocation rewrote the artifact, exited 0, and both required scans found zero matches; its bytes equal the inspected rendered artifact. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-bfe0105.log`; `/dev/shm/website-generator-pr47-browser-render-74b2a74.png` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 
 ## Mechanism
@@ -298,7 +302,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-05)
 
-- Code revision under test: `3ccc697e4d6848ba32c9207eb5e02de3cae88a4c`.
+- Code revision under test: `bfe0105c62878609a2c1f6bf731b3660f1f4af30`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -350,19 +354,24 @@ business-specific claims.
   ownership rule. The browser-inert predicate is also reused by the downstream
   source-action contract so ignored containers cannot re-enter through a sibling
   consumer.
+- The next exact-head review reproduced four more concrete sides of those same
+  policies: explicit render suppression, relative fetch URLs, non-image CSS
+  resources, and metadata image-alt ownership. Source and generated scanners now
+  share one renderedness predicate; fetchability returns and stores the resolved
+  request URL; the fetch inventory and verifier share declaration-typed CSS image
+  extraction; and ordered Open Graph/Twitter image groups preserve URL/alt pairs.
 - Focused both-side regressions: `python -m unittest -q
-  tests.test_generation.BodyAssemblyTests.test_body_action_destinations_are_source_owned
-  tests.test_generation.BodyAssemblyTests.test_body_aria_actions_enforce_label_authority
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_parent_list_item_does_not_span_nested_list_records
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_form_fields_require_actual_labeled_controls
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_image_attributes_are_bound_to_image_resources
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_ignored_source_containers_cannot_authorize_visible_meaning
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_pages_to_fetch_derives_fetchability_from_destination
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_css_image_evidence_is_bound_to_image_declarations
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_image_metadata_pairs_alt_with_its_resource
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_excludes_inert_source_actions
-  tests.test_site_extraction.EnrichmentGroundingTests.test_nested_atomic_records_cannot_authorize_cross_record_items`:
-  7 tests passed, including pass/fail sides and the two pre-existing boundaries
-  that first exposed overly broad replacements.
+  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_enforces_identity_and_phone_substitutions`:
+  6 tests passed, including pass/fail sides and the existing generated hidden-
+  content regression that now consumes the shared renderedness predicate.
 - Affected modules: `python -m unittest -q tests.test_site_extraction
-  tests.test_generation`: 218 tests passed.
-- Full suite: `python -m unittest discover -s tests -q`: 360 tests passed with
+  tests.test_generation`: 220 tests passed.
+- Full suite: `python -m unittest discover -s tests -q`: 362 tests passed with
   34 skipped.
 - Scoped static checks passed:
   `ruff check --ignore F401,F541 lib/site_extraction.py lib/generation.py pipeline.py
@@ -376,18 +385,18 @@ business-specific claims.
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-05T23:17:55-05:00` capture with no model
-  resident and exited 0 before the `2026-09-05T23:18:58-05:00` post-run capture;
+  invocation began after the `2026-09-05T23:36:06-05:00` capture with no model
+  resident and exited 0 before the `2026-09-05T23:37:09-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
-  path ran. Log: `/dev/shm/website-generator-pr47-fixture-3ccc697.log`.
+  path ran. Log: `/dev/shm/website-generator-pr47-fixture-bfe0105.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`; size was 71954 bytes, inode
-  3309618, mtime was `2026-09-05 23:18:53.700922393 -0500`, and SHA-256 was
+  3311281, mtime was `2026-09-05 23:37:06.396119912 -0500`, and SHA-256 was
   `5b57fe46110d90d88b6f6b4fcfe18eeac32198d3c2980b524ed87d43c89aaacd`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-3ccc697.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-3ccc697.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-bfe0105.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-bfe0105.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3890 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
