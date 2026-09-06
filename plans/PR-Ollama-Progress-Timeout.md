@@ -24,7 +24,7 @@ continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
 This five-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +1409 / -29. The native stream decoder is a new
+the final diff is +1568 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -61,15 +61,18 @@ existing generation timeout. Local config resolution accepts
 `LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS`; direct callers receive the same
 default. Both the one-token prompt probe and the full native `/api/chat` request
 use the same streaming request helper and explicitly request identity content
-encoding. A local-only Requests adapter arms one deadline timer before connect,
-request-body write, and response-header parsing; if that phase exceeds the
-smaller of the total and no-progress deadlines, it atomically marks the request
-expired and shuts down that request's socket. The timer is disarmed as soon as
-headers complete. The same synchronous request then uses urllib3 `read1()` with
-decoding disabled, so each body loop iteration performs at most one underlying
-receive before elapsed time is re-evaluated. Before every receive, it sets the
-live loopback socket timeout to the smaller of the remaining inactivity window
-and remaining total deadline. It assembles bounded newline-delimited JSON
+encoding. A local-only Requests adapter starts one request-scoped deadline
+watchdog before connect, request-body write, and response-header parsing. The
+same watchdog remains attached to the connection through body framing; deadline
+updates wake that thread rather than creating a thread or timer per frame. If
+the smaller of the total and no-progress deadlines expires, it atomically marks
+the request expired and shuts down that request's socket. It is disarmed before
+the response closes and the connection can return to the pool. The same
+synchronous request uses urllib3 `read1()` with decoding disabled to bound
+returned data. Because HTTP chunk framing can still perform multiple receives
+inside one `read1()` call, the watchdog—not a socket timeout or decoder return—is
+the elapsed-time authority. Per-receive socket timeouts remain a second bound.
+The reader assembles bounded newline-delimited JSON
 frames, joins only assistant content, retains the terminal `done_reason` and
 token counts, and rejects malformed, error, reasoning, tool, oversized,
 duplicate-terminal, or incomplete streams through the existing error types.
@@ -229,34 +232,38 @@ Current shared-stream evidence, gathered from the final working tree based on
 
 ### Current revision-bound evidence
 
-Commit `3c820de4b1250ef2c4b87e660b52189e9b099554` preserves one absolute
+Commit `de93388b64e715dc6d547efc51abf390c759f4e3` preserves one absolute
 inactivity deadline across connect, request write, response headers, and the
 first streamed frame. A deterministic regression spent 0.04 seconds receiving
 headers under a 0.05-second inactivity limit, then proved the body reader used
 only the remaining budget: it raised the prompt-probe no-progress error before
-0.075 seconds. The focused provider-boundary class passed 42 tests. The full
+0.075 seconds. A production-shaped chunked server then sent a valid chunk-size
+line one byte every 0.03 seconds; the old implementation took 0.244 seconds
+under a 0.05-second deadline, while the request-scoped watchdog now enforces
+both total-before-inactivity and inactivity-before-total in under 0.15 seconds.
+The focused provider-boundary class passed 43 tests. The full
 repository command `timeout 180s python -m unittest discover -s tests` passed
-302 tests in 14.977 seconds with 34 skipped; log:
-`/dev/shm/website-generator-pr46-full-tests-final-clock.log`.
+303 tests in 18.846 seconds with 34 skipped; log:
+`/dev/shm/website-generator-pr46-full-tests-final-watchdog.log`.
 
 After `ollama ps` became empty, the required no-deploy fixture ran from
-`2026-09-06T12:08:25-05:00` through `2026-09-06T12:09:18-05:00` with exit
+`2026-09-06T12:28:22-05:00` through `2026-09-06T12:29:14-05:00` with exit
 status 0. The clean tree was at the commit above. The artifact modification
-timestamp changed from `1788713846` to `1788714558`, proving this invocation
+timestamp changed from `1788714558` to `1788715754`, proving this invocation
 rewrote it. The resulting 71,983-byte
 `outputs/builds/drees-plumbing-inc/index.html` retained SHA-256
 `1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22` and
 is byte-identical to the fresh rendered spot-check at
 `/dev/shm/website-generator-pr46-fixture-final-read1.png`. Both required scans
 returned status 1 with zero matches. Logs:
-`/dev/shm/website-generator-pr46-fixture-final-shared-deadline.log`,
-`/dev/shm/website-generator-pr46-fixture-final-shared-deadline-envelope.txt`,
-`/dev/shm/website-generator-pr46-placeholder-scan-final.txt`, and
-`/dev/shm/website-generator-pr46-forbidden-claim-scan-final.txt`.
+`/dev/shm/website-generator-pr46-fixture-final-body-watchdog.log`,
+`/dev/shm/website-generator-pr46-fixture-final-body-watchdog-envelope.txt`,
+`/dev/shm/website-generator-pr46-placeholder-scan-body-watchdog.txt`, and
+`/dev/shm/website-generator-pr46-forbidden-claim-scan-body-watchdog.txt`.
 
 ## Estimated diff size
 
-Actual: five declared files, +1409 / -29. The stream decoder and
+Actual: five declared files, +1568 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.
