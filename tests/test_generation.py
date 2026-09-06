@@ -4504,30 +4504,37 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
         self.assertIn('aria-valuetext="Services"', html)
 
-    def test_build_generator_rejects_unsupported_accessibility_numeric_values(self):
+    def test_build_generator_rejects_uncontracted_numeric_semantics(self):
+        services = ("5",)
         prospect = {
             "business_name": "Test Business",
             "trade": "cleaning service",
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
-            "services": list(DEFAULT_BUILD_SERVICES),
+            "services": list(services),
         }
         value_surfaces = (
             '<div role="meter" aria-label="Customer Reviews" '
-            'aria-valuenow="999"></div>',
-            '<meter value="999"></meter>',
-            '<progress value="999"></progress>',
+            'aria-valuenow="5" aria-valuemax="5"></div>',
+            '<div role="progressbar" aria-valuetext="5"></div>',
+            '<meter value="5"></meter>',
+            '<progress value="5"></progress>',
+            '<input type="number" value="5">',
+            '<input type="range" value="5">',
         )
 
         for surface in value_surfaces:
             unsupported = COMPLETE_BUILD_BODY.replace(
+                COMPLETE_SERVICES_GRID,
+                services_grid(services),
+            ).replace(
                 '<section class="dual-cta-hero"></section>',
                 f'<section class="dual-cta-hero">{surface}</section>',
             )
             with self.subTest(surface=surface), self.assertRaisesRegex(
                 GeneratedBodyError,
-                "visible copy outside the source-owned catalog",
+                "numeric control semantics outside a source-bound component contract",
             ):
                 build.generate_build_html(
                     prospect,
@@ -4535,7 +4542,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     FakeLocalClient(local_chat_payload(unsupported)),
                 )
 
-    def test_build_generator_allows_source_owned_accessibility_numeric_values(self):
+    def test_build_generator_allows_source_owned_numeric_text_value(self):
         services = ("5",)
         supported = COMPLETE_BUILD_BODY.replace(
             COMPLETE_SERVICES_GRID,
@@ -4543,9 +4550,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         ).replace(
             '<section class="dual-cta-hero"></section>',
             '<section class="dual-cta-hero">'
-            '<div role="meter" aria-valuenow="5"></div>'
-            '<meter value="5"></meter>'
-            '<progress value="5"></progress>'
+            '<input type="text" value="5">'
             '</section>',
         )
         prospect = {
@@ -4563,9 +4568,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(supported)),
         )
 
-        self.assertIn('aria-valuenow="5"', html)
-        self.assertIn('<meter value="5">', html)
-        self.assertIn('<progress value="5">', html)
+        self.assertIn('<input type="text" value="5">', html)
 
     def test_arbitrary_business_hero_fallback_is_business_neutral(self):
         prompt = build.build_hero_prompt(

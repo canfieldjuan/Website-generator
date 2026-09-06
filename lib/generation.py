@@ -320,6 +320,15 @@ INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES = (
     "aria-details",
     "aria-errormessage",
 )
+UNCONTRACTED_NUMERIC_ARIA_ATTRIBUTES = (
+    "aria-valuenow",
+    "aria-valuemin",
+    "aria-valuemax",
+)
+UNCONTRACTED_NUMERIC_ROLE_NAMES = frozenset(
+    ("meter", "progressbar", "scrollbar", "slider", "spinbutton")
+)
+UNCONTRACTED_NUMERIC_INPUT_TYPES = frozenset(("number", "range"))
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -3519,6 +3528,30 @@ def _validate_visible_copy(
     for element in (body_root, *body_root.find_all(True)):
         if not is_visually_exposed(element):
             continue
+        tag_name = element.name.casefold()
+        role_names = {
+            token.casefold()
+            for token in str(element.get("role") or "").split()
+        }
+        input_type = str(element.get("type") or "text").casefold()
+        has_numeric_semantics = (
+            tag_name in {"meter", "progress"}
+            or (
+                tag_name == "input"
+                and input_type in UNCONTRACTED_NUMERIC_INPUT_TYPES
+            )
+            or bool(role_names & UNCONTRACTED_NUMERIC_ROLE_NAMES)
+            or any(
+                isinstance(element.get(attribute), str)
+                and bool(element.get(attribute).strip())
+                for attribute in UNCONTRACTED_NUMERIC_ARIA_ATTRIBUTES
+            )
+        )
+        if has_numeric_semantics:
+            raise GeneratedBodyError(
+                "Generated body contains numeric control semantics outside a "
+                "source-bound component contract."
+            )
         for value in _direct_user_facing_text_values(element):
             fragment = _normalize_source_owned_text(value)
             if fragment:
