@@ -3439,13 +3439,9 @@ def _validate_visible_copy(
                 f"{class_name} contract."
             )
 
-    def is_exposed(element: Tag) -> bool:
+    def is_visually_exposed(element: Tag) -> bool:
         return not any(
             is_render_suppressed_element(candidate)
-            or (
-                isinstance(candidate.get("aria-hidden"), str)
-                and candidate["aria-hidden"].strip().casefold() == "true"
-            )
             for candidate in (element, *element.parents)
             if isinstance(candidate, Tag)
         )
@@ -3456,7 +3452,7 @@ def _validate_visible_copy(
             isinstance(node, NavigableString)
             and not isinstance(node, Comment)
             and isinstance(node.parent, Tag)
-            and is_exposed(node.parent)
+            and is_visually_exposed(node.parent)
         ):
             fragment = _normalize_source_owned_text(str(node))
             if fragment:
@@ -3470,7 +3466,7 @@ def _validate_visible_copy(
         "title",
     )
     for element in (body_root, *body_root.find_all(True)):
-        if not is_exposed(element):
+        if not is_visually_exposed(element):
             continue
         for attribute in exposed_attributes:
             value = element.get(attribute)

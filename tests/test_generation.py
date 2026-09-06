@@ -4083,6 +4083,56 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(unsupported)),
             )
 
+    def test_build_generator_rejects_unsupported_aria_hidden_visible_copy(self):
+        unsupported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<p aria-hidden="true">We also offer window cleaning</p>'
+            '</section>',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unsupported)),
+            )
+
+    def test_build_generator_allows_source_owned_aria_hidden_visible_copy(self):
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<p aria-hidden="true">Services</p>'
+            '</section>',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+
+        self.assertIn('<p aria-hidden="true">Services</p>', html)
+
     def test_arbitrary_business_hero_fallback_is_business_neutral(self):
         prompt = build.build_hero_prompt(
             {
