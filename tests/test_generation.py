@@ -1616,6 +1616,16 @@ class BodyAssemblyTests(unittest.TestCase):
                     expected_action_urls=invalid_owner_contract,
                 )
 
+        with self.assertRaisesRegex(GeneratedBodyError, "no exact form owner"):
+            validate_generated_body(
+                body_result(
+                    '<body><div id="owned"></div>'
+                    '<form id="owned" action="/other">'
+                    '<button form="owned">Send</button></form></body>'
+                ),
+                expected_action_urls=invalid_owner_contract,
+            )
+
         exact_owner = (
             '<body><form id="owned" action="/other">'
             '<button form="owned">Send</button></form></body>'

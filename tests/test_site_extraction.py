@@ -1304,6 +1304,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for complete_label in (
             "Fax Line No. 217-555-0100",
             "Fax Customer Service Number: 217.555.0100",
+            "Fax Dept. No. 217-555-0100",
             "Fax Dept. Number: 217-555-0100",
             "Fax Dept. Line: 217-555-0100",
             "Fax Regional Office Desk: 217-555-0100",
@@ -1330,6 +1331,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(
                 base_phone,
                 "<h1>Acme Cleaning</h1><p>Phone Dept. Line: 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>Phone Dept. No. 217-555-0100</p>",
             ),
             base_phone,
         )
@@ -4008,6 +4016,18 @@ class EnrichmentGroundingTests(unittest.TestCase):
                     invalid_owner_admitted["form_action"],
                     "https://acme.test/other",
                 )
+
+        first_id_collision = validate_enrichment_result(
+            {"form_fields": ["Email"]},
+            page_type="contact",
+            source_html=(
+                '<div id="owned"></div><form id="owned" action="/default">'
+                '<label>Email<input name="email"></label>'
+                '<button form="owned" formaction="/other">Send</button></form>'
+            ),
+            source_url="https://acme.test/contact",
+        )
+        self.assertEqual(first_id_collision["form_action"], "https://acme.test/default")
 
         same_endpoint_admitted = validate_enrichment_result(
             {"form_fields": ["Email"]},

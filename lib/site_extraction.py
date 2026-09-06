@@ -482,10 +482,11 @@ _CONTACT_FIELD_ABBREVIATION_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?P<token>[A-Z0-9]{1,4})$",
     re.I,
 )
-_CONTACT_FIELD_ABBREVIATION_CONTINUATIONS = {
-    "dept": frozenset({(), ("line",), ("number",)}),
-    "no": frozenset({()}),
-}
+_CONTACT_FIELD_ABBREVIATIONS = frozenset({"dept", "no"})
+_INDEPENDENT_OFFICE_FIELD_PATTERN = re.compile(
+    r"^\s*(?:(?:main|primary)\s+)?office(?:\s+(?:line|number|phone))?\s*[:#\-–—]",
+    re.I,
+)
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
 _CSS_DECLARATION_PATTERN = re.compile(
     r"(?:^|[;{])\s*([\w-]+)\s*:\s*([^;{}]+)",
@@ -794,25 +795,16 @@ def _contact_field_gap_is_structural(
             )
             if abbreviation is not None:
                 token = abbreviation.group("token").casefold()
-                if not role_before_number:
-                    # In a postfix label ("Regional Dept. Fax"), the role
-                    # itself follows this gap. The abbreviation is structural
-                    # only when no second field starts between it and the role.
-                    if not _WORD_PATTERN.findall(gap[boundary.end() :]):
-                        continue
-                else:
-                    # Prefix abbreviations are structural only inside a
-                    # bounded contact-label grammar. A larger remainder such
-                    # as "Main office:" starts a new field and makes the
-                    # period a real record boundary.
-                    continuation = tuple(
-                        word.casefold()
-                        for word in _WORD_PATTERN.findall(gap[boundary.end() :])
-                    )
-                    if continuation in _CONTACT_FIELD_ABBREVIATION_CONTINUATIONS.get(
-                        token, frozenset()
-                    ):
-                        continue
+                following_gap = gap[boundary.end() :]
+                if token in _CONTACT_FIELD_ABBREVIATIONS and not (
+                    role_before_number
+                    and _INDEPENDENT_OFFICE_FIELD_PATTERN.match(following_gap)
+                ):
+                    # Recognized field abbreviations may be consecutive and
+                    # may precede arbitrary bounded field descriptors. They
+                    # stop only when the remainder begins a separately labelled
+                    # callable office field.
+                    continue
         if marker in {"–", "—"}:
             outside = (
                 gap[boundary.end() :]
@@ -1391,8 +1383,12 @@ def _source_form_owner(
             return None
         # HTML form-owner references are exact IDs. Trimming would turn an
         # explicitly invalid association into authority for another form.
-        owners = root.find_all("form", id=form_id, limit=2)
-        return owners[0] if len(owners) == 1 else None
+        owner = (
+            root
+            if isinstance(root, Tag) and root.get("id") == form_id
+            else root.find(id=form_id)
+        )
+        return owner if isinstance(owner, Tag) and owner.name.casefold() == "form" else None
     return control.find_parent("form")
 
 
