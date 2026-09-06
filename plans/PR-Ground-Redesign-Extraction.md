@@ -145,6 +145,10 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fqT3l`: unavailable action subtrees still granted source authority | One availability rule must govern every source action consumer without hiding inert text that remains rendered. | Actions below `inert`, disabled controls, and controls disabled by a fieldset now reject; an ordinary action and the disabled-fieldset first-legend exception pass. Inert non-action claim text remains visible evidence. | fixed/superseded | `lib/site_extraction.py:982-1012,1632-1665`; `pipeline.py:17-24,214-240`; `tests/test_site_extraction.py:1867-1957,2489-2507` |
 | `PRRT_kwDOTDYaKM6fqT3s`: wrapping native labels absorbed their controls' option text | A native label owns its own accessible text, not the text content of the form control it labels. | `<label>Project Type<select><option>Office</option></select></label>` admits `Project Type` and rejects the fabricated combined label `Project Type Office`; externally associated and ARIA labels retain their existing paths. | fixed/superseded | `lib/site_extraction.py:912-979,1787-1832`; `tests/test_site_extraction.py:1615-1679` |
 | `PRRT_kwDOTDYaKM6fqT3u`: a valid main/H1 FAQ record was discarded | A single H1-owned main record must be usable while independent nested or peer records remain ownership boundaries. | `<main><h1>Do you offer financing?</h1><p>Yes.</p></main>` admits the complete FAQ record. A main with independent sections rejects, and an H1 page shell cannot recombine a question from one peer H2 record with another peer's answer. | fixed/superseded | `lib/site_extraction.py:1107-1109,1225-1263,1316-1332`; `tests/test_site_extraction.py:2838-2886` |
+| `PRRT_kwDOTDYaKM6fqwTb`: service-section headlines did not enter the service/location contract | Every admitted service surface consumed by generation must enter the same relationship-preservation contract; independent service and location facts still cannot authorize a composed claim. | A headline-only `Drain Cleaning` services section is retained as a service, but does not authorize `Drain Cleaning in Effingham, IL` without one complete source-owned relationship. | fixed/superseded | `pipeline.py:154-205`; `tests/test_site_extraction.py:2636-2689`; `tests/test_generation.py:1504-1551` |
+| `PRRT_kwDOTDYaKM6fqtjJ`: a transparent nested heading wrapper split a claim from its restriction | Claim ownership must follow one bounded rendered record through transparent wrappers; wrapper spelling cannot allow a heading to discard an adjacent restriction. | `<div><div><h3>Free Estimates</h3></div><div>Members only.</div></div>` rejects the shortened claim and admits the complete qualified assertion. | fixed/superseded | `lib/site_extraction.py:1394-1514`; `tests/test_site_extraction.py:731-747` |
+| `PRRT_kwDOTDYaKM6fqtjL`: enrichment validated form labels but discarded their endpoint | Form controls and their effective endpoint must be owned by one source form, and only code may add the verified endpoint after raw model output passes schema validation. | One source form's labels retain its browser-effective HTTP(S) action into the generated-form contract; ambiguous same-label forms reject, the endpoint does not become link authority, and model-authored `form_action` rejects. | fixed/superseded | `lib/site_extraction.py:1165-1222,1511-1538,1989-2026,2396-2426,2750-2776`; `pipeline.py:247-280`; `tests/test_site_extraction.py:3566-3607` |
+| `PRRT_kwDOTDYaKM6fqtjN`: channel-specific neutral labels ignored destination scheme | Neutral fallback may describe only the capability its destination actually performs unless the exact source-owned label/destination pair already grants authority. | Unowned `Text Us` and `Email Us` on `tel:` reject; `Call Us` on `tel:` and `Text Us` on `sms:` admit, while an exact source-owned pair retains precedence. | fixed/superseded | `lib/generation.py:2208-2215,2379-2408`; `tests/test_generation.py:1200-1255` |
 
 ## Mechanism
 
@@ -350,87 +354,65 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `f539b1cbf252cf4cbfd1dff612da9aab2aa60634`.
-  The worktree was clean when the production-shaped fixture started. The plan
-  update that records these results is documentation-only and therefore a
-  descendant of this tested code revision.
-- Five isolated current-head probes reproduced the remaining review paths before
-  implementation: browser-effective `<base href>` was ignored for a relative
-  image and form endpoint, a generated form without an action passed, an ordinary
-  phone authorized SMS, and independent service/location facts admitted a new
-  coverage assertion. The implementation closes those paths through three shared
-  policies rather than five exceptions: one effective source-document base for
-  URL consumers, one explicit endpoint/capability action contract for extraction
-  and output, and one record-owned complete-assertion contract for service/location
-  relationships.
-- Boundary probe: `python -m unittest -v
-  tests.test_generation.BodyAssemblyTests.test_body_action_destinations_are_source_owned
-  tests.test_generation.BodyAssemblyTests.test_service_location_claims_require_one_complete_source_assertion
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_source_base_controls_relative_resource_and_page_resolution
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_resolves_source_form_against_base
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_redesign_service_location_contract_preserves_only_complete_claims`
-  passed 5 tests. Negative sides reject an implicit form endpoint, phone-derived
-  SMS, and a composed service/location assertion. Positive sides preserve an
-  explicit admitted form/SMS pair, separate independently rendered facts, one
-  complete source relationship, and root-relative image/page/form resolution.
-- The next paginated review exposed six paths, but all reproduced through two
-  flattening boundaries. The semantic-fact boundary now excludes noncurrent HTML,
-  distinguishes fax from callable phone evidence, and preserves base plus
-  extension-qualified phone variants. The relational-action boundary now keeps
-  decoded browser URL identity, binds item title to destination through direct or
-  bounded record-local detail actions, and requires a social platform plus its
-  URL to belong to one source action. Isolated probes reject fax, deleted phone,
-  cross-paired item URL, and share-as-profile inputs while admitting ordinary and
-  extension-bearing phones, inserted replacements, record-local detail links,
-  owned profiles, and browser-decoded URLs.
-- The last two paginated threads were remaining consumers of already-declared
-  rules. Form-field collection now applies the same availability predicate as
-  actions, including disabled, inert, and first-legend boundaries. The redesign
-  prompt's enriched-preview and submit-label branches now state the same
-  exact-source-or-bounded-neutral contract enforced by output admission. Focused
-  tests passed for unavailable controls, action availability, and prompt
-  consistency.
-- Current affected modules: `python -m unittest -q tests.test_site_extraction
-  tests.test_generation` passed 234 tests.
-- Full suite: `python -m unittest discover -s tests` passed 376 tests with 34
-  skipped.
-- Static evidence: `python -m ruff check --ignore F401,F541
-  lib/site_extraction.py lib/generation.py pipeline.py
-  tests/test_site_extraction.py tests/test_generation.py`, `python -m compileall
-  -q pipeline.py lib tests`, and `git diff --check` passed. The unscoped Ruff run
-  reported 8 pre-existing F401/F541 findings, and `ruff format --check` would
-  mechanically rewrite all 5 inspected Python files; neither unrelated rewrite is
-  included in this PR.
+- Code revision under test: `2377b75f32b0b3f7027952b514e0bcf0ddfd1ff9`.
+  The code worktree was clean when the production-shaped fixture started. This
+  plan update is a documentation-only descendant of that tested code revision.
+- Four isolated probes reproduced every then-open thread against the preceding
+  head before implementation: a transparent nested wrapper split a claim from
+  its restriction, contact enrichment discarded the form endpoint, channel-
+  specific neutral labels ignored the destination scheme, and a service headline
+  never entered the service/location contract. The implementation changes the
+  shared structural-owner walk, source-form ownership/effective-endpoint contract,
+  generated action policy, and service-surface collector. It does not enumerate
+  the reproduced words or add per-fixture exceptions.
+- Boundary probe: `python -m unittest tests.test_site_extraction
+  tests.test_generation` passed 236 tests. The negative sides reject a shortened
+  wrapper-owned claim, controls split across ambiguous forms, a model-authored
+  endpoint, mismatched text/email/call destinations, and service/location
+  composition without a complete source relationship. Positive sides preserve
+  the complete qualified claim, one form-owned browser-effective endpoint,
+  exact source-owned action pairs, correctly matched channel actions, and
+  headline-only service evidence without granting a composed coverage claim.
+- Full suite: `python -m unittest discover -s tests -v` passed 378 tests with 34
+  skipped. Log: `/dev/shm/website-generator-pr47-full-2377b75.log`.
+- Static evidence: `python -m ruff check lib/site_extraction.py
+  lib/generation.py`, `python -m compileall -q build.py pipeline.py
+  connect_provider.py lib tests`, and `git diff --check` passed. A broader scoped
+  Ruff invocation reported eight existing F401/F541 findings also present on
+  `origin/main`; no unrelated lint cleanup is included.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began after `2026-09-06T04:35:07,631172909-05:00`, completed before
-  `2026-09-06T04:36:06,879843694-05:00`, exited 0, and left the model resident
-  100% on the GPU. No correction attempt, email, or deployment path ran. Log:
-  `/dev/shm/website-generator-pr47-fixture-f539b1c.log`.
-- The invocation replaced the prior artifact inode with inode 3309618 at mtime
-  `2026-09-06 04:36:03.819089057 -0500`; the resulting 71939-byte
-  `outputs/builds/drees-plumbing-inc/index.html` has SHA-256
+  Ollama. It began at `2026-09-06T04:54:48,025681445-05:00`, completed at
+  `2026-09-06T04:55:38,666198954-05:00`, exited 0, and ran the 22 GB model 100% on
+  the GPU with context 40960. No correction attempt, email, or deployment path
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-2377b75.log`.
+- The invocation replaced artifact inode 3309618 with inode 3311281 and set mtime
+  `2026-09-06 04:55:38.591645034 -0500`, proving this invocation rewrote
+  `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71939-byte artifact
+  has SHA-256
   `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
-  returned status 1 with zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-f539b1c.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-f539b1c.log`.
-- Rendered spot-check: the committed artifact returned HTTP 200 with 71939 bytes;
-  headless Chrome reported title `DREES PLUMBING INC` and 2441 body-text
-  characters. The tall screenshot was inspected at original resolution through
-  top, middle, and bottom crops and shows a nonblank styled Drees Plumbing page
-  with navigation, hero and CTAs, services, trust/reviews, contact form, and
-  footer. Full screenshot:
-  `/dev/shm/website-generator-pr47-browser-render-f539b1c.png`, SHA-256
-  `bbd0dbe929f645f5b0a3830d69cc20f82c575c9f729346433999d2683136a4b7`.
+  returned the expected no-match status 1 with zero matches; missing-file and
+  execution-error statuses were handled separately. Logs:
+  `/dev/shm/website-generator-pr47-placeholder-scan-2377b75.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-2377b75.log`.
+- Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
+  reported title `DREES PLUMBING INC` and 2441 body-text characters. The full
+  screenshot was visually inspected and shows the complete styled page from hero
+  through footer without an obvious render break. Screenshot:
+  `/dev/shm/website-generator-pr47-browser-render-2377b75.png`, SHA-256
+  `5be194b19b5f44ffdde0c394f5ed3614a023be993dc8b3f4d1f02b0bc10c4afa`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
   separate open issue because one successful run does not resolve its historical
   stall.
-- `bash scripts/local_pr_review.sh origin/main` passed on the clean plan-only
-  descendant. Final-head GitHub/review reconciliation follows after publication
-  so it is not claimed against an unpublished or superseded head.
+- Clean-worktree local review and final-head GitHub/review reconciliation follow
+  after this documentation-only descendant is committed and published; neither is
+  claimed against the tested code revision.
 
 ### Historical evidence (earlier revisions; not final-head proof)
 
+- Revision `f539b1cbf252cf4cbfd1dff612da9aab2aa60634` had its own fresh
+  fixture, scans, rendered spot-check, affected suite, and full-suite evidence.
+  Those results are historical and do not substitute for the current block.
 - The earlier three current-review reproductions first admitted a shortened
   recipient-qualified claim, ignored an unsupported `input[type=button]` label,
   and rejected the correct identity from a WordPress-style `site-identity`
