@@ -152,6 +152,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fq4kC`: a semantic main shell abandoned a heading-owned restriction | A page-level claim owner must follow its semantic content scope while body/document shells remain non-owning and record/peer-heading boundaries remain intact. | `<main><h3>Free Estimates</h3><p>Members only.</p></main>` rejects the shortened benefit and admits the complete qualified assertion. Existing body-level independent facts and peer records remain separate. | fixed/superseded | `lib/site_extraction.py:1707-1718,1778-1827`; `tests/test_site_extraction.py:731-775` |
 | `PRRT_kwDOTDYaKM6fq4kD`: source-form admission ignored submitter `formaction` | Extraction, contract construction, and generated-output validation must share one submit-action and effective-destination rule; one form is admissible only when its available submitters resolve to one endpoint. | A submitter override replaces the form/default endpoint, equal submitter endpoints admit, conflicting endpoints reject, and a valid late submitter beyond the extraction item cap is still considered. | fixed/superseded | `lib/site_extraction.py:1171-1228,1273-1320,2094-2117`; `lib/generation.py:23-31,2215-2248`; `pipeline.py:18-28,296-322`; `tests/test_site_extraction.py:2717-2828,3592-3670` |
 | `PRRT_kwDOTDYaKM6fq4kE`: sentence-form fax labels became callable phone evidence | Contact admission must classify the nearest explicit role in the same sentence, not only one punctuation-shaped prefix. | `Our fax is 217-555-0100` rejects while `Our phone is 217-555-0100`, extension-qualified phone text, and existing callable action evidence remain admissible. | fixed/superseded | `lib/site_extraction.py:462-474,765-773`; `tests/test_site_extraction.py:1101-1139` |
+| `PRRT_kwDOTDYaKM6frBY4`: direct text in a semantic main retained a second unbounded occurrence | One rendered claim run may have only its bounded structural owner; parent-local text cannot remain independently authoritative when a distinct child context owns that same run. | `<main>Free Estimates<p>Members only.</p></main>` rejects the shortened benefit and admits the complete assertion. The suppression applies only to homepage claim contexts; valid nested list records still admit and cross-record combinations reject. | fixed/superseded | `lib/site_extraction.py:1796-1902`; `tests/test_site_extraction.py:749-762,2288-2309` |
+| `PRRT_kwDOTDYaKM6frBY6`: postfix fax roles became callable evidence | Contact admission must select the nearest explicit role on either side of a phone occurrence within the same sentence. | Both `217-555-0100 is our fax` and `217-555-0100 (fax)` reject; the equivalent postfix phone wording and existing prefix/extension phone forms admit. | fixed/superseded | `lib/site_extraction.py:765-797,2182-2200`; `tests/test_site_extraction.py:1102-1159` |
 
 ## Mechanism
 
@@ -357,26 +359,27 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `9ea7515f1dbffd1bc3f43ae2a86827c2babe3918`.
+- Code revision under test: `2e5c5239c597e632bfd5b6dfb145db06cb217e9e`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
-- Isolated probes reproduced all three newly reported paths against the preceding
-  head: `<main>` abandoned a heading restriction, form enrichment ignored a
-  submitter override, and sentence-form fax text became callable. The correction
-  changes the shared semantic claim-owner walk, moves submit/action destination
-  classification into the source-authority module used by extraction, contract
-  construction, and generated-output validation, and classifies the nearest
-  explicit contact role within the same sentence. It does not enumerate claim
-  wording, special-case the reported fixture, or make body/document shells owners.
+- Isolated probes reproduced the two latest review paths against the preceding
+  head: parent-local text in `<main>` remained a second unbounded occurrence, and
+  postfix fax wording remained callable. The correction suppresses that duplicate
+  occurrence only when a distinct child claim context owns the same structural
+  run, and selects the nearest explicit contact role on either side within the
+  sentence. It does not enumerate claim wording or copular phrases, special-case
+  the reported fixture, make body/document shells owners, or alter record-mode
+  evidence.
 - Boundary probe: `python -m unittest tests.test_site_extraction
   tests.test_generation` passed 236 tests. Focused positive/negative coverage
-  additionally proves shortened versus complete `<main>` claims, fax versus phone
-  roles, submitter override versus conflicting endpoints, generated action
-  propagation, and a valid submitter appearing after `MAX_ITEMS` unrelated
-  controls. Log: `/dev/shm/website-generator-pr47-affected-9ea7515.log`.
+  additionally proves shortened versus complete heading and direct-text `<main>`
+  claims, prefix and postfix fax versus phone roles, submitter override versus
+  conflicting endpoints, generated action propagation, a valid submitter after
+  `MAX_ITEMS` unrelated controls, and unchanged leaf-record isolation. Log:
+  `/dev/shm/website-generator-pr47-affected-direct-main-postfix-role.log`.
 - Full suite: `timeout 180s python -m unittest discover -s tests -v` passed 378
   tests with 34 skipped. Log:
-  `/dev/shm/website-generator-pr47-full-9ea7515.log`. An earlier unbounded
+  `/dev/shm/website-generator-pr47-full-direct-main-postfix-role.log`. An earlier unbounded
   invocation was terminated after an unrelated Connect-provider test deadlocked;
   that exact test then passed alone in 0.143 seconds, and the bounded full rerun
   completed normally. The interrupted invocation is not counted as passing proof.
@@ -387,25 +390,25 @@ business-specific claims.
   `pipeline.py` reported six unrelated existing F401/F541 findings; no unrelated
   lint cleanup is included.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T05:27:04,495519988-05:00`, completed at
-  `2026-09-06T05:27:54,747700773-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T05:49:11,384309184-05:00`, completed at
+  `2026-09-06T05:50:01,820619159-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-9ea7515.log`.
-- The invocation replaced artifact inode 3311281 with inode 3325015 and set mtime
-  `2026-09-06 05:27:54.670064827 -0500`, proving this invocation rewrote
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-2e5c523.log`.
+- The invocation replaced artifact inode 3325015 with inode 3325022 and set mtime
+  `2026-09-06 05:50:01.707108525 -0500`, proving this invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71939-byte artifact
   has SHA-256
   `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-9ea7515.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-9ea7515.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-2e5c523.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-2e5c523.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
   reported title `DREES PLUMBING INC`, 2441 body-text characters, and a
   1440x3245 document. The full screenshot was visually inspected and shows the
   complete styled page from hero through footer without an obvious render break.
-  Screenshot: `/dev/shm/website-generator-pr47-browser-render-9ea7515.png`,
+  Screenshot: `/dev/shm/website-generator-pr47-browser-render-2e5c523.png`,
   SHA-256
   `b4526d0f9eb448f20b703463ac4e0ace38ed96d81ac43a668528a1aa8e430298`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
