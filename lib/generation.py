@@ -759,72 +759,80 @@ _LOCAL_REQUEST_DEADLINE: ContextVar[_LocalRequestDeadline | None] = ContextVar(
 
 
 class _LocalDeadlineConnectionMixin:
-    """Abort a local request socket when its establishment deadline expires."""
+    """Abort a local request socket when its elapsed deadline expires."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._local_deadline_lock = threading.Lock()
+        self._local_deadline_condition = threading.Condition()
         self._local_deadline_token: object | None = None
-        self._local_deadline_timer: threading.Timer | None = None
+        self._local_deadline_state: _LocalRequestDeadline | None = None
+        self._local_deadline_thread: threading.Thread | None = None
 
-    def _expire_local_request(
-        self,
-        token: object,
-        deadline: _LocalRequestDeadline,
-    ) -> None:
-        with self._local_deadline_lock:
-            if self._local_deadline_token is not token:
-                return
-            deadline.expired.set()
-            active_socket = self.sock
-            if active_socket is None:
-                return
-            try:
-                active_socket.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
+    def _run_local_deadline_watchdog(self) -> None:
+        while True:
+            with self._local_deadline_condition:
+                deadline = self._local_deadline_state
+                if deadline is None:
+                    self._local_deadline_thread = None
+                    return
+                remaining = deadline.expires_at - time.monotonic()
+                if remaining > 0:
+                    self._local_deadline_condition.wait(timeout=remaining)
+                    continue
+                deadline.expired.set()
+                active_socket = self.sock
+                self._local_deadline_thread = None
+            if active_socket is not None:
+                try:
+                    active_socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            return
 
-    def _disarm_local_deadline(self, token: object) -> None:
-        with self._local_deadline_lock:
-            if self._local_deadline_token is not token:
+    def _arm_local_deadline(self, deadline: _LocalRequestDeadline) -> object:
+        token = object()
+        with self._local_deadline_condition:
+            self._local_deadline_token = token
+            self._local_deadline_state = deadline
+            watchdog = self._local_deadline_thread
+            if watchdog is None or not watchdog.is_alive():
+                watchdog = threading.Thread(
+                    target=self._run_local_deadline_watchdog,
+                    daemon=True,
+                    name="ollama-request-deadline",
+                )
+                self._local_deadline_thread = watchdog
+                watchdog.start()
+            self._local_deadline_condition.notify_all()
+        return token
+
+    def _disarm_local_deadline(self, token: object | None = None) -> None:
+        with self._local_deadline_condition:
+            if token is not None and self._local_deadline_token is not token:
                 return
-            timer = self._local_deadline_timer
             self._local_deadline_token = None
-            self._local_deadline_timer = None
-        if timer is not None:
-            timer.cancel()
+            self._local_deadline_state = None
+            self._local_deadline_condition.notify_all()
 
     def request(self, *args: Any, **kwargs: Any) -> None:
         deadline = _LOCAL_REQUEST_DEADLINE.get()
         if deadline is None:
             return super().request(*args, **kwargs)
-        token = object()
-        timer = threading.Timer(
-            max(0.0, deadline.expires_at - time.monotonic()),
-            self._expire_local_request,
-            args=(token, deadline),
-        )
-        timer.daemon = True
-        with self._local_deadline_lock:
-            self._local_deadline_token = token
-            self._local_deadline_timer = timer
-        timer.start()
+        token = self._arm_local_deadline(deadline)
         try:
             super().request(*args, **kwargs)
             if deadline.expired.is_set():
-                raise TimeoutError("Local request establishment deadline expired.")
+                raise TimeoutError("Local request deadline expired.")
         except BaseException:
             self._disarm_local_deadline(token)
             raise
 
     def getresponse(self) -> Any:
-        with self._local_deadline_lock:
-            token = self._local_deadline_token
         try:
             return super().getresponse()
-        finally:
-            if token is not None:
-                self._disarm_local_deadline(token)
+        except BaseException:
+            self._disarm_local_deadline()
+            raise
 
 
 class _LocalDeadlineHTTPConnection(_LocalDeadlineConnectionMixin, HTTPConnection):
@@ -968,9 +976,19 @@ def _local_no_progress_error(
     )
 
 
-def _set_local_stream_socket_timeout(response: Any, timeout_seconds: float) -> None:
+def _local_stream_connection(response: Any) -> Any:
     raw = getattr(response, "raw", None)
     connection = getattr(raw, "connection", None)
+    arm_deadline = getattr(connection, "_arm_local_deadline", None)
+    disarm_deadline = getattr(connection, "_disarm_local_deadline", None)
+    if not callable(arm_deadline) or not callable(disarm_deadline):
+        raise GenerationProviderUnavailable(
+            "Ollama response does not expose elapsed deadline enforcement."
+        )
+    return connection
+
+
+def _set_local_stream_socket_timeout(connection: Any, timeout_seconds: float) -> None:
     sock = getattr(connection, "sock", None)
     settimeout = getattr(sock, "settimeout", None)
     if not callable(settimeout):
@@ -985,10 +1003,30 @@ def _set_local_stream_socket_timeout(response: Any, timeout_seconds: float) -> N
         ) from exc
 
 
+def _arm_local_stream_deadline(
+    connection: Any,
+    expires_at: float,
+    expired: threading.Event,
+) -> None:
+    connection._arm_local_deadline(
+        _LocalRequestDeadline(expires_at=expires_at, expired=expired)
+    )
+
+
+def _disarm_local_response_deadline(response: Any) -> None:
+    raw = getattr(response, "raw", None)
+    connection = getattr(raw, "connection", None)
+    disarm_deadline = getattr(connection, "_disarm_local_deadline", None)
+    if callable(disarm_deadline):
+        disarm_deadline()
+
+
 def _iter_bounded_local_stream_lines(
     response: Any,
     *,
+    connection: Any,
     deadline: float,
+    deadline_expired: threading.Event,
     no_progress_timeout_seconds: float,
     no_progress_deadline: float,
     progress_stage: str,
@@ -1013,16 +1051,20 @@ def _iter_bounded_local_stream_lines(
             raise _local_no_progress_error(
                 progress_stage, no_progress_timeout_seconds
             )
+        receive_deadline = min(deadline, progress_deadline)
+        _arm_local_stream_deadline(
+            connection,
+            receive_deadline,
+            deadline_expired,
+        )
         _set_local_stream_socket_timeout(
-            response,
+            connection,
             min(total_remaining, progress_remaining),
         )
         try:
-            # urllib3.read1 performs at most one underlying receive when
-            # content decoding is disabled. Re-entering this loop after every
-            # receive makes both elapsed deadlines independent of byte flow;
-            # a peer trickling bytes faster than the socket timeout cannot
-            # hold a larger buffered read open indefinitely.
+            # read1 bounds returned data, but HTTP chunk framing may perform
+            # multiple receives internally. The connection watchdog enforces
+            # elapsed deadlines independently of this call returning.
             chunk = read_once(LOCAL_STREAM_CHUNK_BYTES, decode_content=False)
         except (OSError, requests.RequestException, Urllib3HTTPError) as exc:
             if time.monotonic() >= deadline:
@@ -1056,12 +1098,20 @@ def _iter_bounded_local_stream_lines(
             if not raw_line:
                 yield raw_line
                 continue
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if now >= deadline:
                 raise GenerationProviderUnavailable(
                     "Local generation exceeded its configured request deadline."
                 )
-            progress_deadline = (
-                time.monotonic() + no_progress_timeout_seconds
+            if now >= progress_deadline:
+                raise _local_no_progress_error(
+                    progress_stage, no_progress_timeout_seconds
+                )
+            progress_deadline = now + no_progress_timeout_seconds
+            _arm_local_stream_deadline(
+                connection,
+                min(deadline, progress_deadline),
+                deadline_expired,
             )
             yield raw_line
         if len(pending) > MAX_LOCAL_STREAM_FRAME_BYTES:
@@ -1069,10 +1119,20 @@ def _iter_bounded_local_stream_lines(
                 "Local generation provider returned an oversized stream frame."
             )
     if pending:
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now >= deadline:
             raise GenerationProviderUnavailable(
                 "Local generation exceeded its configured request deadline."
             )
+        if now >= progress_deadline:
+            raise _local_no_progress_error(
+                progress_stage, no_progress_timeout_seconds
+            )
+        _arm_local_stream_deadline(
+            connection,
+            min(deadline, now + no_progress_timeout_seconds),
+            deadline_expired,
+        )
         yield bytes(pending)
 
 
@@ -1080,6 +1140,7 @@ def _read_local_chat_stream(
     response: Any,
     *,
     deadline: float,
+    deadline_expired: threading.Event,
     no_progress_timeout_seconds: float,
     no_progress_deadline: float,
     progress_stage: str = "generation",
@@ -1087,11 +1148,15 @@ def _read_local_chat_stream(
     content_parts: list[str] = []
     content_bytes = 0
     terminal: dict[str, Any] | None = None
+    connection: Any | None = None
 
     try:
+        connection = _local_stream_connection(response)
         for raw_line in _iter_bounded_local_stream_lines(
             response,
+            connection=connection,
             deadline=deadline,
+            deadline_expired=deadline_expired,
             no_progress_timeout_seconds=no_progress_timeout_seconds,
             no_progress_deadline=no_progress_deadline,
             progress_stage=progress_stage,
@@ -1148,6 +1213,10 @@ def _read_local_chat_stream(
                     "Ollama returned a stream frame without completion state."
                 )
     finally:
+        if connection is not None:
+            connection._disarm_local_deadline()
+        else:
+            _disarm_local_response_deadline(response)
         response.close()
 
     if terminal is None:
@@ -1205,11 +1274,13 @@ def _request_local_chat_stream(
     try:
         _raise_for_local_response_status(response)
     except Exception:
+        _disarm_local_response_deadline(response)
         response.close()
         raise
     return _read_local_chat_stream(
         response,
         deadline=deadline,
+        deadline_expired=deadline_state.expired,
         no_progress_timeout_seconds=request_timeout[1],
         no_progress_deadline=no_progress_deadline,
         progress_stage=progress_stage,

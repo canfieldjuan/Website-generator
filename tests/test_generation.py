@@ -222,10 +222,22 @@ class FakeLocalResponse:
         self._stream_source_chunks = None
         self._stream_chunk_index = 0
         self._stream_chunk_offset = 0
+        self.deadline_states = []
+        self.deadline_disarm_calls = 0
+
+        def arm_deadline(deadline):
+            self.deadline_states.append(deadline)
+            return object()
+
+        def disarm_deadline(token=None):
+            self.deadline_disarm_calls += 1
+
         self.raw = SimpleNamespace(
             read1=self._read1,
             connection=SimpleNamespace(
-                sock=SimpleNamespace(settimeout=self.socket_timeouts.append)
+                sock=SimpleNamespace(settimeout=self.socket_timeouts.append),
+                _arm_local_deadline=arm_deadline,
+                _disarm_local_deadline=disarm_deadline,
             )
         )
 
@@ -1306,6 +1318,75 @@ class ProviderBoundaryTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=1)
+
+    def test_local_prompt_probe_chunk_header_trickle_honors_elapsed_deadlines(self):
+        class ChunkHeaderTrickleHandler(socketserver.StreamRequestHandler):
+            def handle(self):
+                content_length = 0
+                while True:
+                    line = self.rfile.readline()
+                    if not line or line == b"\r\n":
+                        break
+                    if line.lower().startswith(b"content-length:"):
+                        content_length = int(line.split(b":", 1)[1].strip())
+                if content_length:
+                    self.rfile.read(content_length)
+                self.wfile.write(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/x-ndjson\r\n"
+                    b"Transfer-Encoding: chunked\r\n\r\n"
+                )
+                self.wfile.flush()
+                try:
+                    for byte in b"100000\r\n":
+                        self.wfile.write(bytes((byte,)))
+                        self.wfile.flush()
+                        time.sleep(0.03)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        cases = (
+            ("total", 0.05, 1, "exceeded its configured request deadline"),
+            ("inactivity", 1, 0.05, "no prompt-probe progress within 0.05"),
+        )
+        for label, total_timeout, no_progress_timeout, expected_error in cases:
+            with self.subTest(label=label):
+                server = socketserver.ThreadingTCPServer(
+                    ("127.0.0.1", 0), ChunkHeaderTrickleHandler
+                )
+                server.daemon_threads = True
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    selected = GenerationConfig(
+                        provider="local",
+                        model=DEFAULT_LOCAL_MODEL,
+                        base_url=f"http://127.0.0.1:{server.server_address[1]}",
+                        api_key="test-key",
+                        timeout_seconds=total_timeout,
+                        max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+                        local_no_progress_timeout_seconds=no_progress_timeout,
+                    )
+
+                    started = time.monotonic()
+                    with self.assertRaisesRegex(
+                        GenerationProviderUnavailable,
+                        expected_error,
+                    ):
+                        generate_text(
+                            selected,
+                            system_prompt="system",
+                            user_parts=(PromptPart("input"),),
+                            temperature=0.4,
+                        )
+                    elapsed = time.monotonic() - started
+
+                    self.assertGreaterEqual(elapsed, 0.04)
+                    self.assertLess(elapsed, 0.15)
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=1)
 
     def test_local_prompt_probe_headers_do_not_reset_no_progress_deadline(self):
         class SlowHeadersClient(FakeLocalClient):
