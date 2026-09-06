@@ -3880,6 +3880,42 @@ class PromptContractTests(unittest.TestCase):
 
 
 class AtomicWriteAndCliTests(unittest.TestCase):
+    def test_prepare_prospect_normalizes_services_before_duplicate_check(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": ["Drain  cleaning"],
+        }
+
+        prepared = build.prepare_prospect(prospect)
+
+        self.assertEqual(prepared["services"], ["Drain cleaning"])
+
+    def test_prepare_prospect_rejects_render_equivalent_service_duplicates(self):
+        base = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+        duplicate_sets = (
+            ["Drain  cleaning", "Drain cleaning"],
+            ["Ｄrain cleaning", "Drain cleaning"],
+        )
+
+        for services in duplicate_sets:
+            with self.subTest(services=services), self.assertRaisesRegex(
+                ValueError,
+                "must not contain duplicates",
+            ):
+                build.prepare_prospect(
+                    {**base, "services": services},
+                )
+
     def test_uncatalogued_trade_uses_generic_document_colors(self):
         colors = build.resolve_build_document_colors(
             {"business_name": "Test Business", "trade": "roofer"}
@@ -4132,6 +4168,134 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
 
         self.assertIn('<p aria-hidden="true">Services</p>', html)
+
+    def test_build_generator_rejects_unsupported_indirect_aria_copy(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        for attribute in (
+            "aria-labelledby",
+            "aria-describedby",
+            "aria-details",
+            "aria-errormessage",
+        ):
+            unsupported = COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero" '
+                f'{attribute}="unsupported-copy"></section>'
+                '<span id="unsupported-copy" hidden>'
+                'We also offer window cleaning</span>',
+            )
+            with self.subTest(attribute=attribute), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(unsupported)),
+                )
+
+    def test_build_generator_allows_source_owned_indirect_aria_copy(self):
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero" '
+            'aria-labelledby="source-copy"></section>'
+            '<span id="source-copy" hidden>Services</span>',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+
+        self.assertIn('aria-labelledby="source-copy"', html)
+
+    def test_build_generator_rejects_unsupported_rendered_input_value(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        for input_type in ("text", "tel", "email"):
+            unsupported = COMPLETE_BUILD_BODY.replace(
+                '<p class="form-trust">',
+                f'<input class="form-input" type="{input_type}" '
+                'value="We also offer window cleaning">'
+                '<p class="form-trust">',
+            )
+            with self.subTest(input_type=input_type), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(unsupported)),
+                )
+
+    def test_build_generator_allows_source_owned_rendered_input_value(self):
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<p class="form-trust">',
+            '<input class="form-input" type="text" value="Services">'
+            '<p class="form-trust">',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+
+        self.assertIn('value="Services"', html)
+
+    def test_build_generator_ignores_nonrendered_hidden_input_value(self):
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<p class="form-trust">',
+            '<input type="hidden" value="We also offer window cleaning">'
+            '<p class="form-trust">',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+
+        self.assertIn('type="hidden"', html)
 
     def test_arbitrary_business_hero_fallback_is_business_neutral(self):
         prompt = build.build_hero_prompt(

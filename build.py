@@ -23,6 +23,7 @@ import hashlib
 import argparse
 import copy
 import sys
+import unicodedata
 from datetime import date
 from html import escape
 from pathlib import Path
@@ -762,7 +763,10 @@ def prepare_prospect(prospect, build_date=None):
         raise ValueError(
             "Prospect JSON services must be a non-empty list of non-empty strings."
         )
-    normalized_services = [service.strip() for service in services]
+    normalized_services = [
+        " ".join(unicodedata.normalize("NFKC", service).split())
+        for service in services
+    ]
     if len({service.casefold() for service in normalized_services}) != len(
         normalized_services
     ):

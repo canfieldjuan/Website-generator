@@ -1895,23 +1895,18 @@ def _canonical_email_value(value: str) -> str | None:
     return canonical_email_address(unquote(value))
 
 
-def _claim_exposure_texts(
+def _build_accessibility_text_resolver(
     body_root: Tag,
     *,
-    excluded_root_classes: Iterable[str] = (),
-) -> tuple[tuple[str, str], str]:
-    visual_parts: list[str] = []
-    phone_visual_parts: list[str] = []
+    is_excluded: Callable[[Tag], bool],
+) -> tuple[
+    Callable[[Any, frozenset[str]], str],
+    Callable[[Tag, str, frozenset[str]], str],
+    Callable[[Tag], bool],
+    Callable[[Tag], str],
+]:
+    """Build the one ARIA reference resolver used by claim and copy admission."""
     id_targets: dict[str, list[Tag]] = {}
-    excluded_classes = frozenset(excluded_root_classes)
-
-    def is_excluded(node: Tag) -> bool:
-        return bool(_exact_class_names(node) & excluded_classes) or any(
-            _exact_class_names(parent) & excluded_classes
-            for parent in node.parents
-            if isinstance(parent, Tag)
-        )
-
     for element in (body_root, *body_root.find_all(True)):
         if is_excluded(element):
             continue
@@ -1933,39 +1928,6 @@ def _claim_exposure_texts(
             value = node.get("value") or node.get("placeholder")
             return value if isinstance(value, str) else ""
         return ""
-
-    def tooltip_text(node: Tag) -> str:
-        value = node.get("title")
-        return value if isinstance(value, str) else ""
-
-    def visit_visual(node: Any) -> None:
-        if isinstance(node, Comment):
-            return
-        if isinstance(node, NavigableString):
-            text = str(node)
-            visual_parts.append(text)
-            phone_visual_parts.append(text)
-            return
-        if not isinstance(node, Tag):
-            return
-        if is_excluded(node):
-            return
-        if is_render_suppressed_element(node):
-            return
-        has_text_boundary = node.name.casefold() in DOM_ADJACENCY_BOUNDARY_TAGS
-        if has_text_boundary:
-            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
-        tooltip = tooltip_text(node)
-        if tooltip:
-            visual_parts.append(tooltip)
-        replacement = replacement_text(node)
-        if replacement:
-            visual_parts.append(replacement)
-            phone_visual_parts.append(replacement)
-        for child in node.children:
-            visit_visual(child)
-        if has_text_boundary:
-            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
 
     def resolve_references(
         node: Tag,
@@ -1993,11 +1955,7 @@ def _claim_exposure_texts(
             return ""
         if isinstance(node, NavigableString):
             return str(node)
-        if not isinstance(node, Tag):
-            return ""
-        if is_excluded(node):
-            return ""
-        if is_hidden_input(node):
+        if not isinstance(node, Tag) or is_excluded(node) or is_hidden_input(node):
             return ""
         aria_hidden = node.get("aria-hidden")
         if not active_references and (
@@ -2036,6 +1994,65 @@ def _claim_exposure_texts(
             if isinstance(node.get(attribute), str) and node.get(attribute).strip()
         )
         return " ".join((primary_text, *descriptions))
+
+    return accessible_text, resolve_references, is_hidden_input, replacement_text
+
+
+def _claim_exposure_texts(
+    body_root: Tag,
+    *,
+    excluded_root_classes: Iterable[str] = (),
+) -> tuple[tuple[str, str], str]:
+    visual_parts: list[str] = []
+    phone_visual_parts: list[str] = []
+    excluded_classes = frozenset(excluded_root_classes)
+
+    def is_excluded(node: Tag) -> bool:
+        return bool(_exact_class_names(node) & excluded_classes) or any(
+            _exact_class_names(parent) & excluded_classes
+            for parent in node.parents
+            if isinstance(parent, Tag)
+        )
+
+    (
+        accessible_text,
+        _resolve_references,
+        is_hidden_input,
+        replacement_text,
+    ) = _build_accessibility_text_resolver(body_root, is_excluded=is_excluded)
+
+    def tooltip_text(node: Tag) -> str:
+        value = node.get("title")
+        return value if isinstance(value, str) else ""
+
+    def visit_visual(node: Any) -> None:
+        if isinstance(node, Comment):
+            return
+        if isinstance(node, NavigableString):
+            text = str(node)
+            visual_parts.append(text)
+            phone_visual_parts.append(text)
+            return
+        if not isinstance(node, Tag):
+            return
+        if is_excluded(node):
+            return
+        if is_render_suppressed_element(node):
+            return
+        has_text_boundary = node.name.casefold() in DOM_ADJACENCY_BOUNDARY_TAGS
+        if has_text_boundary:
+            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
+        tooltip = tooltip_text(node)
+        if tooltip:
+            visual_parts.append(tooltip)
+        replacement = replacement_text(node)
+        if replacement:
+            visual_parts.append(replacement)
+            phone_visual_parts.append(replacement)
+        for child in node.children:
+            visit_visual(child)
+        if has_text_boundary:
+            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
 
     accessible_parts: list[str] = []
 
@@ -3474,14 +3491,34 @@ def _validate_visible_copy(
                 fragment = _normalize_source_owned_text(value)
                 if fragment:
                     exposed_fragments.append(fragment)
-        if element.name.casefold() == "input" and str(
-            element.get("type") or ""
-        ).casefold() in {"button", "reset", "submit"}:
+        if element.name.casefold() == "input":
             value = element.get("value")
             if isinstance(value, str):
                 fragment = _normalize_source_owned_text(value)
                 if fragment:
                     exposed_fragments.append(fragment)
+
+    _, resolve_references, _, _ = _build_accessibility_text_resolver(
+        body_root,
+        is_excluded=lambda _element: False,
+    )
+    for element in (body_root, *body_root.find_all(True)):
+        if not is_visually_exposed(element):
+            continue
+        for attribute in (
+            "aria-labelledby",
+            "aria-describedby",
+            "aria-details",
+            "aria-errormessage",
+        ):
+            value = element.get(attribute)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            fragment = _normalize_source_owned_text(
+                resolve_references(element, attribute, frozenset())
+            )
+            if fragment:
+                exposed_fragments.append(fragment)
 
     unsupported = sorted(
         {fragment for fragment in exposed_fragments if fragment not in normalized_allowed},
