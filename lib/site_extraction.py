@@ -514,7 +514,13 @@ def _words_contain_scope_qualifier(words: list[str]) -> bool:
 
 
 def _preceding_clause_scopes_claim(words: list[str]) -> bool:
-    if words and _words_contain_scope_qualifier(words[:1]):
+    is_request_wrapper = (
+        len(words) >= 2
+        and words[-2:] == ["call", "for"]
+        or len(words) >= 3
+        and words[-3:] == ["call", "us", "for"]
+    )
+    if not is_request_wrapper and _words_contain_scope_qualifier(words):
         return True
     for index, word in enumerate(words):
         if index > 0 and word in _RECIPIENT_BENEFIT_PREDICATES:
@@ -879,7 +885,11 @@ def _identity_candidates_agree(first: str, second: str) -> bool:
     )
 
 
-def _heading_owned_fragment(heading: Any) -> str:
+def _heading_owned_fragment(
+    heading: Any,
+    *,
+    stop_at_record_containers: bool = False,
+) -> str:
     match = _HEADING_TAG_PATTERN.fullmatch(getattr(heading, "name", "") or "")
     if match is None:
         return str(heading)
@@ -887,7 +897,11 @@ def _heading_owned_fragment(heading: Any) -> str:
     parts = [str(heading)]
     for sibling in heading.next_siblings:
         sibling_name = getattr(sibling, "name", None)
-        if sibling_name in {"article", "section"}:
+        if (
+            sibling_name in _RECORD_CONTAINER_TAGS
+            if stop_at_record_containers
+            else sibling_name in {"article", "section"}
+        ):
             break
         sibling_heading = (
             _HEADING_TAG_PATTERN.fullmatch(sibling_name)
@@ -960,20 +974,7 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
     for heading in soup.find_all(_HEADING_TAG_PATTERN):
         if _HEADING_TAG_PATTERN.fullmatch(heading.name or "") is None:
             continue
-        parts = [str(heading)]
-        for sibling in heading.next_siblings:
-            sibling_name = getattr(sibling, "name", None)
-            if sibling_name in _RECORD_CONTAINER_TAGS:
-                break
-            sibling_heading = (
-                _HEADING_TAG_PATTERN.fullmatch(sibling_name)
-                if isinstance(sibling_name, str)
-                else None
-            )
-            if sibling_heading is not None:
-                break
-            parts.append(str(sibling))
-        append("".join(parts))
+        append(_heading_owned_fragment(heading, stop_at_record_containers=True))
     return tuple(fragments)
 
 

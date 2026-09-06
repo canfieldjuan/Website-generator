@@ -557,6 +557,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "Seniors get Free Estimates",
             "Members qualify for Free Estimates",
             "Members are offered Free Estimates",
+            "Maintenance-plan members are eligible for Free Estimates",
         ):
             source = f"<h1>Acme Cleaning</h1><p>{complete_claim}.</p>"
             with (
@@ -2043,6 +2044,47 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 source_html=html,
                 source_url="https://acme.test/questions",
             )
+
+    def test_heading_record_stops_at_nested_heading_in_sibling_wrapper(self):
+        document = {
+            "type": "services",
+            "headline": "Plumbing Services",
+            "items": [
+                {
+                    "title": "Drain Cleaning",
+                    "url": None,
+                    "image_url": None,
+                    "tag": None,
+                    "meta": "Includes a warranty.",
+                }
+            ],
+        }
+        split_records = (
+            "<section><h1>Plumbing Services</h1><h2>Drain Cleaning</h2>"
+            "<aside><h2>Water Heater Repair</h2>"
+            "<p>Includes a warranty.</p></aside></section>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "share one source section"):
+            validate_enrichment_result(
+                document,
+                page_type="services",
+                source_html=split_records,
+                source_url="https://acme.test/services",
+            )
+
+        one_record = (
+            "<section><h1>Plumbing Services</h1><h2>Drain Cleaning</h2>"
+            "<aside><p>Includes a warranty.</p></aside></section>"
+        )
+        self.assertEqual(
+            validate_enrichment_result(
+                document,
+                page_type="services",
+                source_html=one_record,
+                source_url="https://acme.test/services",
+            ),
+            {**document, "source_url": "https://acme.test/services"},
+        )
 
     def test_section_heading_record_cannot_span_list_records(self):
         document = {
