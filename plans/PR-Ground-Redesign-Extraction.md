@@ -103,7 +103,7 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fpGr8`: font URLs became image authority through CSS | CSS resources must be admitted by declaration type, and the fetch inventory plus verifier must share that classifier. | `@font-face src: url('/brand.woff2')` rejects as image evidence while `background-image: url('/hero.jpg')` admits. | fixed/superseded | `lib/site_extraction.py:252-267,688-694,1143-1144,1270-1272`; `pipeline.py:495-500`; `tests/test_site_extraction.py:1420-1444` |
 | `PRRT_kwDOTDYaKM6fpGr9`: metadata image alt lost its image owner | Bounded Open Graph/Twitter image metadata must preserve ordered URL/alt ownership rather than admit unrelated page-wide text. | `og:image` followed by its `og:image:alt` admits the exact pair; a different alt rejects. | fixed/superseded | `lib/site_extraction.py:241-251,1198-1220`; `tests/test_site_extraction.py:1446-1470` |
 | `PRRT_kwDOTDYaKM6fpOBq`: input action `value` bypassed generated label admission | Every independently rendered, accessible, or tooltip label surface on one action must pass the same source-owned or bounded-neutral policy in every consumer. | A submit input whose admitted ARIA label hides an unsupported visible `value` now rejects; when both labels and their destination pairs are source-owned, it admits. | fixed/superseded | `lib/site_extraction.py:742-773,856-876,1253-1271`; `pipeline.py:208-234`; `lib/generation.py:2260-2280,2367-2382`; `tests/test_generation.py:1427-1458`; `tests/test_site_extraction.py:2050-2072` |
-| `PRRT_kwDOTDYaKM6fpOBr`: neutral action tokens composed an unsupported review claim | Capability-neutral fallback labels must be bounded complete phrases; token membership cannot authorize a new semantic assertion. | `Read All Reviews` now rejects without source label/pair authority while exact neutral `Contact Us`, `Learn More`, and `Request Service` labels admit; the same review label admits when source-owned. | fixed/superseded | `lib/generation.py:404-432,2152-2215,2367-2382`; `tests/test_generation.py:1460-1492` |
+| `PRRT_kwDOTDYaKM6fpOBr`: neutral action tokens composed an unsupported review claim | Capability-neutral fallback labels must be bounded complete phrases; token membership cannot authorize a new semantic assertion. | `Read All Reviews` now rejects without source label/pair authority while exact neutral `Contact Us` and `Learn More` labels admit; the same review label admits when source-owned. | fixed/superseded | `lib/generation.py:404-432,2152-2215,2367-2382`; `tests/test_generation.py:1460-1492` |
 | `PRRT_kwDOTDYaKM6fpZkx`: unknown trailing claim predicates could be discarded | Asserted fields may omit only an explicit meaning-preserving leading wrapper; every unknown trailing clause remains part of the assertion regardless of its vocabulary. | `Free Estimates` from `Free Estimates require membership` rejects without adding `require` to a denylist; the complete qualified claim admits. Other trailing assertions now follow the same fail-closed rule. | fixed/superseded | `lib/site_extraction.py:557-592,1623-1648`; `tests/test_site_extraction.py:386-462,553-590` |
 | `PRRT_kwDOTDYaKM6fpZk0`: conflicting explicit identity metadata independently authorized both names | Identity authority must resolve one uniquely best-supported canonical identity across independent metadata, structured DOM, title, and H1 channels; a tied conflict authorizes neither candidate. | Conflicting `application-name` and `og:site_name` now select the name corroborated by title/H1 and reject the other; without corroboration both reject. | fixed/superseded | `lib/site_extraction.py:1010-1052,1260-1446,1580-1594`; `tests/test_site_extraction.py:1051-1078` |
 | Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `6ee2c00` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-6ee2c00.log`; `/dev/shm/website-generator-pr47-browser-render-6ee2c00.png` |
@@ -121,9 +121,13 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fp4hx`: adjacent leaf block claims remained tag-dependent | Assertion ownership must follow actual direct source contexts while preserving explicit independent-record, heading, and field boundaries; the HTML spelling of a leaf block cannot change its owner. | Sibling leaf `<div>` blocks now share their direct parent owner, so `Free Estimates` cannot discard `Members only`; the complete owned assertion admits. Existing independent record containers and peer heading sections remain separate. | fixed/superseded | `lib/site_extraction.py:1394-1484`; `tests/test_site_extraction.py:606-699` |
 | `PRRT_kwDOTDYaKM6fp4hy`: validated brand identity and home destination were authorized independently | A code-owned generated navigation action must bind its exact validated label to its exact code-owned destination, just as source actions do. | The redesign action contract carries the exact site name paired with the catalog-owned `/` home route. A linked brand to `/` admits; rebinding that name to another otherwise admitted URL rejects. | fixed/superseded | `pipeline.py:146-247`; `lib/generation.py:2218-2382`; `tests/test_generation.py:4720-4774`; `tests/test_site_extraction.py:2213-2377` |
 | `PRRT_kwDOTDYaKM6fp-5p`: list/wrapper restrictions fell outside a heading owner | An assertion owner must include the text-bearing sibling subtree, not only a sibling that is itself the nearest text context, while record and heading boundaries remain intact. | An H3 followed by a `ul/li` restriction now owns the list subtree; the shortened benefit rejects and the complete qualified assertion admits. Nested same-or-higher headings and independent semantic records stop the owner. | fixed/superseded | `lib/site_extraction.py:1394-1514`; `tests/test_site_extraction.py:688-714` |
-| `PRRT_kwDOTDYaKM6fp-5q`: content-bearing labels were classified as neutral actions | Neutral fallback wording cannot assert that an About, FAQ, gallery, map, service, team, or work destination exists. Those labels require exact source label/pair authority. | The content/capability category was removed from the bounded neutral set. `Meet Our Team` pointed at an otherwise admitted contact URL rejects; the exact source-owned `Meet Our Team` to `/team` pair admits. Truly generic `Contact Us`, `Learn More`, and `Request Service` controls remain neutral. | fixed/superseded | `lib/generation.py:2152-2200,2350-2366`; `tests/test_generation.py:1460-1528` |
+| `PRRT_kwDOTDYaKM6fp-5q`: content-bearing labels were classified as neutral actions | Neutral fallback wording cannot assert that an About, FAQ, gallery, map, service, team, or work destination exists. Those labels require exact source label/pair authority. | The content/capability category was removed from the bounded neutral set. `Meet Our Team` pointed at an otherwise admitted contact URL rejects; the exact source-owned `Meet Our Team` to `/team` pair admits. Truly generic `Contact Us` and `Learn More` controls remain neutral; `Request Service` requires exact source or code ownership. | fixed/superseded | `lib/generation.py:2152-2200,2350-2366`; `tests/test_generation.py:1460-1528` |
 | `PRRT_kwDOTDYaKM6fqEKl`: admitted relative image resources remained relative | Source-relative image and logo evidence must become one usable source-resolved resource before mirroring and generation consume it. | Homepage and enrichment admission now canonicalize every validated `image_url`, `logo_url`, and `images[].url` against that document's source URL. The extraction integration test proves `/hero.jpg` reaches the mirror as `https://acme.test/hero.jpg`, while a relative action URL remains unchanged. | fixed/superseded | `lib/site_extraction.py:2361-2399,2488-2489`; `tests/test_site_extraction.py:78-160,2528-2533` |
 | `PRRT_kwDOTDYaKM6fqEKn`: final CTA checklist contradicted action admission | The model prompt and executable action contract must permit the same exact source-owned or bounded-neutral labels. | The checklist no longer forbids `Submit` or `Contact Us`; it repeats the shared exact-source-or-bounded-neutral rule and still prohibits invented capability wording. | fixed/superseded | `references/02-redesign-gen-prompt.md:254-258,601-620`; `tests/test_site_extraction.py:3145-3178`; `lib/generation.py:2152-2200,2350-2366` |
+| `PRRT_kwDOTDYaKM6fqME4`: direct rendered text after a claim heading escaped its owner | Claim ownership must follow rendered text nodes as well as element wrappers while retaining record, peer-heading, and schema-field boundaries. | `<h3>Free Estimates</h3>Members only.` now rejects the shortened benefit and admits the complete qualified assertion through the same owner walk used for wrapped sibling content. | fixed/superseded | `lib/site_extraction.py:1415-1525`; `tests/test_site_extraction.py:635-757` |
+| `PRRT_kwDOTDYaKM6fqME5`: `Request Service` was globally neutral | A label that asserts a service-request capability must require exact source or code ownership; it cannot be an unrestricted neutral phrase. | An unowned `Request Service` action now rejects. The standalone builder explicitly owns only `Request Service` paired with its generated `#contact` section, and rebinding that label to another destination rejects. | fixed/superseded | `lib/generation.py:2152-2198,2350-2364`; `build.py:94-99,359-370`; `tests/test_generation.py:1488-1529,1615-1661` |
+| `PRRT_kwDOTDYaKM6fqME8`: uncorroborated multiple H1 candidates selected the first candidate | Unseeded identity candidates must resolve to one uniquely supported identity; DOM order alone cannot grant authority. | Both names from a two-H1 page now reject, while a single H1 and an independently corroborated H1 identity retain their existing positive paths. | fixed/superseded | `lib/site_extraction.py:1687-1728`; `tests/test_site_extraction.py:1199-1249` |
+| `PRRT_kwDOTDYaKM6fqME-`: SVG `xlink:href` actions bypassed label admission | Source extraction and generated-output validation must classify the same link elements, destination attributes, labels, and label/destination pairs. | An unsupported label on `<svg><a xlink:href=...>` now rejects; the exact source-owned SVG label/destination pair admits in both source extraction and generated-output validation. | fixed/superseded | `lib/site_extraction.py:330,1015-1025,1577-1608`; `lib/generation.py:2105-2119,2350-2364`; `tests/test_site_extraction.py:2259-2293`; `tests/test_generation.py:1292-1318` |
 
 ## Mechanism
 
@@ -444,60 +448,65 @@ business-specific claims.
   admitted image-resource fields now resolve once against their source document.
   The final CTA checklist also contradicted the executable action rule; it now
   states the same exact-source-or-bounded-neutral contract as generation admission.
-- Focused ownership and action boundaries: `python -m unittest -q
+- The latest paginated review exposed four independently reproducible paths through
+  shared policies, not four words to add to denylists. Assertion ownership now
+  includes direct rendered text nodes; unseeded H1 candidates use the same unique
+  identity arbitration as every other channel; source and output action consumers
+  share `href` plus `xlink:href`; and `Request Service` moved from global neutral
+  vocabulary to the standalone builder's exact label/destination contract.
+- Focused claim, identity, SVG-action, and builder-action boundary probes passed:
+  `python -m unittest -q
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_adjacent_owned_disclaimers
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_keeps_only_action_owned_urls
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_excludes_inert_source_actions
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_preserves_every_source_label_surface
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_inert_formaction_attributes_do_not_create_source_authority
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_business_name_requires_assertive_identity_evidence
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_cta_requires_a_complete_source_action_pair
+  tests.test_generation.BodyAssemblyTests.test_body_action_destinations_are_source_owned
   tests.test_generation.BodyAssemblyTests.test_neutral_action_labels_are_bounded_complete_phrases
-  tests.test_generation.AtomicWriteAndCliTests.test_redesign_generators_bind_identity_and_action_destinations`:
-  7 tests passed. The negative side covers shortened claims across `h1` through
-  `h6`, adjacent leaf `div` blocks, and list wrappers; peer heading/record
-  boundaries; content-bearing fallback labels; and rebinding the business identity
-  to another admitted destination. The positive side covers complete
-  heading/block/list-owned claims, independent record and field boundaries, exact
-  source action pairs including team content, genuinely neutral controls, and the
-  catalog-owned business-name-to-`/` pair.
+  tests.test_generation.BodyAssemblyTests.test_build_action_contract_binds_canonical_form_labels`:
+  6 tests passed.
+  Their negative sides cover dropped direct-text qualifications, both candidates
+  from an ambiguous two-H1 page, an unsupported SVG action label, an unowned
+  service-request capability, and destination rebinding. Their positive sides
+  preserve the complete qualified claim, a single/corroborated H1, an exact
+  source-owned SVG pair, and the builder-owned `Request Service` to `#contact`
+  pair.
 - Current affected modules: `python -m unittest -q tests.test_site_extraction
-  tests.test_generation`: 226 tests passed. The image boundary covers relative and
-  absolute resources, source metadata, picture/source and CSS declarations, alt
-  pairing, enrichment, downstream mirroring, input immutability, and an unchanged
-  relative action URL. Prompt coverage proves its checklist no longer conflicts
-  with source-owned neutral controls.
-- Full suite on code revision `b05467e531165ce208d2304ddd968868c5da1c45`:
+  tests.test_generation`: 226 tests passed. These modules cover the new direct-text,
+  identity arbitration, SVG action, capability label, and exact builder-pair
+  boundaries alongside the existing image, ownership, and prompt contracts.
+- Full suite on code revision `300e135f0939bbef454a61a2f715255ee8557c3f`:
   `python -m unittest discover -s tests -q`: 368 tests passed with 34 skipped.
 - Scoped static checks passed:
-  `ruff check --ignore F401,F541 lib/site_extraction.py
-  tests/test_site_extraction.py references/02-redesign-gen-prompt.md`;
-  `python -m compileall -q lib/site_extraction.py tests/test_site_extraction.py`;
-  and `git diff --check`.
-- The final code revision `b05467e531165ce208d2304ddd968868c5da1c45`
+  `ruff check --ignore F401,F541 build.py lib/site_extraction.py
+  lib/generation.py tests/test_site_extraction.py tests/test_generation.py`;
+  `python -m compileall -q build.py lib/site_extraction.py lib/generation.py
+  tests/test_site_extraction.py tests/test_generation.py`; and `git diff --check`.
+- The final code revision `300e135f0939bbef454a61a2f715255ee8557c3f`
   used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-06T02:45:15-05:00` capture with no model
-  resident and exited 0 before the `2026-09-06T02:46:54-05:00` post-run capture;
+  invocation began after the `2026-09-06T03:08:27-05:00` capture with no model
+  resident and exited 0 before the `2026-09-06T03:09:57-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
   path ran. The first generated body was correctly rejected for unsupported `Not
   a Franchise` wording; the bounded correction passed full admission. Log:
-  `/dev/shm/website-generator-pr47-fixture-b05467e.log`.
+  `/dev/shm/website-generator-pr47-fixture-300e135.log`.
 - The successful invocation rewrote
-  `outputs/builds/drees-plumbing-inc/index.html`; size was 71986 bytes, inode
-  3320504, mtime was `2026-09-06 02:46:44.927200098 -0500`, and SHA-256 was
-  `428c54d54bea2aabbef294a979d679a211c5daea0896210a4ac3b40ec6817959`.
+  `outputs/builds/drees-plumbing-inc/index.html`; size was 72027 bytes, inode
+  3311297, mtime was `2026-09-06 03:09:52.789210998 -0500`, and SHA-256 was
+  `2728fda49162dae9477be2acbad5f97e299382eddf3f2837424e51e686c23796`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-b05467e.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-b05467e.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-300e135.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-300e135.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3180 styled page showing Drees Plumbing identity,
-  phone, hero, service grid, trust content, and customer reviews. The current
+  phone, navigation, `Request Service` CTA, hero, service grid, trust content,
+  and customer reviews. The current
   artifact was served directly from this invocation's output. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-b05467e.png`,
+  `/dev/shm/website-generator-pr47-browser-render-300e135.png`,
   SHA-256
-  `896f42996ae08d4efa93d63574dd196f939aadf13dcd8153a1c59f4b879bfe1f`.
+  `12cdb4df66e4cdd750eed2ff64ff8364b1e472b6ea177be0ddbfddefc076e99a`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
   after this evidence block is committed; the handoff records that exact result
   rather than claiming a dirty-tree advisory run as final proof.
