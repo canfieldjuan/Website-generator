@@ -169,7 +169,12 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6frm_H`: descriptor-word matching left new terminal labels outside the protected field | Contact field ownership must depend on bounded role/number structure, not an enumeration of descriptor words or terminal labels. | `Fax Dept. Line: 217-555-0100` reproduced as callable on `d8fa02c`. The descriptor regex has been removed: primitive role tokens are found independently, then a bounded field-like span to the next number is protected only when no intervening role or hard group boundary exists. Both `Line` and an unseen `Regional Office Desk` terminal reject for fax and admit for phone; sentence-delimited mixed roles retain their own numbers. | fixed/superseded | `lib/site_extraction.py:471-479,771-813`; `tests/test_site_extraction.py:1243-1273` |
 | Self-boundary probe: a long field label exceeded the contact-span cap and became callable | Resource bounds may reject input, but crossing an arbitrary size threshold must never grant contact authority. | On `2b0b6e8`, a 172-character punctuated fax field admitted its number while the shorter equivalent rejected. The structural field grammar now operates over the already bounded source assertion without an admission-changing label cap; the long fax field rejects and the equivalent long phone field admits. | fixed/superseded | `lib/site_extraction.py:471-478,771-810`; `tests/test_site_extraction.py:1111-1114,1247-1284` |
 | `PRRT_kwDOTDYaKM6frrrQ`: punctuated postfix fields lost their owner | Prefix and postfix contact fields must use one adjacency and boundary grammar; punctuation inside either complete field cannot separate its role from its number. | `217-555-0100 (Regional Dept. Fax)` reproduced as callable on `2b0b6e8`. The shared field-gap classifier now protects structurally internal punctuation on both number/role orders; wrapped and unwrapped fax forms reject while equivalent phone forms admit. | fixed/superseded | `lib/site_extraction.py:783-817,820-868`; `tests/test_site_extraction.py:1125-1140,1170-1181` |
-| `PRRT_kwDOTDYaKM6frrrR`: prefix field protection crossed a completed sentence | Field punctuation may suppress a group boundary only when it belongs to the adjacent role/number field; arbitrary allowed characters cannot erase a sentence boundary. | `Fax inquiries are handled online. Main office: 217-555-0100` reproduced with the office number rejected on `2b0b6e8`. Contact evidence now preserves case for bounded abbreviation syntax, and the shared gap classifier leaves both `online.` and the short prose boundary `down.` active; both office-phone controls admit while `Dept.` fax fields still reject. | fixed/superseded | `lib/site_extraction.py:480-484,599-602,686-727,783-817,975-1002,1995-2016,2466-2478`; `tests/test_site_extraction.py:1182-1203` |
+| `PRRT_kwDOTDYaKM6frrrR`: prefix field protection crossed a completed sentence | Field punctuation may suppress a group boundary only when it belongs to the adjacent role/number field; arbitrary allowed characters cannot erase a sentence boundary. | `Fax inquiries are handled online. Main office: 217-555-0100` reproduced with the office number rejected on `2b0b6e8`. The shared gap classifier preserves only explicit bounded field-abbreviation/dash syntax and leaves both `online.` and the short prose boundary `down.` active; both office-phone controls admit while `Dept.` fax fields still reject. | fixed/superseded | `lib/site_extraction.py:481-485,780-807`; `tests/test_site_extraction.py:1188-1218` |
+| `PRRT_kwDOTDYaKM6frw_8`: source form method was discarded | A form capability is one browser-effective endpoint/method pair; extraction, prompt authority, and output admission cannot authorize its halves independently. | A source POST form now records `form_action` plus `form_method`; an omitted generated method defaults to GET and rejects against that POST pair. GET defaults, submitter overrides, and URL-only legacy callers retain their own explicit behavior. | fixed/superseded | `lib/site_extraction.py:1406-1425,1509-1545,1841-1845,2451-2468,2842-2880,3218-3232`; `pipeline.py:212-262,309-356`; `lib/generation.py:385-445,2116-2149,2220-2353`; `tests/test_site_extraction.py:2838-2884,3960-4062`; `tests/test_generation.py:1611-1668` |
+| `PRRT_kwDOTDYaKM6frw_9`: a standalone native button acquired submit semantics | An element is a submit action only when browser form ownership and its native type make it one; extraction and output validation must use the same decision. | Standalone implicit buttons, buttons with a missing owner, and inert `type=button` controls admit without requiring a form endpoint; the same implicit button inside a form still fails when the form has no action. | fixed/superseded | `lib/site_extraction.py:1395-1448`; `lib/generation.py:2266-2302`; `tests/test_generation.py:1585-1609` |
+| `PRRT_kwDOTDYaKM6frw_-`: exact `class="logo"` was not a logo marker | Logo admission must recognize bounded exact semantic tokens without treating descriptive alt text or substring matches as ownership. | An image with exact class token `logo` now admits as the business logo; existing generic image and third-party `alt="... logo"` controls still reject. | fixed/superseded | `lib/site_extraction.py:397-408,1092-1117`; `tests/test_site_extraction.py:1993-2029` |
+| `PRRT_kwDOTDYaKM6fr0Cl`: lowercase multiword abbreviated fax fields escaped ownership | Contact ownership must use a case-independent, bounded field-punctuation grammar for both prefix and postfix order; capitalization cannot confer callable authority. | Lowercase `fax regional dept. line: 217-555-0100` and its unwrapped postfix counterpart reject; equivalent lowercase phone fields admit. | fixed/superseded | `lib/site_extraction.py:472-485,780-818`; `tests/test_site_extraction.py:1125-1143,1173-1187` |
+| `PRRT_kwDOTDYaKM6fr0Cn`: an acronym-ending fax sentence swallowed the following office phone | Completed prose punctuation must remain a group boundary regardless of capitalization, while the explicitly bounded field abbreviations remain structural. | `Fax inquiries are handled by IT. Main office: 217-555-0100` now admits the office phone; `Dept.`/`No.` fax fields still reject and their phone controls admit. | fixed/superseded | `lib/site_extraction.py:481-485,780-818`; `tests/test_site_extraction.py:1125-1220` |
 
 ## Mechanism
 
@@ -207,7 +212,8 @@ A source-owned label remains bound to the destination on its source action, even
 when that wording also belongs to the neutral vocabulary. Accessible action
 labels include replacement text from image, area, and image-input controls;
 source collection and generated-body admission use one shared action-element
-classifier and construct the same complete, whitespace-normalized label.
+classifier and construct the same complete, whitespace-normalized label. Native
+submit controls must also have a real browser form owner.
 Destination sanitization remains independent, so a destination-bearing element
 cannot escape URL admission merely because it lacks an action label. An admitted
 phone or email display value remains
@@ -218,10 +224,12 @@ source collection and output pair admission use the same resolver. Link navigati
 and form submission use separate destination-authority sets: a source form action
 or effective submit override can remain a generated form endpoint but cannot
 become a generated link, and a source link cannot become a generated form
-endpoint. Output URL sanitization separately checks every declared destination
-attribute, including an inert or orphaned `formaction`, without promoting that
-attribute into source authority. Pair evidence does not itself grant either kind
-of URL authority. The redesign catalog's exact validated business name and its
+endpoint. Matched source fields retain one code-owned endpoint/method pair,
+including the HTML GET default and submitter overrides; generated forms must
+preserve that pair instead of independently reusing its endpoint with a different
+method. Inert or orphaned `formaction` attributes are not browser-effective
+submission paths and grant no source or output authority. Pair evidence does not
+itself grant either kind of URL authority. The redesign catalog's exact validated business name and its
 internal `/` home route are likewise carried as one code-owned action pair; neither
 half can authorize rebinding the business identity to another destination.
 Flat heading records
@@ -375,68 +383,56 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `9cec5a6b4cf30a1a42dc6226a43051d1f3286b26`.
+- Code revision under test: `fe2baaa67039d2de7736c1443ec53c0832e0a44e`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
-- Isolated validation probes exercise the latest exact-head review paths:
-  role-to-value em dash, a later fax role following `Call Center`, a punctuated
-  `Fax Dept. Number` descriptor, and a phone/fax pair separated by `<br>`. Every
-  fax value rejected and the stacked phone admitted. Positive controls retained
-  ordinary and ASCII-dash phone labels. A follow-up `Fax Dept. Line` reproduction
-  proved that terminal-descriptor matching itself was the remaining category bug,
-  so that regex was removed rather than extended. Primitive role tokens are now
-  identified independently and a bounded role-to-number field span is protected
-  only when no intervening role or hard group boundary exists. Both `Line` and an
-  unseen `Regional Office Desk` terminal reject for fax and admit for phone. The
-  contact-only DOM projection separately preserves rendered line boundaries without
-  altering general claim text. A second-side max+1 probe then reproduced an
-  admission-changing size boundary: a 172-character punctuated fax label exceeded
-  the field-span cap and became callable. The arbitrary cap is now removed from the
-  already source-bounded assertion; the long fax label rejects and the equivalent
-  phone label admits. The next exact-head review exposed both missing postfix
-  protection and prefix protection crossing a real sentence. Contact text now
-  retains case until contact ownership is decided, while existing negation and
-  restriction checks explicitly normalize their tokens. One shared two-sided
-  field-gap classifier protects only structurally internal abbreviation/dash
-  punctuation. Wrapped and unwrapped postfix fax labels reject, their phone
-  controls admit, and unrelated office phones after both long- and short-word
-  completed fax sentences admit.
-- Boundary probe: `python -m unittest -q tests.test_site_extraction
-  tests.test_generation` passed 236 tests. The negative side covers every reproduced
-  fax-authority bypass and the existing ambiguous/conflicting role cases; the
-  positive side retains callable phone fields across inline spans, extensions,
-  dotted numbers, textual and visual group separators, and structural line breaks.
-- Full suite: `python -m unittest discover -s tests -q` exited 0; the saved log
-  reports 378 tests passed with 34 skipped in 13.884 seconds. Log:
-  `/dev/shm/website-generator-pr47-full-suite-9cec5a6.log`.
+- Root-cause boundary probes cover the five latest review paths without adding
+  tag- or phrase-specific exceptions. Lowercase prefix/postfix fax fields reject,
+  their phone equivalents admit, and the office phone after the acronym-ending
+  `IT.` sentence admits. Exact class token `logo` admits while existing alt-only
+  and unrelated-image controls reject. Standalone implicit buttons and inert
+  `formaction` controls remain non-submit actions, while the same button with an
+  owning form requires a valid endpoint. Extraction retains one source form
+  endpoint/method pair; generated POST preserves it and an omitted method (browser
+  default GET) rejects. Existing GET, submitter-override, ambiguous-form, and
+  URL-only caller controls all remain covered.
+- Affected boundary suite: `python -m unittest -q
+  tests.test_site_extraction tests.test_generation` exited 0; the saved log reports
+  239 tests passed in 7.686 seconds. Log:
+  `/dev/shm/pr47-affected-fe2baaa.log`.
+- Full suite: `python -m unittest -q` exited 0; the saved log reports 381 tests
+  passed with 34 skipped in 13.765 seconds. Log:
+  `/dev/shm/pr47-full-suite-fe2baaa.log`.
 - Static evidence: `python -m ruff check lib/site_extraction.py
-  tests/test_site_extraction.py`, `python -m compileall -q
-  build.py pipeline.py connect_provider.py lib tests`, and `git diff --check`
-  passed. A repository-wide formatter invocation was intentionally not retained
-  because it rewrote pre-existing lines outside this correction.
+  lib/generation.py tests/test_site_extraction.py`, `python -m ruff check
+  --ignore F401,F541 pipeline.py tests/test_generation.py`, `python -m compileall
+  -q lib pipeline.py tests/test_site_extraction.py tests/test_generation.py`, and
+  `git diff --check` passed. The unfiltered repository-wide Ruff invocation remains
+  red on 14 pre-existing F401/F541 findings outside this boundary change; they were
+  not auto-fixed or folded into this PR.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T07:48:15,619932905-05:00`, completed at
-  `2026-09-06T07:49:06,206417245-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T08:17:03,962250829-05:00`, completed at
+  `2026-09-06T08:18:04,705699220-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-9cec5a6.log`.
-- The invocation replaced artifact inode 3325019 with inode 3311281 and set mtime
-  `2026-09-06 07:49:06.118713838 -0500`, proving this invocation rewrote
-  `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71939-byte artifact
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-fe2baaa.log`.
+- The invocation replaced artifact inode 3311281 with inode 3325017 and set mtime
+  `2026-09-06 08:18:01.232872759 -0500`, proving this invocation rewrote
+  `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71858-byte artifact
   has SHA-256
-  `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
+  `13f7b426c17c17ff620ee92214e4f7404bcd11fef48582124a6381b2286d640f`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-9cec5a6.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-9cec5a6.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-fe2baaa.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-fe2baaa.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
-  loaded a 1440x3040 screenshot with title `DREES PLUMBING INC` and 2441
+  loaded a 1440x3300 screenshot with title `DREES PLUMBING INC` and 2454
   body-text characters. The screenshot was visually inspected and shows the
-  styled navigation, hero, service grid, trust content, and review content
-  without an obvious render break. Screenshot:
-  `/dev/shm/website-generator-pr47-browser-render-9cec5a6.png`,
+  styled navigation, hero, service grid, trust content, reviews, request form,
+  and footer without an obvious render break. Screenshot:
+  `/dev/shm/website-generator-pr47-browser-render-fe2baaa.png`,
   SHA-256
-  `8bd3d16328852d0dd3e9e388433d2cc5ae25724c1955a43e6172c45d1586ae75`.
+  `4c9333807d871ee623517b78f49fd15e041cd3781638b838682c18f37ea09e2a`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
   separate open issue because one successful run does not resolve its historical
   stall.
