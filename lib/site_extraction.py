@@ -414,6 +414,32 @@ _RECIPIENT_TO_PREDECESSORS = frozenset(
         "restricted",
     }
 )
+_RECIPIENT_BENEFIT_PREDICATES = frozenset(
+    {
+        "earn",
+        "earned",
+        "earns",
+        "earning",
+        "enjoy",
+        "enjoyed",
+        "enjoys",
+        "enjoying",
+        "get",
+        "gets",
+        "getting",
+        "got",
+        "qualify",
+        "qualified",
+        "qualifies",
+        "qualifying",
+        "receive",
+        "received",
+        "receives",
+        "receiving",
+    }
+)
+_PASSIVE_BENEFIT_PREDICATES = frozenset({"offered", "provided", "reserved"})
+_BE_AUXILIARIES = frozenset({"am", "are", "be", "been", "being", "is", "was", "were"})
 
 
 def _normalize_text(value: str) -> str:
@@ -487,6 +513,21 @@ def _words_contain_scope_qualifier(words: list[str]) -> bool:
     return False
 
 
+def _preceding_clause_scopes_claim(words: list[str]) -> bool:
+    if words and _words_contain_scope_qualifier(words[:1]):
+        return True
+    for index, word in enumerate(words):
+        if index > 0 and word in _RECIPIENT_BENEFIT_PREDICATES:
+            return True
+        if (
+            index > 1
+            and word in _PASSIVE_BENEFIT_PREDICATES
+            and words[index - 1] in _BE_AUXILIARIES
+        ):
+            return True
+    return False
+
+
 def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     preceding_sentence = _SENTENCE_BREAK_PATTERN.split(text[:start])[-1]
     preceding_clause = _CONTRAST_BREAK_PATTERN.split(preceding_sentence)[-1]
@@ -524,7 +565,7 @@ def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
     ]
     if _words_contain_restriction(preceding_words + following_words):
         return True
-    if preceding_words and _words_contain_scope_qualifier(preceding_words[:1]):
+    if _preceding_clause_scopes_claim(preceding_words):
         return True
     return _words_contain_scope_qualifier(following_words)
 

@@ -2253,17 +2253,37 @@ def _generated_action_labels(element: Tag) -> tuple[str, ...]:
                 parts.append(replacement_text(child))
         return " ".join(" ".join(part for part in parts if part).split())
 
+    root = element.find_parent("body")
+
+    def accessible_name(node: Tag, active_references: frozenset[str]) -> str:
+        labelled_by = node.get("aria-labelledby")
+        if isinstance(labelled_by, str) and labelled_by.strip():
+            if root is None:
+                return ""
+            labelled_parts: list[str] = []
+            for target_id in labelled_by.split():
+                if target_id in active_references:
+                    return ""
+                targets = root.find_all(id=target_id, limit=2)
+                if len(targets) != 1:
+                    return ""
+                target_name = accessible_name(
+                    targets[0],
+                    active_references | {target_id},
+                )
+                if not target_name:
+                    return ""
+                labelled_parts.append(target_name)
+            return " ".join(" ".join(labelled_parts).split())
+
+        aria_label = node.get("aria-label")
+        if isinstance(aria_label, str) and aria_label.strip():
+            return " ".join(aria_label.split())
+        return text_with_replacements(node)
+
     labelled_by = element.get("aria-labelledby")
     if isinstance(labelled_by, str) and labelled_by.strip():
-        root = element.find_parent("body")
-        labelled_parts = []
-        if root is not None:
-            for target_id in labelled_by.split():
-                target = root.find(id=target_id)
-                if target is not None:
-                    labelled_parts.append(text_with_replacements(target))
-        accessible_label = " ".join(part for part in labelled_parts if part)
-        append(accessible_label)
+        append(accessible_name(element, frozenset()))
     append(element.get("aria-label"))
     if element.name.casefold() == "input":
         append(element.get("value"))

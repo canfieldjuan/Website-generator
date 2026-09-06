@@ -1322,6 +1322,34 @@ class BodyAssemblyTests(unittest.TestCase):
                 expected_action_urls=contract,
             )
 
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "non-neutral action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><a aria-labelledby="cta-label" '
+                    'href="https://source.test/book"></a>'
+                    '<span id="cta-label" aria-label="Book Appointment">'
+                    "Contact Us</span></body>"
+                ),
+                expected_action_urls=contract,
+            )
+
+        aria_labelled_body = (
+            '<body><a aria-labelledby="cta-label" '
+            'href="https://source.test/book"></a>'
+            '<span id="cta-label" aria-label="Contact Us">'
+            "Book Appointment</span></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(aria_labelled_body),
+                expected_action_urls=contract,
+            ),
+            aria_labelled_body,
+        )
+
         for image_action in (
             (
                 '<body><a href="https://source.test/book">'

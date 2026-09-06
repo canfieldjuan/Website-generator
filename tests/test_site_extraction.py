@@ -553,6 +553,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "Free Estimates are available to members",
             "Free Estimates as part of membership",
             "For seniors, Free Estimates",
+            "Maintenance-plan members receive Free Estimates",
+            "Seniors get Free Estimates",
+            "Members qualify for Free Estimates",
+            "Members are offered Free Estimates",
         ):
             source = f"<h1>Acme Cleaning</h1><p>{complete_claim}.</p>"
             with (
