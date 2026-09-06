@@ -316,7 +316,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `02456099c07ece8c3cd4c8d827274f7dad96a917`.
+- Code revision under test: `07d14d7224e29b2066a2ffcb436498acd1d63956`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -431,28 +431,28 @@ business-specific claims.
   tests/test_site_extraction.py`;
   `python -m compileall -q lib/site_extraction.py
   tests/test_site_extraction.py`; and `git diff --check`.
-- The final code revision `02456099c07ece8c3cd4c8d827274f7dad96a917`
+- The final code revision `07d14d7224e29b2066a2ffcb436498acd1d63956`
   used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-06T01:25:27-05:00` capture with no model
-  resident and exited 0 before the `2026-09-06T01:26:28-05:00` post-run capture;
+  invocation began after the `2026-09-06T01:45:40-05:00` capture with no model
+  resident and exited 0 before the `2026-09-06T01:46:44-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
-  path ran. Log: `/dev/shm/website-generator-pr47-fixture-0245609.log`.
+  path ran. Log: `/dev/shm/website-generator-pr47-fixture-07d14d7.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`; size was 72027 bytes, inode
-  3325015, mtime was `2026-09-06 01:26:24.869957891 -0500`, and SHA-256 was
+  3311297, mtime was `2026-09-06 01:46:40.516883085 -0500`, and SHA-256 was
   `8991ac64600a198bcf5f14d6feae6fe33e0cbca5ee752d23da033dbaaaa2b309`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-0245609.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-0245609.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-07d14d7.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-07d14d7.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3180 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
-  artifact has the same SHA-256 as the HTML used for that render. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-0245609.png`,
+  artifact was served directly from this invocation's output. Full render:
+  `/dev/shm/website-generator-pr47-browser-render-07d14d7.png`,
   SHA-256
   `06cb49e006365b4e31f2b71f072f8ce5dd2e0b48e47469d60adc3221e8761945`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
