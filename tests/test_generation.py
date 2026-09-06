@@ -816,6 +816,8 @@ class ProviderBoundaryTests(unittest.TestCase):
                 "num_ctx": DEFAULT_LOCAL_CONTEXT_TOKENS,
             },
         )
+        self.assertIs(probe_call["json"]["stream"], True)
+        self.assertIs(probe_call["stream"], True)
         self.assertEqual(method, "POST")
         self.assertEqual(url, "http://127.0.0.1:11434/api/chat")
         self.assertEqual(
@@ -1198,6 +1200,48 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertGreater(client.chat_response.read_calls, 1)
         self.assertLess(elapsed, 0.5)
         self.assertEqual(client.chat_response.close_calls, 1)
+
+    def test_local_prompt_probe_trickle_cannot_overrun_total_deadline(self):
+        class TrickleResponse(FakeLocalResponse):
+            def __init__(self):
+                super().__init__()
+                self.read_calls = 0
+
+            def _read1(self, chunk_size, decode_content=False):
+                self.read_calls += 1
+                time.sleep(0.01)
+                return b"x"
+
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            timeout_seconds=0.05,
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+            local_no_progress_timeout_seconds=1,
+        )
+        client = FakeLocalClient()
+        client.prompt_response = TrickleResponse()
+
+        started = time.monotonic()
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "exceeded its configured request deadline",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=client,
+            )
+        elapsed = time.monotonic() - started
+
+        self.assertEqual(len(client.calls), 1)
+        self.assertGreater(client.prompt_response.read_calls, 1)
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(client.prompt_response.close_calls, 1)
 
     def test_local_stream_read_honors_no_progress_before_total_deadline(self):
         class BlockingResponse(FakeLocalResponse):

@@ -24,7 +24,7 @@ continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
 This four-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +1029 / -29. The native stream decoder is a new
+the final diff is +1098 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -58,21 +58,18 @@ ship that boundary without its required negative proof.
 `GenerationConfig` carries a local no-progress timeout separate from the
 existing generation timeout. Local config resolution accepts
 `LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS`; direct callers receive the same
-default. The prompt probe stays a one-token non-streaming request because its
-entire response is itself the progress unit. Its socket read is bounded by the
-smaller of the remaining generation ceiling and the no-progress timeout.
-
-The full native `/api/chat` request uses `stream: true` and explicitly requests
-identity content encoding. One synchronous reader uses urllib3 `read1()` with
-decoding disabled, so each loop iteration performs at most one underlying
-receive before elapsed time is re-evaluated. Before every receive, it sets the
-live loopback socket timeout to the smaller of the remaining inactivity window
-and remaining total deadline. It then assembles bounded newline-delimited JSON
-frames, joins only assistant content, retains the terminal `done_reason` and
-token counts, and rejects malformed, error, reasoning, tool, oversized,
-duplicate-terminal, or incomplete streams through the existing error types.
-There is no larger buffered read, producer thread, concurrent response close,
-or unbounded handoff.
+default. Both the one-token prompt probe and the full native `/api/chat` request
+use the same streaming request helper and explicitly request identity content
+encoding. One synchronous reader uses urllib3 `read1()` with decoding disabled,
+so each loop iteration performs at most one underlying receive before elapsed
+time is re-evaluated. Before every receive, it sets the live loopback socket
+timeout to the smaller of the remaining inactivity window and remaining total
+deadline. It then assembles bounded newline-delimited JSON frames, joins only
+assistant content, retains the terminal `done_reason` and token counts, and
+rejects malformed, error, reasoning, tool, oversized, duplicate-terminal, or
+incomplete streams through the existing error types. There is no unbounded
+buffered request, producer thread, concurrent response close, or unbounded
+handoff on either request path.
 
 No runtime-residency check is used as authority. `/api/ps` can show a loaded
 model but cannot prove whether the queue is free, and checking it would retain a
@@ -172,8 +169,8 @@ Final single-reader evidence:
   again returned status 1. Log:
   `/dev/shm/website-generator-pr46-fixture-final-single-reader.log`.
 
-Current `read1()` evidence, gathered from the final working tree based on
-`083138b68e6bf75252f593b803c734095dc67d46`:
+Current shared-stream evidence, gathered from the final working tree based on
+`1e9636a7c1a646a51f25ccc6802fe9dc306ab44f`:
 
 - A production-shaped Requests/urllib3 server probe first emitted a valid
   nonterminal NDJSON frame, then sent one byte every 0.01 seconds. Despite bytes
@@ -181,24 +178,32 @@ Current `read1()` evidence, gathered from the final working tree based on
   returned the configured-total-deadline error after 0.151 seconds against a
   0.15-second ceiling. Log:
   `/dev/shm/website-generator-pr46-real-trickle-proof.log`.
-- The focused provider-boundary class passed 39 tests. The final repository
-  suite command `timeout 180s python -m unittest discover -s tests` passed 299
-  tests with 34 skipped in 16.797 seconds. An earlier verbose invocation was
-  stopped after an unrelated test-runner deadlock; the bounded rerun completed
+- A second production-shaped probe exercised `generate_text()` itself. Its
+  prompt-accounting request used `stream: true`; after one valid probe frame,
+  the server sent one byte every 0.01 seconds. The adapter enforced the
+  0.15-second total deadline after 0.152 seconds and never started the full
+  generation request. Log:
+  `/dev/shm/website-generator-pr46-prompt-trickle-proof.log`.
+- The focused provider-boundary class passed 40 tests. The final repository
+  suite command `timeout 180s python -m unittest discover -s tests` passed 300
+  tests with 34 skipped in 18.541 seconds. An earlier verbose invocation was
+  stopped after an unrelated test-runner deadlock; bounded reruns completed
   normally and the deadlock did not recur.
-- The no-deploy fixture ran from the recorded pre-run envelope at
-  `2026-09-06T11:25:56-05:00` through the post-run envelope at
-  `2026-09-06T11:26:58-05:00`, with exit status 0. Before the run the artifact
-  timestamp was `1788711145`; afterward it was `1788712013`, proving this
+- After the observed Document Summarizer compilation finished and `ollama ps`
+  was empty, the no-deploy fixture ran from the recorded pre-run envelope at
+  `2026-09-06T11:35:36-05:00` through the post-run envelope at
+  `2026-09-06T11:36:41-05:00`, with exit status 0. Before the run the artifact
+  timestamp was `1788712013`; afterward it was `1788712597`, proving this
   invocation rewrote it. The resulting 71,983-byte artifact retained SHA-256
   `1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22`.
   Both required scans returned status 1 with zero matches. Log:
-  `/dev/shm/website-generator-pr46-fixture-final-read1.log`; fresh rendered
-  spot-check: `/dev/shm/website-generator-pr46-fixture-final-read1.png`.
+  `/dev/shm/website-generator-pr46-fixture-final-shared-stream.log`; the output
+  is byte-identical to the fresh rendered spot-check at
+  `/dev/shm/website-generator-pr46-fixture-final-read1.png`.
 
 ## Estimated diff size
 
-Actual: four declared files, +1029 / -29. The stream decoder and
+Actual: four declared files, +1098 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.

@@ -868,6 +868,7 @@ def _iter_bounded_local_stream_lines(
     *,
     deadline: float,
     no_progress_timeout_seconds: float,
+    progress_stage: str,
 ) -> Iterator[bytes]:
     pending = bytearray()
     raw = getattr(response, "raw", None)
@@ -887,7 +888,7 @@ def _iter_bounded_local_stream_lines(
             )
         if progress_remaining <= 0:
             raise _local_no_progress_error(
-                "generation", no_progress_timeout_seconds
+                progress_stage, no_progress_timeout_seconds
             )
         _set_local_stream_socket_timeout(
             response,
@@ -906,7 +907,7 @@ def _iter_bounded_local_stream_lines(
                     "Local generation exceeded its configured request deadline."
                 ) from exc
             raise _local_no_progress_error(
-                "generation", no_progress_timeout_seconds
+                progress_stage, no_progress_timeout_seconds
             ) from exc
         if chunk == b"":
             break
@@ -955,6 +956,7 @@ def _read_local_chat_stream(
     *,
     deadline: float,
     no_progress_timeout_seconds: float,
+    progress_stage: str = "generation",
 ) -> dict[str, Any]:
     content_parts: list[str] = []
     content_bytes = 0
@@ -965,6 +967,7 @@ def _read_local_chat_stream(
             response,
             deadline=deadline,
             no_progress_timeout_seconds=no_progress_timeout_seconds,
+            progress_stage=progress_stage,
         ):
             if not raw_line:
                 continue
@@ -1027,6 +1030,39 @@ def _read_local_chat_stream(
     payload = dict(terminal)
     payload["message"] = {"content": "".join(content_parts)}
     return payload
+
+
+def _request_local_chat_stream(
+    client: Any,
+    endpoint: str,
+    request_body: dict[str, Any],
+    *,
+    config: GenerationConfig,
+    deadline: float,
+    progress_stage: str,
+) -> dict[str, Any]:
+    request_timeout = _local_request_timeout(config, deadline)
+    try:
+        response = client.post(
+            endpoint,
+            json=request_body,
+            stream=True,
+            timeout=request_timeout,
+            allow_redirects=False,
+        )
+    except requests.Timeout as exc:
+        raise _local_no_progress_error(progress_stage, request_timeout[1]) from exc
+    try:
+        _raise_for_local_response_status(response)
+    except Exception:
+        response.close()
+        raise
+    return _read_local_chat_stream(
+        response,
+        deadline=deadline,
+        no_progress_timeout_seconds=request_timeout[1],
+        progress_stage=progress_stage,
+    )
 
 
 def preflight_generation_provider(
@@ -1292,7 +1328,7 @@ def _generate_local_text(
     token_probe = {
         "model": config.model,
         "messages": messages,
-        "stream": False,
+        "stream": True,
         "think": False,
         "options": {
             "temperature": 0,
@@ -1302,18 +1338,14 @@ def _generate_local_text(
         },
     }
     try:
-        probe_timeout = _local_request_timeout(config, deadline)
-        try:
-            probe_response = selected_client.post(
-                endpoint,
-                json=token_probe,
-                timeout=probe_timeout,
-                allow_redirects=False,
-            )
-        except requests.Timeout as exc:
-            raise _local_no_progress_error("prompt-probe", probe_timeout[1]) from exc
-        _raise_for_local_response_status(probe_response)
-        probe_payload = probe_response.json()
+        probe_payload = _request_local_chat_stream(
+            selected_client,
+            endpoint,
+            token_probe,
+            config=config,
+            deadline=deadline,
+            progress_stage="prompt-probe",
+        )
         if not isinstance(probe_payload, dict) or probe_payload.get("done") is not True:
             raise ValueError("Ollama returned an incomplete prompt probe")
         prompt_tokens = probe_payload.get("prompt_eval_count")
@@ -1328,26 +1360,14 @@ def _generate_local_text(
                 "The complete local generation prompt does not fit alongside "
                 "the required output reserve. Reduce the prospect data."
             )
-        generation_timeout = _local_request_timeout(config, deadline)
-        try:
-            response = selected_client.post(
-                endpoint,
-                json=request_body,
-                stream=True,
-                timeout=generation_timeout,
-                allow_redirects=False,
-            )
-        except requests.Timeout as exc:
-            raise _local_no_progress_error("generation", generation_timeout[1]) from exc
-        _raise_for_local_response_status(response)
-        try:
-            payload = _read_local_chat_stream(
-                response,
-                deadline=deadline,
-                no_progress_timeout_seconds=generation_timeout[1],
-            )
-        except requests.RequestException as exc:
-            raise _local_no_progress_error("generation", generation_timeout[1]) from exc
+        payload = _request_local_chat_stream(
+            selected_client,
+            endpoint,
+            request_body,
+            config=config,
+            deadline=deadline,
+            progress_stage="generation",
+        )
     except GenerationResponseError:
         raise
     except GenerationProviderUnavailable:
