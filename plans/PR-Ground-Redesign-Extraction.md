@@ -154,7 +154,7 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fq4kE`: sentence-form fax labels became callable phone evidence | Contact admission must associate each phone occurrence with its nearest explicit role inside the bounded source assertion, not recognize only one punctuation-shaped prefix. | `Our fax is 217-555-0100` rejects while `Our phone is 217-555-0100`, extension-qualified phone text, and existing callable action evidence remain admissible. | fixed/superseded | `lib/site_extraction.py:471-474,766-809`; `tests/test_site_extraction.py:1112-1169` |
 | `PRRT_kwDOTDYaKM6frBY4`: direct text in a semantic main retained a second unbounded occurrence | One rendered claim run may have only its bounded structural owner; parent-local text cannot remain independently authoritative when a distinct child context owns that same run. | `<main>Free Estimates<p>Members only.</p></main>` rejects the shortened benefit and admits the complete assertion. The suppression applies only to homepage claim contexts; valid nested list records still admit and cross-record combinations reject. | fixed/superseded | `lib/site_extraction.py:1796-1902`; `tests/test_site_extraction.py:749-762,2288-2309` |
 | `PRRT_kwDOTDYaKM6frBY6`: postfix fax roles became callable evidence | Contact admission must select the nearest explicit role on either side of a phone occurrence within its bounded source assertion. | Both `217-555-0100 is our fax` and `217-555-0100 (fax)` reject; the equivalent postfix phone wording and existing prefix/extension phone forms admit. | fixed/superseded | `lib/site_extraction.py:766-809,2215-2233`; `tests/test_site_extraction.py:1112-1169` |
-| `PRRT_kwDOTDYaKM6frI0U`: a wrapper's descendant heading hid its pre-heading qualifier | Claim ownership must split a rendered wrapper at its first heading boundary; pre-heading text belongs to the preceding claim run, while the heading starts a new run. | `<main>Free Estimates<div>Members only.<h2>Details</h2></div></main>` rejects the shortened benefit, admits `Free Estimates Members only.`, and does not attach `Details` to that claim. Existing peer-heading and record boundaries still pass. | fixed/superseded | `lib/site_extraction.py:1769-1806`; `tests/test_site_extraction.py:749-763` |
+| `PRRT_kwDOTDYaKM6frI0U`: a wrapper's descendant heading hid its pre-heading qualifier | Claim ownership must split a rendered wrapper at its first heading boundary; all nested contexts in the pre-heading fragment belong to the preceding claim run, while the heading starts a new run. | Direct, span-wrapped, paragraph-wrapped, and nested-wrapper qualifiers all reject the shortened benefit, admit `Free Estimates Members only.`, and do not attach `Details` to that claim. Existing peer-heading and record boundaries still pass. | fixed/superseded | `lib/site_extraction.py:1755-1822,1860-1883`; `tests/test_site_extraction.py:749-765` |
 | `PRRT_kwDOTDYaKM6frI0W`: abbreviation punctuation separated a fax role from its number | Contact-role ownership must be assigned inside the already bounded source assertion, not by treating every period as a sentence break. Complete field-label spans must associate each role with its nearest phone occurrence. | `Fax No. 217-555-0100` and the dotted-number variant reject; `Phone No. 217-555-0100` admits. In a mixed fax/phone record, only the phone occurrence authorizes a callable number. | fixed/superseded | `lib/site_extraction.py:471-474,766-809`; `tests/test_site_extraction.py:1112-1182` |
 
 ## Mechanism
@@ -361,7 +361,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `b32ddf0933902822807213734b3b0d1845243dda`.
+- Code revision under test: `0516ce3e510414612ea0668d64fadfec09433040`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
 - Isolated probes reproduced the two latest review paths against the preceding
@@ -385,25 +385,25 @@ business-specific claims.
   lib/site_extraction.py tests/test_site_extraction.py`, and `git diff --check`
   passed.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T06:03:03,777078379-05:00`, completed at
-  `2026-09-06T06:03:54,217550828-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T06:10:37,395052292-05:00`, completed at
+  `2026-09-06T06:11:27,623844427-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-b32ddf0.log`.
-- The invocation replaced artifact inode 3325022 with inode 3309502 and set mtime
-  `2026-09-06 06:03:54.134759199 -0500`, proving this invocation rewrote
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-0516ce3.log`.
+- The invocation replaced artifact inode 3309502 with inode 3325019 and set mtime
+  `2026-09-06 06:11:27.538137699 -0500`, proving this invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71939-byte artifact
   has SHA-256
   `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-b32ddf0.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-b32ddf0.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-0516ce3.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-0516ce3.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
   reported title `DREES PLUMBING INC`, 2441 body-text characters, and a
   1440x3040 document. The full screenshot was visually inspected and shows the
   complete styled page from hero through footer without an obvious render break.
-  Screenshot: `/dev/shm/website-generator-pr47-browser-render-b32ddf0.png`,
+  Screenshot: `/dev/shm/website-generator-pr47-browser-render-0516ce3.png`,
   SHA-256
   `8bd3d16328852d0dd3e9e388433d2cc5ae25724c1955a43e6172c45d1586ae75`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
