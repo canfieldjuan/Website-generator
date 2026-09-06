@@ -58,6 +58,7 @@ analysis may control presentation but may not authorize a visible business claim
 - `lib/site_extraction.py`
 - `lib/generation.py`
 - `pipeline.py`
+- `references/01-site-analysis-prompt.md`
 - `references/02-redesign-gen-prompt.md`
 - `references/04-interior-page-prompt.md`
 - `references/06-build-prompt.md`
