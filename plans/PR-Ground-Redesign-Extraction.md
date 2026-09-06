@@ -168,6 +168,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6frggG`: `<br>` was erased before contact grouping | Contact ownership must preserve rendered structural boundaries without changing general claim text. | A stacked phone followed by a fax on the next rendered line rejected the phone on `a65d7c3`. A contact-only DOM text projection now preserves `<br>` as an internal boundary, feeds only phone evidence, admits the phone, and rejects both following fax values. | fixed/superseded | `lib/site_extraction.py:1085-1097,1829-1830,1912-1933,1982-1987,2075-2120`; `tests/test_site_extraction.py:1266-1282` |
 | `PRRT_kwDOTDYaKM6frm_H`: descriptor-word matching left new terminal labels outside the protected field | Contact field ownership must depend on bounded role/number structure, not an enumeration of descriptor words or terminal labels. | `Fax Dept. Line: 217-555-0100` reproduced as callable on `d8fa02c`. The descriptor regex has been removed: primitive role tokens are found independently, then a bounded field-like span to the next number is protected only when no intervening role or hard group boundary exists. Both `Line` and an unseen `Regional Office Desk` terminal reject for fax and admit for phone; sentence-delimited mixed roles retain their own numbers. | fixed/superseded | `lib/site_extraction.py:471-479,771-813`; `tests/test_site_extraction.py:1243-1273` |
 | Self-boundary probe: a long field label exceeded the contact-span cap and became callable | Resource bounds may reject input, but crossing an arbitrary size threshold must never grant contact authority. | On `2b0b6e8`, a 172-character punctuated fax field admitted its number while the shorter equivalent rejected. The structural field grammar now operates over the already bounded source assertion without an admission-changing label cap; the long fax field rejects and the equivalent long phone field admits. | fixed/superseded | `lib/site_extraction.py:471-478,771-810`; `tests/test_site_extraction.py:1111-1114,1247-1284` |
+| `PRRT_kwDOTDYaKM6frrrQ`: punctuated postfix fields lost their owner | Prefix and postfix contact fields must use one adjacency and boundary grammar; punctuation inside either complete field cannot separate its role from its number. | `217-555-0100 (Regional Dept. Fax)` reproduced as callable on `2b0b6e8`. The shared field-gap classifier now protects structurally internal punctuation on both number/role orders; wrapped and unwrapped fax forms reject while equivalent phone forms admit. | fixed/superseded | `lib/site_extraction.py:783-817,820-868`; `tests/test_site_extraction.py:1125-1140,1170-1181` |
+| `PRRT_kwDOTDYaKM6frrrR`: prefix field protection crossed a completed sentence | Field punctuation may suppress a group boundary only when it belongs to the adjacent role/number field; arbitrary allowed characters cannot erase a sentence boundary. | `Fax inquiries are handled online. Main office: 217-555-0100` reproduced with the office number rejected on `2b0b6e8`. Contact evidence now preserves case for bounded abbreviation syntax, and the shared gap classifier leaves both `online.` and the short prose boundary `down.` active; both office-phone controls admit while `Dept.` fax fields still reject. | fixed/superseded | `lib/site_extraction.py:480-484,599-602,686-727,783-817,975-1002,1995-2016,2466-2478`; `tests/test_site_extraction.py:1182-1203` |
 
 ## Mechanism
 
@@ -373,7 +375,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `b22b6e74b24418adea0ca1589722a67aa8614334`.
+- Code revision under test: `9cec5a6b4cf30a1a42dc6226a43051d1f3286b26`.
   The code worktree was clean when the production-shaped fixture started. This
   plan update is a documentation-only descendant of that tested code revision.
 - Isolated validation probes exercise the latest exact-head review paths:
@@ -391,41 +393,48 @@ business-specific claims.
   admission-changing size boundary: a 172-character punctuated fax label exceeded
   the field-span cap and became callable. The arbitrary cap is now removed from the
   already source-bounded assertion; the long fax label rejects and the equivalent
-  phone label admits.
+  phone label admits. The next exact-head review exposed both missing postfix
+  protection and prefix protection crossing a real sentence. Contact text now
+  retains case until contact ownership is decided, while existing negation and
+  restriction checks explicitly normalize their tokens. One shared two-sided
+  field-gap classifier protects only structurally internal abbreviation/dash
+  punctuation. Wrapped and unwrapped postfix fax labels reject, their phone
+  controls admit, and unrelated office phones after both long- and short-word
+  completed fax sentences admit.
 - Boundary probe: `python -m unittest -q tests.test_site_extraction
   tests.test_generation` passed 236 tests. The negative side covers every reproduced
   fax-authority bypass and the existing ambiguous/conflicting role cases; the
   positive side retains callable phone fields across inline spans, extensions,
   dotted numbers, textual and visual group separators, and structural line breaks.
 - Full suite: `python -m unittest discover -s tests -q` exited 0; the saved log
-  reports 378 tests passed with 34 skipped in 13.875 seconds. Log:
-  `/dev/shm/website-generator-pr47-full-suite-b22b6e7.log`.
+  reports 378 tests passed with 34 skipped in 13.884 seconds. Log:
+  `/dev/shm/website-generator-pr47-full-suite-9cec5a6.log`.
 - Static evidence: `python -m ruff check lib/site_extraction.py
   tests/test_site_extraction.py`, `python -m compileall -q
   build.py pipeline.py connect_provider.py lib tests`, and `git diff --check`
   passed. A repository-wide formatter invocation was intentionally not retained
   because it rewrote pre-existing lines outside this correction.
 - The exact required fixture command used `local:qwen3-30b-a3b:latest` through
-  Ollama. It began at `2026-09-06T07:35:17,520761094-05:00`, completed at
-  `2026-09-06T07:36:07,778385249-05:00`, exited 0, and ran the 22 GB model 100% on
+  Ollama. It began at `2026-09-06T07:48:15,619932905-05:00`, completed at
+  `2026-09-06T07:49:06,206417245-05:00`, exited 0, and ran the 22 GB model 100% on
   the GPU with context 40960. No correction attempt, email, or deployment path
-  ran. Log: `/dev/shm/website-generator-pr47-fixture-b22b6e7.log`.
-- The invocation replaced artifact inode 3325015 with inode 3325019 and set mtime
-  `2026-09-06 07:36:07.698712440 -0500`, proving this invocation rewrote
+  ran. Log: `/dev/shm/website-generator-pr47-fixture-9cec5a6.log`.
+- The invocation replaced artifact inode 3325019 with inode 3311281 and set mtime
+  `2026-09-06 07:49:06.118713838 -0500`, proving this invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`. The resulting 71939-byte artifact
   has SHA-256
   `c94f19b6cb38bbcd08a10ba80673c1930378b58020e7950f0ab7ab8c0cfd66ca`.
 - Exact required placeholder and case-insensitive forbidden-claim scans each
   returned the expected no-match status 1 with zero matches; missing-file and
   execution-error statuses were handled separately. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-b22b6e7.log` and
-  `/dev/shm/website-generator-pr47-forbidden-claim-scan-b22b6e7.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-9cec5a6.log` and
+  `/dev/shm/website-generator-pr47-forbidden-claim-scan-9cec5a6.log`.
 - Rendered spot-check: the fresh artifact returned HTTP 200; headless Chrome
   loaded a 1440x3040 screenshot with title `DREES PLUMBING INC` and 2441
   body-text characters. The screenshot was visually inspected and shows the
   styled navigation, hero, service grid, trust content, and review content
   without an obvious render break. Screenshot:
-  `/dev/shm/website-generator-pr47-browser-render-b22b6e7.png`,
+  `/dev/shm/website-generator-pr47-browser-render-9cec5a6.png`,
   SHA-256
   `8bd3d16328852d0dd3e9e388433d2cc5ae25724c1955a43e6172c45d1586ae75`.
 - Issue #46 was not reproduced: the full local request completed. It remains a
