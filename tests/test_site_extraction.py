@@ -1111,6 +1111,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "contact": {"phone": "217-555-0100"},
             }
         }
+        long_field_descriptor = f"{'Regional ' * 16}Dept. Line"
         with self.assertRaisesRegex(SiteExtractionError, "source phone"):
             validate_site_analysis(
                 base_phone,
@@ -1246,6 +1247,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "Fax Dept. Number: 217-555-0100",
             "Fax Dept. Line: 217-555-0100",
             "Fax Regional Office Desk: 217-555-0100",
+            f"Fax {long_field_descriptor}: 217-555-0100",
             "Fax — 217-555-0100",
             "Call Center Fax Number: 217-555-0100",
         ):
@@ -1268,6 +1270,14 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(
                 base_phone,
                 "<h1>Acme Cleaning</h1><p>Phone Dept. Line: 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1>"
+                f"<p>Phone {long_field_descriptor}: 217-555-0100</p>",
             ),
             base_phone,
         )

@@ -472,7 +472,6 @@ _PHONE_ROLE_PATTERN = re.compile(
     r"\b(?P<role>fax|facsimile|phone|telephone|mobile|cell|call)\b",
     re.I,
 )
-_CONTACT_FIELD_GAP_MAX_LENGTH = 120
 _CONTACT_FIELD_GAP_PATTERN = re.compile(r"[\sA-Z0-9_&'’(),./:#\-–—]*", re.I)
 _CONTACT_GROUP_BOUNDARY = "\ue000"
 _CONTACT_GROUP_BREAK_PATTERN = re.compile(
@@ -794,10 +793,7 @@ def _contact_occurrence_is_noncallable(
             or following_number.start() < following_role.start()
         ):
             field_gap = text[role.end() : following_number.start()]
-            if (
-                len(field_gap) <= _CONTACT_FIELD_GAP_MAX_LENGTH
-                and _CONTACT_FIELD_GAP_PATTERN.fullmatch(field_gap) is not None
-            ):
+            if _CONTACT_FIELD_GAP_PATTERN.fullmatch(field_gap) is not None:
                 protected_end = following_number.start()
         protected_role_spans.append((role.start(), protected_end))
     protected_spans = tuple(
