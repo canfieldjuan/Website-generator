@@ -60,6 +60,7 @@ analysis may control presentation but may not authorize a visible business claim
 - `pipeline.py`
 - `references/02-redesign-gen-prompt.md`
 - `references/04-interior-page-prompt.md`
+- `references/06-build-prompt.md`
 - `tests/test_generation.py`
 - `tests/test_site_extraction.py`
 - `requirements.txt`
@@ -308,8 +309,11 @@ business-specific claims.
 - Issue #46 was not reproduced by the final fixture: the full request returned
   and the build completed. The issue remains separate and open because one
   successful run does not resolve its historical stall.
-- Final-head GitHub unit, Windows packaging, and latest-review reconciliation
-  remain pending until this evidence update is pushed.
+- Final-head GitHub checks and the latest review are reconciled from the live PR
+  after this evidence block is committed, because another plan-only evidence
+  commit would itself create a new head. The final handoff must identify the
+  exact head, tested merge revision where applicable, check results, unresolved
+  thread count, and review outcome.
 
 ### Historical evidence (earlier revisions; not final-head proof)
 
