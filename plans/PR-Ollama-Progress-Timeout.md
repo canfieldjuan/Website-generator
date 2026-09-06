@@ -134,9 +134,10 @@ files:
   `git diff --check` passed. `F401` is scoped out because the test module already
   contains two unrelated unused admission-contract imports on `origin/main`.
 
-Pending before publish: run `bash scripts/local_pr_review.sh origin/main` on the
-clean committed worktree, then reconcile the exact remote head with GitHub CI
-and review.
+`bash scripts/local_pr_review.sh origin/main` passed on clean commit `a0c3cc9`
+against merge base `826f0c8919615d4ed2849ebed8fb511bc6bc994b`: committed-diff whitespace
+and plan-presence checks both passed. GitHub CI and review remain to be
+reconciled against the exact published head.
 
 ## Estimated diff size
 
