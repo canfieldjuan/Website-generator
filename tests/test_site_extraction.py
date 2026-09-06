@@ -728,6 +728,24 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             complete_nested_blocks,
         )
 
+        wrapped_heading_scope = (
+            '<meta property="og:site_name" content="Acme"><div>'
+            "<div><h3>Free Estimates</h3></div>"
+            "<div>Members only.</div></div>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(shortened, wrapped_heading_scope)
+        complete_wrapped_heading_scope = {
+            "site": {"name": "Acme", "tagline": "Free Estimates Members only."}
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                complete_wrapped_heading_scope,
+                wrapped_heading_scope,
+            ),
+            complete_wrapped_heading_scope,
+        )
+
         list_owned_scope = (
             '<meta property="og:site_name" content="Acme"><div>'
             "<h3>Free Estimates</h3><ul><li>Members only.</li></ul></div>"
@@ -1763,8 +1781,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         )
 
         wrapped_select = (
-            "<label>Project Type"
-            "<select><option>Office</option></select></label>"
+            "<form><label>Project Type"
+            "<select><option>Office</option></select></label></form>"
         )
         self.assertEqual(
             validate_enrichment_result(
@@ -1790,6 +1808,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             '<label for="email"><img alt="Email"></label><input id="email">',
         ):
             with self.subTest(source=source):
+                source = f"<form>{source}</form>"
                 self.assertEqual(
                     validate_enrichment_result(
                         {"form_fields": ["Email"]},
@@ -1813,7 +1832,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 dual_association,
                 page_type="contact",
                 source_html=(
-                    '<label for="email">Email<input id="email" type="email"></label>'
+                    '<form><label for="email">Email'
+                    '<input id="email" type="email"></label></form>'
                 ),
                 source_url="https://acme.test/contact",
             )["form_fields"],
@@ -2097,12 +2117,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_enrichment_result(
                 form_fields,
                 page_type="contact",
-                source_html="<label>Email<input></label>",
+                source_html="<form><label>Email<input></label></form>",
                 source_url="https://acme.test/contact",
             ),
             {
                 "form_fields": ["Email"],
                 "source_url": "https://acme.test/contact",
+                "form_action": "https://acme.test/contact",
             },
         )
 
@@ -2124,8 +2145,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 )
 
         first_legend = (
-            '<fieldset disabled><legend><label>Email<input name="email">'
-            "</label></legend></fieldset>"
+            '<form><fieldset disabled><legend><label>Email<input name="email">'
+            "</label></legend></fieldset></form>"
         )
         self.assertEqual(
             validate_enrichment_result(
@@ -2137,6 +2158,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             {
                 "form_fields": ["Email"],
                 "source_url": "https://acme.test/contact",
+                "form_action": "https://acme.test/contact",
             },
         )
 
@@ -2444,6 +2466,45 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "source text"):
             validate_site_analysis(nested_heading_target, nested_heading_source)
 
+    def test_single_page_form_retains_its_code_owned_endpoint(self):
+        source = (
+            '<meta property="og:site_name" content="Acme">'
+            '<nav><a href="#contact">Contact</a></nav>'
+            '<section id="contact"><h2>Contact</h2>'
+            '<form action="/submit"><label>Email<input name="email"></label>'
+            "</form></section>"
+        )
+        document = {
+            "site": {"name": "Acme"},
+            "single_page_sections": [
+                {
+                    "nav_label": "Contact",
+                    "anchor": "#contact",
+                    "page_type": "contact",
+                    "content": {"form_fields": ["Email"]},
+                }
+            ],
+        }
+        admitted = validate_site_analysis(
+            document,
+            source,
+            "https://acme.test/",
+        )
+        self.assertEqual(
+            admitted["single_page_sections"][0]["content"]["form_action"],
+            "https://acme.test/submit",
+        )
+
+        contract = pipeline._redesign_action_url_contract(
+            admitted,
+            pipeline._redesign_contact_contract(admitted),
+        )
+        self.assertEqual(
+            contract.allowed_form_urls,
+            ("https://acme.test/submit",),
+        )
+        self.assertNotIn("https://acme.test/submit", contract.allowed_urls)
+
     def test_single_page_section_without_anchor_uses_one_heading_owned_scope(self):
         source = (
             "<h1>Acme Cleaning</h1><nav><button>About</button>"
@@ -2585,7 +2646,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 ],
             }
         )
-        self.assertEqual(separate.services, ("Drain Cleaning",))
+        self.assertEqual(separate.services, ("Our Services", "Drain Cleaning"))
         self.assertEqual(separate.locations, ("Effingham, IL",))
         self.assertEqual(separate.allowed_claims, ())
 
@@ -2612,6 +2673,21 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ("Drain Cleaning throughout Effingham, IL",),
         )
 
+        headline_only = pipeline._redesign_service_location_contract(
+            {
+                "site": {"name": "Acme", "location": "Effingham, IL"},
+                "sections": [
+                    {
+                        "type": "services",
+                        "headline": "Drain Cleaning",
+                        "items": [],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(headline_only.services, ("Drain Cleaning",))
+        self.assertEqual(headline_only.allowed_claims, ())
+
     def test_generation_action_contract_keeps_only_action_owned_urls(self):
         contract = pipeline._redesign_action_url_contract(
             {
@@ -2631,7 +2707,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                         "source_url": "/services",
                     }
                 ],
-                "contact_form": {"source_url": "/contact-source"},
+                "contact_form": {
+                    "source_url": "/contact-source",
+                    "form_action": "/contact-submit",
+                },
                 "images": [{"url": "/hero.jpg", "context": "hero"}],
                 "social": [{"platform": "Facebook", "url": "/facebook"}],
                 "footer_links": [{"label": "Privacy", "url": "/privacy"}],
@@ -2682,8 +2761,9 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         )
         self.assertEqual(
             contract.allowed_form_urls,
-            ("/submit", "/pay", "/external"),
+            ("/contact-submit", "/submit", "/pay", "/external"),
         )
+        self.assertNotIn("/contact-submit", contract.allowed_urls)
         self.assertEqual(
             contract.allowed_labels,
             (
@@ -3480,6 +3560,49 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 {"contact_info": {}},
                 page_type="contact",
                 source_html="<h1>Contact</h1>",
+                source_url="https://acme.test/contact",
+            )
+
+    def test_contact_enrichment_retains_one_code_owned_form_endpoint(self):
+        source = (
+            '<base href="https://forms.acme.test/v1/">'
+            '<form action="submit"><label for="email">Email</label>'
+            '<input id="email" name="email"></form>'
+        )
+        admitted = validate_enrichment_result(
+            {"form_fields": ["Email"]},
+            page_type="contact",
+            source_html=source,
+            source_url="https://acme.test/contact",
+        )
+        self.assertEqual(admitted["form_action"], "https://forms.acme.test/v1/submit")
+
+        contract = pipeline._redesign_action_url_contract(
+            {"site": {"name": "Acme"}, "contact_form": admitted},
+            pipeline._redesign_contact_contract({}),
+        )
+        self.assertEqual(
+            contract.allowed_form_urls,
+            ("https://forms.acme.test/v1/submit",),
+        )
+        self.assertNotIn("https://forms.acme.test/v1/submit", contract.allowed_urls)
+
+        with self.assertRaisesRegex(SiteExtractionError, "one source-owned form endpoint"):
+            validate_enrichment_result(
+                {"form_fields": ["Email"]},
+                page_type="contact",
+                source_html=(
+                    '<form action="/first"><label>Email<input name="first"></label></form>'
+                    '<form action="/second"><label>Email<input name="second"></label></form>'
+                ),
+                source_url="https://acme.test/contact",
+            )
+
+        with self.assertRaisesRegex(SiteExtractionError, "schema rejected"):
+            validate_enrichment_result(
+                {"form_fields": ["Email"], "form_action": "https://evil.test/"},
+                page_type="contact",
+                source_html=source,
                 source_url="https://acme.test/contact",
             )
 

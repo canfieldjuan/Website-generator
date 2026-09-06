@@ -1228,6 +1228,46 @@ class BodyAssemblyTests(unittest.TestCase):
             valid_body,
         )
 
+        for mismatched_label in ("Text Us", "Email Us"):
+            with (
+                self.subTest(mismatched_label=mismatched_label),
+                self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "channel-specific action label",
+                ),
+            ):
+                validate_generated_body(
+                    body_result(
+                        f'<body><a href="tel:2175550100">{mismatched_label}</a></body>'
+                    ),
+                    expected_action_urls=contract,
+                )
+
+        text_body = (
+            '<body><a href="sms:2175550100?body=Hello">Text Us</a></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(text_body),
+                expected_action_urls=contract,
+            ),
+            text_body,
+        )
+
+        exact_source_mismatch = ActionUrlAdmissionContract(
+            phones=("217-555-0100",),
+            allowed_labels=("Text Us",),
+            allowed_pairs=(("Text Us", "tel:2175550100"),),
+        )
+        source_owned_body = '<body><a href="tel:2175550100">Text Us</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(source_owned_body),
+                expected_action_urls=exact_source_mismatch,
+            ),
+            source_owned_body,
+        )
+
         entity_site = {
             "site": {"name": "Acme Plumbing"},
             "nav": [

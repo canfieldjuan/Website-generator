@@ -167,6 +167,7 @@ def _redesign_service_location_contract(site_json):
     def collect_service_section(section):
         if not isinstance(section, dict):
             return
+        append_text(services, section.get("headline"))
         append_text(source_claims, section.get("headline"))
         for item in section.get("items") or ():
             if not isinstance(item, dict):
@@ -243,6 +244,10 @@ def _redesign_action_url_contract(
         _append_source_value(allowed_urls, destination)
         _append_source_pair(allowed_pairs, label, destination)
 
+    def append_form_action(value):
+        if isinstance(value, dict):
+            _append_source_value(allowed_form_urls, value.get("form_action"))
+
     def append_item_urls(items):
         if isinstance(items, list):
             for item in items:
@@ -256,7 +261,9 @@ def _redesign_action_url_contract(
         if isinstance(section, dict):
             append_field(section, "source_url")
             append_item_urls(section.get("items"))
-    append_field(site_json.get("contact_form") or {}, "source_url")
+    contact_form = site_json.get("contact_form") or {}
+    append_field(contact_form, "source_url")
+    append_form_action(contact_form)
     for item in site_json.get("social") or ():
         append_action(item, "platform")
     for item in site_json.get("footer_links") or ():
@@ -270,6 +277,7 @@ def _redesign_action_url_contract(
         content = section.get("content")
         if isinstance(content, dict):
             append_item_urls(content.get("items"))
+            append_form_action(content)
     conversion_profile = site_json.get("conversion_profile")
     if isinstance(conversion_profile, dict):
         for label in conversion_profile.get("existing_ctas") or ():

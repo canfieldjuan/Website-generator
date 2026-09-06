@@ -1162,6 +1162,59 @@ def is_labelled_action_element(element: Any) -> bool:
     )
 
 
+def _source_form_owner(
+    control: Tag,
+    root: BeautifulSoup | Tag,
+) -> Tag | None:
+    form_id = control.get("form")
+    if isinstance(form_id, str) and form_id.strip():
+        owners = root.find_all("form", id=form_id.strip(), limit=2)
+        return owners[0] if len(owners) == 1 else None
+    return control.find_parent("form")
+
+
+def _source_form_control_label(
+    control: Tag,
+    root: BeautifulSoup | Tag,
+) -> str:
+    accessible_label = (
+        _source_accessible_text(control, root, frozenset())
+        if control.has_attr("aria-labelledby") or control.has_attr("aria-label")
+        else ""
+    )
+    if not accessible_label:
+        labels: list[str] = []
+        seen_labels: set[int] = set()
+
+        def append_label(label: Any) -> None:
+            identity = id(label)
+            if identity not in seen_labels:
+                seen_labels.add(identity)
+                labels.append(
+                    source_accessible_name(
+                        label,
+                        root,
+                        excluded_element=control,
+                    )
+                )
+
+        wrapping_label = control.find_parent("label")
+        if wrapping_label is not None:
+            append_label(wrapping_label)
+        control_id = control.get("id")
+        if isinstance(control_id, str) and control_id.strip():
+            for label in root.find_all(
+                "label", attrs={"for": control_id}, limit=MAX_ITEMS
+            ):
+                append_label(label)
+        accessible_label = " ".join(label for label in labels if label)
+    if not accessible_label:
+        accessible_label = str(
+            control.get("placeholder") or control.get("title") or ""
+        ).strip()
+    return _normalize_text(accessible_label)
+
+
 def _marked_identity_text_parts(
     element: Tag,
     root: BeautifulSoup | Tag,
@@ -1456,6 +1509,12 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
+class SourceFormEvidence:
+    control_labels: tuple[str, ...]
+    action_url: str | None
+
+
+@dataclass(frozen=True)
 class SourceEvidence:
     text_segments: tuple[str, ...]
     assertion_segments: tuple[str, ...]
@@ -1474,6 +1533,7 @@ class SourceEvidence:
     emails: frozenset[str]
     phones: frozenset[str]
     resolution_base_url: str | None
+    forms: tuple[SourceFormEvidence, ...]
     records: tuple[SourceEvidence, ...]
     content_sections: tuple[SourceEvidence, ...]
     section_targets: tuple[tuple[str, SourceEvidence], ...]
@@ -1615,18 +1675,31 @@ class SourceEvidence:
             local_segment = _normalize_text(" ".join(local_parts))
             owner_segment = local_segment
             if is_claim_scope_context(context):
+                scope_context = context
                 parent = context.parent
-                if isinstance(parent, Tag) and parent.name in claim_scope_parent_tags:
+                siblings: list[Any] = []
+                while isinstance(parent, Tag):
                     siblings = [
                         child
                         for child in parent.children
                         if isinstance(child, Tag) or claim_component_text(child)
                     ]
+                    if parent.name in claim_scope_parent_tags and len(siblings) > 1:
+                        break
+                    if (
+                        parent.name in _INDEPENDENT_RECORD_TAGS
+                        or parent.name in {"body", "html"}
+                    ):
+                        siblings = []
+                        break
+                    scope_context = parent
+                    parent = parent.parent
+                if siblings:
                     context_index = next(
                         (
                             index
                             for index, sibling in enumerate(siblings)
-                            if sibling is context
+                            if sibling is scope_context
                         ),
                         None,
                     )
@@ -1634,7 +1707,7 @@ class SourceEvidence:
                         first = context_index
                         last = context_index
                         heading_level = (
-                            _assertion_heading_level(context)
+                            claim_component_heading_level(scope_context)
                             if _group_heading_claims
                             else None
                         )
@@ -1902,55 +1975,6 @@ class SourceEvidence:
             h1_identity_parts,
         )
 
-        form_control_labels: list[str] = []
-        for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):
-            if not is_source_action_available(control):
-                continue
-            if (
-                control.name == "input"
-                and str(control.get("type") or "text").casefold()
-                in _NON_DATA_INPUT_TYPES
-            ):
-                continue
-            accessible_label = (
-                _source_accessible_text(control, soup, frozenset())
-                if control.has_attr("aria-labelledby") or control.has_attr("aria-label")
-                else ""
-            )
-            if not accessible_label:
-                labels = []
-                seen_labels: set[int] = set()
-
-                def append_label(label: Any) -> None:
-                    identity = id(label)
-                    if identity not in seen_labels:
-                        seen_labels.add(identity)
-                        labels.append(
-                            source_accessible_name(
-                                label,
-                                soup,
-                                excluded_element=control,
-                            )
-                        )
-
-                wrapping_label = control.find_parent("label")
-                if wrapping_label is not None:
-                    append_label(wrapping_label)
-                control_id = control.get("id")
-                if isinstance(control_id, str) and control_id.strip():
-                    for label in soup.find_all(
-                        "label", attrs={"for": control_id}, limit=MAX_ITEMS
-                    ):
-                        append_label(label)
-                accessible_label = " ".join(label for label in labels if label)
-            if not accessible_label:
-                accessible_label = str(
-                    control.get("placeholder") or control.get("title") or ""
-                ).strip()
-            normalized_label = _normalize_text(accessible_label)
-            if normalized_label:
-                form_control_labels.append(normalized_label)
-
         def resolved(values: Iterable[str]) -> frozenset[str]:
             admitted: set[str] = set()
             for raw in values:
@@ -1961,6 +1985,51 @@ class SourceEvidence:
                 if resolution_base_url:
                     admitted.add(urljoin(resolution_base_url, candidate))
             return frozenset(admitted)
+
+        data_controls = tuple(
+            control
+            for control in soup.find_all(
+                ["input", "select", "textarea"], limit=MAX_ITEMS
+            )
+            if is_source_action_available(control)
+            and not (
+                control.name == "input"
+                and str(control.get("type") or "text").casefold()
+                in _NON_DATA_INPUT_TYPES
+            )
+        )
+        forms: list[SourceFormEvidence] = []
+        for form in soup.find_all("form", limit=MAX_ITEMS):
+            if not is_source_action_available(form):
+                continue
+            labels = tuple(
+                label
+                for control in data_controls
+                if _source_form_owner(control, soup) is form
+                if (label := _source_form_control_label(control, soup))
+            )
+            raw_action = form.get("action")
+            if isinstance(raw_action, str) and raw_action.strip():
+                action_candidate = urljoin(
+                    resolution_base_url or "",
+                    html.unescape(raw_action).strip(),
+                )
+            else:
+                action_candidate = source_url
+            parsed_action = urlsplit(action_candidate or "")
+            action_url = (
+                action_candidate
+                if parsed_action.scheme.casefold() in {"http", "https"}
+                and parsed_action.hostname
+                else None
+            )
+            forms.append(SourceFormEvidence(labels, action_url))
+
+        form_control_labels: list[str] = []
+        for control in data_controls:
+            normalized_label = _source_form_control_label(control, soup)
+            if normalized_label:
+                form_control_labels.append(normalized_label)
 
         emails: set[str] = set()
         for raw_segment in email_values:
@@ -2096,6 +2165,7 @@ class SourceEvidence:
             emails=frozenset(emails),
             phones=frozenset(phones),
             resolution_base_url=resolution_base_url,
+            forms=tuple(forms),
             records=records,
             content_sections=content_sections,
             section_targets=section_targets,
@@ -2323,16 +2393,37 @@ class SourceEvidence:
                 f"{path} is not grounded in a source image identified as a logo."
             )
 
-    def require_form_fields(self, path: str, values: Any) -> None:
-        remaining_labels = list(self.form_control_labels)
-        for index, value in enumerate(values or []):
-            normalized = _normalize_text(value) if isinstance(value, str) else ""
-            if not normalized or normalized not in remaining_labels:
-                raise SiteExtractionError(
-                    f"{path}[{index}] is not the complete label of a distinct "
-                    "source form control."
-                )
-            remaining_labels.remove(normalized)
+    def require_form_fields(self, path: str, values: Any) -> str | None:
+        normalized_values = tuple(
+            _normalize_text(value) if isinstance(value, str) else ""
+            for value in values or []
+        )
+        if not normalized_values:
+            return None
+
+        matches: list[SourceFormEvidence] = []
+        for form in self.forms:
+            remaining_labels = list(form.control_labels)
+            for normalized in normalized_values:
+                if not normalized or normalized not in remaining_labels:
+                    break
+                remaining_labels.remove(normalized)
+            else:
+                matches.append(form)
+
+        if not matches:
+            raise SiteExtractionError(
+                f"{path} are not complete labels of distinct controls owned by one "
+                "source form."
+            )
+        actions = tuple(
+            dict.fromkeys(form.action_url for form in matches if form.action_url)
+        )
+        if len(actions) != 1:
+            raise SiteExtractionError(
+                f"{path} do not identify one source-owned form endpoint."
+            )
+        return actions[0]
 
 
 def _validation_error(validator: Draft202012Validator, document: Any) -> str | None:
@@ -2534,7 +2625,7 @@ def _require_site_facts(
         anchor = section.get("anchor")
         content = section.get("content") or {}
 
-        def require_content(section_evidence: SourceEvidence) -> None:
+        def require_content(section_evidence: SourceEvidence) -> str | None:
             section_evidence.require_text(
                 f"{path}.content.headline", content.get("headline"), asserted=True
             )
@@ -2547,7 +2638,7 @@ def _require_site_facts(
                 content.get("items"),
                 allow_nonassertive_title=section.get("page_type") == "faq",
             )
-            section_evidence.require_form_fields(
+            form_action = section_evidence.require_form_fields(
                 f"{path}.content.form_fields", content.get("form_fields")
             )
             _require_contact(
@@ -2555,11 +2646,14 @@ def _require_site_facts(
                 f"{path}.content.contact_info",
                 content.get("contact_info"),
             )
+            return form_action
 
         if anchor is not None:
             evidence.require_action(path, section["nav_label"], anchor)
             section_evidence = evidence.require_section_target(f"{path}.anchor", anchor)
-            require_content(section_evidence)
+            form_action = require_content(section_evidence)
+            if form_action is not None:
+                content["form_action"] = form_action
             continue
 
         evidence.require_action_label(f"{path}.nav_label", section["nav_label"])
@@ -2572,7 +2666,7 @@ def _require_site_facts(
                 section_evidence.require_heading(
                     f"{path}.nav_label", section["nav_label"]
                 )
-                require_content(section_evidence)
+                form_action = require_content(section_evidence)
             except SiteExtractionError:
                 continue
             break
@@ -2580,6 +2674,8 @@ def _require_site_facts(
             raise SiteExtractionError(
                 f"{path} navigation and content are not grounded in one source section."
             )
+        if form_action is not None:
+            content["form_action"] = form_action
 
     conversion = document.get("conversion_profile") or {}
     evidence.require_phone("conversion_profile.phone", conversion.get("phone"))
@@ -2664,7 +2760,9 @@ def validate_enrichment_result(
     evidence = SourceEvidence.from_html(source_html, source_url)
 
     if page_type == "contact":
-        evidence.require_form_fields("form_fields", admitted.get("form_fields"))
+        form_action = evidence.require_form_fields(
+            "form_fields", admitted.get("form_fields")
+        )
         _require_contact(evidence, "contact_info", admitted.get("contact_info"))
         contact_info = admitted.get("contact_info") or {}
         has_contact_info = any(
@@ -2673,6 +2771,8 @@ def validate_enrichment_result(
         )
         if not (admitted.get("form_fields") or has_contact_info):
             raise SiteExtractionError("Contact enrichment contains no source content.")
+        if form_action is not None:
+            admitted["form_action"] = form_action
         return admitted
 
     expected_type = {

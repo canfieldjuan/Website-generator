@@ -2205,6 +2205,14 @@ _NEUTRAL_ACTION_LABELS = frozenset(
         "website",
     }
 )
+_CHANNEL_NEUTRAL_ACTION_SCHEMES = {
+    "call": "tel",
+    "call us": "tel",
+    "email": "mailto",
+    "email us": "mailto",
+    "text": "sms",
+    "text us": "sms",
+}
 
 
 def _is_neutral_action_label(value: str) -> bool:
@@ -2378,6 +2386,21 @@ def _validate_action_urls(
                     )
                 continue
             if _is_neutral_action_label(action_label):
+                expected_scheme = _CHANNEL_NEUTRAL_ACTION_SCHEMES.get(
+                    normalized_label
+                )
+                if expected_scheme is not None and (
+                    not stripped_destinations
+                    or any(
+                        destination.partition(":")[0].casefold()
+                        != expected_scheme
+                        for destination in stripped_destinations
+                    )
+                ):
+                    raise GeneratedBodyError(
+                        "Generated body channel-specific action label does not "
+                        "match its destination."
+                    )
                 continue
             if normalized_label:
                 raise GeneratedBodyError(
