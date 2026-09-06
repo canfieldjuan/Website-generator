@@ -353,13 +353,16 @@ def expected_build_form_action(prospect):
 def expected_build_action_url_contract(prospect, review_contract):
     allowed_urls = [expected_build_form_action(prospect)]
     allowed_labels = []
+    allowed_pairs = []
     if review_contract.reviews_url:
         allowed_urls.append(review_contract.reviews_url)
-        allowed_labels.append(
+        review_label = (
             "Read All on Google"
             if review_contract.mode == "cards"
             else "Read All Reviews on Google"
         )
+        allowed_labels.append(review_label)
+        allowed_pairs.append((review_label, review_contract.reviews_url))
     phone = prospect.get("phone")
     email = prospect.get("owner_email")
     return ActionUrlAdmissionContract(
@@ -367,6 +370,7 @@ def expected_build_action_url_contract(prospect, review_contract):
         phones=(phone.strip(),) if isinstance(phone, str) and phone.strip() else (),
         emails=(email.strip(),) if isinstance(email, str) and email.strip() else (),
         allowed_labels=tuple(allowed_labels),
+        allowed_pairs=tuple(allowed_pairs),
     )
 
 

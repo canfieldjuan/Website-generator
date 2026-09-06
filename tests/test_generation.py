@@ -1199,6 +1199,7 @@ class BodyAssemblyTests(unittest.TestCase):
             phones=("217-555-0100",),
             emails=("office@source.test",),
             allowed_labels=("Book",),
+            allowed_pairs=(("Book", "https://source.test/book"),),
         )
         valid_body = (
             '<body><a href="#contact">Contact</a>'
@@ -1309,6 +1310,27 @@ class BodyAssemblyTests(unittest.TestCase):
                 expected_action_urls=contract,
             )
 
+        for image_action in (
+            (
+                '<body><a href="https://source.test/book">'
+                '<img src="https://source.test/logo.png" alt="Book Appointment">'
+                "</a></body>"
+            ),
+            (
+                '<body><input type="image" alt="Book Appointment" '
+                'src="https://source.test/button.png" '
+                'formaction="https://source.test/book"></body>'
+            ),
+        ):
+            with (
+                self.subTest(image_action=image_action),
+                self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"),
+            ):
+                validate_generated_body(
+                    body_result(image_action),
+                    expected_action_urls=contract,
+                )
+
         neutral_body = (
             '<body><a href="https://source.test/book">Contact Us</a>'
             '<a href="https://source.test/book">Book</a>'
@@ -1321,6 +1343,88 @@ class BodyAssemblyTests(unittest.TestCase):
             ),
             neutral_body,
         )
+
+    def test_body_action_labels_remain_bound_to_source_destinations(self):
+        contract = ActionUrlAdmissionContract(
+            allowed_urls=(
+                "https://source.test/contact",
+                "https://source.test/order",
+            ),
+            allowed_labels=("Contact Us", "Order Online"),
+            allowed_pairs=(
+                ("Contact Us", "https://source.test/contact"),
+                ("Order Online", "https://source.test/order"),
+            ),
+        )
+        valid = (
+            '<body><a href="https://source.test/contact">Contact Us</a>'
+            '<a href="https://source.test/order">Order Online</a></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(body_result(valid), expected_action_urls=contract),
+            valid,
+        )
+        for swapped in (
+            '<body><a href="https://source.test/order">Contact Us</a></body>',
+            '<body><a href="https://source.test/contact">Order Online</a></body>',
+        ):
+            with self.subTest(swapped=swapped), self.assertRaisesRegex(
+                GeneratedBodyError, "source-owned action pair"
+            ):
+                validate_generated_body(
+                    body_result(swapped),
+                    expected_action_urls=contract,
+                )
+
+        contact_contract = ActionUrlAdmissionContract(
+            allowed_urls=("https://source.test/contact",),
+            phones=("217-555-0100",),
+            emails=("office@source.test",),
+        )
+        for contact_swap in (
+            (
+                '<body><a href="https://source.test/contact">217-555-0100</a></body>',
+                "phone label",
+            ),
+            (
+                '<body><a href="https://source.test/contact">office@source.test</a></body>',
+                "email label",
+            ),
+        ):
+            body, error = contact_swap
+            with self.subTest(body=body), self.assertRaisesRegex(
+                GeneratedBodyError, error
+            ):
+                validate_generated_body(
+                    body_result(body),
+                    expected_action_urls=contact_contract,
+                )
+
+    def test_body_action_pair_contract_cannot_exceed_component_authority(self):
+        for invalid_contract in (
+            ActionUrlAdmissionContract(
+                allowed_urls=("/contact",),
+                allowed_labels=("Contact",),
+                allowed_pairs=[("Contact", "/contact")],
+            ),
+            ActionUrlAdmissionContract(
+                allowed_urls=("/contact",),
+                allowed_labels=("Contact",),
+                allowed_pairs=(("Missing", "/contact"),),
+            ),
+            ActionUrlAdmissionContract(
+                allowed_urls=("/contact",),
+                allowed_labels=("Contact",),
+                allowed_pairs=(("Contact", "/missing"),),
+            ),
+        ):
+            with self.subTest(contract=invalid_contract), self.assertRaisesRegex(
+                GeneratedBodyError, "pair contract"
+            ):
+                validate_generated_body(
+                    body_result('<body><a href="/contact">Contact</a></body>'),
+                    expected_action_urls=invalid_contract,
+                )
 
     def test_body_admission_restricts_inline_styles_to_declared_properties(self):
         hiding_styles = (

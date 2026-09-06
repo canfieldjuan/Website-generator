@@ -93,6 +93,13 @@ vocabulary permits only presentation, navigation, contact, and the code-owned
 generated service-request form. This allow-by-authority rule prevents booking,
 quote, commerce, donation, registration, subscription, and ticket claims without
 depending on an incomplete capability-verb denylist.
+A source-owned label remains bound to the destination on its source action, even
+when that wording also belongs to the neutral vocabulary. Accessible action
+labels include replacement text from image, area, and image-input controls;
+source collection and generated-body admission construct the same complete,
+whitespace-normalized label. An admitted phone or email display value remains
+bound to its matching contact destination unless that exact source action pair
+was observed.
 Flat heading records
 stop before sibling structural containers, including list wrappers, so a section
 heading cannot turn a collection of independent cards into one evidence record.
@@ -106,7 +113,9 @@ admitted from page-wide evidence. Phone and email scans operate per local
 DOM context rather than concatenating unrelated page nodes. Assertion context
 survives commas, parenthetical contrast modifiers, and colons until a real
 sentence or contrast boundary; inline links inherit their surrounding prose for
-assertion checks while retaining a link-local contact context. Claim-bearing
+assertion checks while retaining their destination at its original DOM position.
+Contact-specific negation recognizes affirmative phrases such as "do not hesitate
+to call" without allowing genuinely negated contact details. Claim-bearing
 content fields require assertive evidence, except FAQ questions. Single-page
 navigation labels bind to their own anchors, and the section content is validated
 inside that exact target container. When no anchor exists, the navigation label
@@ -152,7 +161,9 @@ components require an exact match rather than lending every phrase in the full
 document title to business identity. When a title retains multiple non-generic
 components, an independent site-name or logo seed must select exactly one; the
 page H1 cannot select its own title descriptor, and ambiguity disables the H1
-fallback. Negation and conditional qualifiers are
+fallback. A lone title component can supply identity only when no stronger
+explicit identity exists, or when it agrees exactly with that explicit identity.
+Negation and conditional qualifiers are
 retained across the complete
 owning clause rather than a fixed word window. Figures are atomic content
 records. Heading-delimited section fallback stops at sibling `article` and
@@ -247,6 +258,19 @@ business-specific claims.
   restricted-versus-complete exception claims, negated visible and linked
   phone/email contacts versus positive links, and accessible-label versus
   visible-action wording.
+- Latest paired-authority boundary pass: `python -m unittest -q
+  tests.test_site_extraction tests.test_generation` passed 201 tests. It covers
+  conflicting versus matching single-title identity, linked and plain-text contact
+  negation plus the affirmative "do not hesitate" idiom, image-derived accessible
+  labels, valid and swapped source action pairs (including neutral wording), and
+  malformed or authority-exceeding pair contracts.
+- `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
+  tests/test_site_extraction.py tests/test_generation.py`: passed. The unignored
+  scoped run still reports two pre-existing unused contract imports in
+  `tests/test_generation.py`; they are outside this correction.
+- `ruff check --select F401,F821 pipeline.py build.py` still reports the
+  pre-existing unused `generate_text` import in `pipeline.py`; no unrelated cleanup
+  is included here.
 - `ruff check lib/site_extraction.py tests/test_site_extraction.py`: passed.
 - `ruff format --check lib/site_extraction.py tests/test_site_extraction.py`:
   passed.

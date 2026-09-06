@@ -377,6 +377,7 @@ class ActionUrlAdmissionContract:
     phones: tuple[str, ...] = ()
     emails: tuple[str, ...] = ()
     allowed_labels: tuple[str, ...] = ()
+    allowed_pairs: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -400,6 +401,8 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     phones = _contract_text_values(contract.phones, "Action phone")
     emails = _contract_text_values(contract.emails, "Action email")
     allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
+    allowed_pairs = _contract_action_pairs(contract.allowed_pairs)
+    _validate_action_pair_membership(allowed_pairs, allowed_labels, allowed_urls)
     neutral_terms = sorted(_NEUTRAL_ACTION_LABEL_TERMS)
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
@@ -414,7 +417,9 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
         f"{json.dumps(allowed_labels, ensure_ascii=False)}, display an admitted "
         "phone/email value, or use plainly navigational/contact wording composed "
         "only from these neutral terms: "
-        f"{json.dumps(neutral_terms, ensure_ascii=False)}."
+        f"{json.dumps(neutral_terms, ensure_ascii=False)}. A source-owned label on "
+        "an action with a destination must preserve one exact label/destination "
+        f"pair from {json.dumps(allowed_pairs, ensure_ascii=False)}."
     )
 
 
@@ -2075,6 +2080,43 @@ def _contract_text_values(values: object, label: str) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _contract_action_pairs(values: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(values, tuple):
+        raise GeneratedBodyError("Action pair contract must be a tuple.")
+    normalized: list[tuple[str, str]] = []
+    for value in values:
+        if not isinstance(value, tuple) or len(value) != 2:
+            raise GeneratedBodyError("Action pair contract contains an invalid pair.")
+        label, destination = value
+        if (
+            not isinstance(label, str)
+            or not label.strip()
+            or not isinstance(destination, str)
+            or not destination.strip()
+        ):
+            raise GeneratedBodyError("Action pair contract contains an invalid pair.")
+        pair = (label.strip(), destination.strip())
+        if pair not in normalized:
+            normalized.append(pair)
+    return tuple(normalized)
+
+
+def _validate_action_pair_membership(
+    pairs: tuple[tuple[str, str], ...],
+    allowed_labels: tuple[str, ...],
+    allowed_urls: tuple[str, ...],
+) -> None:
+    label_authority = set(allowed_labels)
+    destination_authority = set(allowed_urls)
+    if any(
+        label not in label_authority or destination not in destination_authority
+        for label, destination in pairs
+    ):
+        raise GeneratedBodyError(
+            "Action pair contract exceeds its label or destination authority."
+        )
+
+
 _NEUTRAL_ACTION_LABEL_TERMS = frozenset(
     {
         "about",
@@ -2152,6 +2194,27 @@ def _generated_action_labels(element: Tag) -> tuple[str, ...]:
         if isinstance(value, str) and value.strip() and value.strip() not in labels:
             labels.append(value.strip())
 
+    def replacement_text(node: Tag) -> str:
+        tag_name = node.name.casefold()
+        if tag_name in {"img", "area"}:
+            value = node.get("alt")
+        elif tag_name == "input" and str(node.get("type") or "").casefold() == "image":
+            value = node.get("alt") or node.get("value")
+        else:
+            value = ""
+        return value if isinstance(value, str) else ""
+
+    def text_with_replacements(node: Tag) -> str:
+        parts: list[str] = []
+        for child in node.descendants:
+            if isinstance(child, Comment):
+                continue
+            if isinstance(child, NavigableString):
+                parts.append(str(child))
+            elif isinstance(child, Tag):
+                parts.append(replacement_text(child))
+        return " ".join(" ".join(part for part in parts if part).split())
+
     labelled_by = element.get("aria-labelledby")
     if isinstance(labelled_by, str) and labelled_by.strip():
         root = element.find_parent("body")
@@ -2160,13 +2223,14 @@ def _generated_action_labels(element: Tag) -> tuple[str, ...]:
             for target_id in labelled_by.split():
                 target = root.find(id=target_id)
                 if target is not None:
-                    labelled_parts.append(target.get_text(" ", strip=True))
+                    labelled_parts.append(text_with_replacements(target))
         accessible_label = " ".join(part for part in labelled_parts if part)
         append(accessible_label)
     append(element.get("aria-label"))
     if element.name.casefold() == "input":
         append(element.get("value"))
-    append(element.get_text(" ", strip=True))
+    append(replacement_text(element))
+    append(text_with_replacements(element))
     append(element.get("title"))
     return tuple(labels)
 
@@ -2177,10 +2241,24 @@ def _validate_action_urls(
 ) -> None:
     if not isinstance(contract, ActionUrlAdmissionContract):
         raise GeneratedBodyError("Action URL admission contract is invalid.")
-    allowed_urls = set(_contract_text_values(contract.allowed_urls, "Action URL"))
+    allowed_url_values = _contract_text_values(contract.allowed_urls, "Action URL")
+    allowed_label_values = _contract_text_values(
+        contract.allowed_labels, "Action label"
+    )
+    contract_pairs = _contract_action_pairs(contract.allowed_pairs)
+    _validate_action_pair_membership(
+        contract_pairs,
+        allowed_label_values,
+        allowed_url_values,
+    )
+    allowed_urls = set(allowed_url_values)
     allowed_labels = {
         _normalize_claim_match_text(label)
-        for label in _contract_text_values(contract.allowed_labels, "Action label")
+        for label in allowed_label_values
+    }
+    allowed_pairs = {
+        (_normalize_claim_match_text(label), destination)
+        for label, destination in contract_pairs
     }
     allowed_phone_digits: set[str] = set()
     for phone in _contract_text_values(contract.phones, "Action phone"):
@@ -2196,7 +2274,7 @@ def _validate_action_urls(
         allowed_emails.add(canonical)
 
     action_values: list[str] = []
-    action_labels: list[str] = []
+    action_entries: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
         if tag_name in {"a", "area"}:
@@ -2210,15 +2288,16 @@ def _validate_action_urls(
         is_labelled_action = (
             tag_name in {"a", "area", "button"}
             or tag_name == "input"
-            and str(element.get("type") or "").casefold() == "submit"
+            and str(element.get("type") or "").casefold() in {"submit", "image"}
         )
-        if is_labelled_action:
-            action_labels.extend(_generated_action_labels(element))
-        action_values.extend(
+        element_values = tuple(
             value
             for attribute in attributes
             if isinstance((value := element.get(attribute)), str)
         )
+        action_values.extend(element_values)
+        if is_labelled_action:
+            action_entries.append((_generated_action_labels(element), element_values))
 
     for raw_value in action_values:
         candidate = raw_value.strip()
@@ -2245,21 +2324,64 @@ def _validate_action_urls(
             "Generated body contains an action URL outside source-owned destinations."
         )
 
-    for action_label in action_labels:
-        normalized_label = _normalize_claim_match_text(action_label)
-        if normalized_label in allowed_labels or _is_neutral_action_label(action_label):
-            continue
-        phone_values = _phone_like_digit_values(action_label)
-        if len(phone_values) == 1 and not phone_values.isdisjoint(allowed_phone_digits):
-            continue
-        mailbox = _canonical_email_value(action_label)
-        if mailbox is not None and mailbox in allowed_emails:
-            continue
-        if normalized_label:
-            raise GeneratedBodyError(
-                "Generated body contains a non-neutral action label that is not "
-                f"an exact source-owned action label: {action_label!r}."
-            )
+    for action_labels, destinations in action_entries:
+        stripped_destinations = tuple(value.strip() for value in destinations)
+        for action_label in action_labels:
+            normalized_label = _normalize_claim_match_text(action_label)
+            phone_values = _phone_like_digit_values(action_label)
+            if len(phone_values) == 1 and not phone_values.isdisjoint(
+                allowed_phone_digits
+            ):
+                for destination in stripped_destinations:
+                    scheme, separator, target = destination.partition(":")
+                    if separator and scheme.casefold() in {"tel", "sms"}:
+                        destination_phone = _canonical_phone_digits(
+                            target.split("?", 1)[0]
+                        )
+                        if destination_phone not in phone_values:
+                            raise GeneratedBodyError(
+                                "Generated body action phone label and destination do not match."
+                            )
+                    elif (normalized_label, destination) not in allowed_pairs:
+                        raise GeneratedBodyError(
+                            "Generated body action phone label and destination do not "
+                            "preserve source ownership."
+                        )
+                continue
+            mailbox = _canonical_email_value(action_label)
+            if mailbox is not None and mailbox in allowed_emails:
+                for destination in stripped_destinations:
+                    scheme, separator, target = destination.partition(":")
+                    if separator and scheme.casefold() == "mailto":
+                        destination_mailbox = _canonical_email_value(
+                            target.split("?", 1)[0]
+                        )
+                        if destination_mailbox != mailbox:
+                            raise GeneratedBodyError(
+                                "Generated body action email label and destination do not match."
+                            )
+                    elif (normalized_label, destination) not in allowed_pairs:
+                        raise GeneratedBodyError(
+                            "Generated body action email label and destination do not "
+                            "preserve source ownership."
+                        )
+                continue
+            if normalized_label in allowed_labels:
+                if stripped_destinations and any(
+                    (normalized_label, destination) not in allowed_pairs
+                    for destination in stripped_destinations
+                ):
+                    raise GeneratedBodyError(
+                        "Generated body does not preserve a source-owned action pair."
+                    )
+                continue
+            if _is_neutral_action_label(action_label):
+                continue
+            if normalized_label:
+                raise GeneratedBodyError(
+                    "Generated body contains a non-neutral action label that is not "
+                    f"an exact source-owned action label: {action_label!r}."
+                )
 
 
 def _validate_source_contacts(

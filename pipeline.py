@@ -4,7 +4,7 @@ import re
 import urllib.parse
 import argparse
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment, NavigableString
 
 from lib.clients import (
     EXTRACTION_MODEL,
@@ -79,6 +79,16 @@ def _append_source_value(values, value):
         values.append(value.strip())
 
 
+def _append_source_pair(pairs, label, destination):
+    if not isinstance(label, str) or not label.strip():
+        return
+    if not isinstance(destination, str) or not destination.strip():
+        return
+    pair = (label.strip(), destination.strip())
+    if pair not in pairs:
+        pairs.append(pair)
+
+
 def _redesign_contact_contract(site_json):
     phones = []
     emails = []
@@ -138,6 +148,7 @@ def _redesign_action_url_contract(
 ):
     allowed_urls = []
     allowed_labels = []
+    allowed_pairs = []
 
     site = site_json.get("site")
     if isinstance(site, dict):
@@ -147,43 +158,39 @@ def _redesign_action_url_contract(
         if isinstance(value, dict):
             _append_source_value(allowed_urls, value.get(field))
 
-    def append_label_field(value, field="label"):
-        if isinstance(value, dict):
-            _append_source_value(allowed_labels, value.get(field))
+    def append_action(value, label_field="label", url_field="url"):
+        if not isinstance(value, dict):
+            return
+        label = value.get(label_field)
+        destination = value.get(url_field)
+        _append_source_value(allowed_labels, label)
+        _append_source_value(allowed_urls, destination)
+        _append_source_pair(allowed_pairs, label, destination)
 
     def append_item_urls(items):
         if isinstance(items, list):
             for item in items:
-                append_field(item)
-                if isinstance(item, dict) and item.get("url") is not None:
-                    _append_source_value(allowed_labels, item.get("title"))
+                append_action(item, "title")
 
     for item in site_json.get("nav") or ():
-        append_field(item)
-        append_label_field(item)
+        append_action(item)
     cta = site_json.get("cta") or {}
-    append_field(cta)
-    append_label_field(cta)
+    append_action(cta)
     for section in site_json.get("sections") or ():
         if isinstance(section, dict):
             append_field(section, "source_url")
             append_item_urls(section.get("items"))
     append_field(site_json.get("contact_form") or {}, "source_url")
     for item in site_json.get("social") or ():
-        append_field(item)
-        if isinstance(item, dict):
-            _append_source_value(allowed_labels, item.get("platform"))
+        append_action(item, "platform")
     for item in site_json.get("footer_links") or ():
-        append_field(item)
-        append_label_field(item)
+        append_action(item)
     for item in site_json.get("pages_to_fetch") or ():
-        append_field(item)
-        append_label_field(item)
+        append_action(item)
     for section in site_json.get("single_page_sections") or ():
         if not isinstance(section, dict):
             continue
-        append_field(section, "anchor")
-        _append_source_value(allowed_labels, section.get("nav_label"))
+        append_action(section, "nav_label", "anchor")
         content = section.get("content")
         if isinstance(content, dict):
             append_item_urls(content.get("items"))
@@ -195,25 +202,62 @@ def _redesign_action_url_contract(
         _append_source_value(allowed_urls, url)
     if isinstance(source_content, str) and "<" in source_content:
         source_root = BeautifulSoup(source_content, "html.parser")
+
+        def replacement_text(element):
+            if element.name in {"img", "area"}:
+                value = element.get("alt")
+            elif element.name == "input" and str(
+                element.get("type") or ""
+            ).casefold() == "image":
+                value = element.get("alt") or element.get("value")
+            else:
+                value = ""
+            return value if isinstance(value, str) else ""
+
+        def text_with_replacements(element):
+            parts = []
+            for child in element.descendants:
+                if isinstance(child, Comment):
+                    continue
+                if isinstance(child, NavigableString):
+                    parts.append(str(child))
+                elif hasattr(child, "name"):
+                    parts.append(replacement_text(child))
+            return " ".join(" ".join(part for part in parts if part).split())
+
         for element in source_root.find_all(["a", "area", "button", "input"]):
+            destination = None
             if element.name in {"a", "area"}:
-                _append_source_value(allowed_urls, element.get("href"))
-            if (
-                element.name == "input"
-                and str(element.get("type") or "").casefold() != "submit"
-            ):
+                destination = element.get("href")
+            elif element.name in {"button", "input"}:
+                destination = element.get("formaction")
+            _append_source_value(allowed_urls, destination)
+            if element.name == "input" and str(
+                element.get("type") or ""
+            ).casefold() not in {"submit", "image"}:
                 continue
-            label = element.get_text(" ", strip=True)
+            labels = []
+            labelled_by = element.get("aria-labelledby")
+            if isinstance(labelled_by, str):
+                for target_id in labelled_by.split():
+                    target = source_root.find(id=target_id)
+                    if target is not None:
+                        _append_source_value(labels, text_with_replacements(target))
+            _append_source_value(labels, element.get("aria-label"))
             if element.name == "input":
-                label = str(element.get("value") or "")
-            if not label:
-                label = str(element.get("aria-label") or element.get("title") or "")
-            _append_source_value(allowed_labels, label)
+                _append_source_value(labels, element.get("value"))
+            _append_source_value(labels, replacement_text(element))
+            _append_source_value(labels, text_with_replacements(element))
+            _append_source_value(labels, element.get("title"))
+            for label in labels:
+                _append_source_value(allowed_labels, label)
+                _append_source_pair(allowed_pairs, label, destination)
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
         phones=contact_contract.phones,
         emails=contact_contract.emails,
         allowed_labels=tuple(allowed_labels),
+        allowed_pairs=tuple(allowed_pairs),
     )
 
 

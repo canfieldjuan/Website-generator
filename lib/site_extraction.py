@@ -320,6 +320,11 @@ _LEADING_PARENTHETICAL_CONTRAST = re.compile(
     r"^\s*,\s*(?:however|though|nevertheless)\s*,\s*",
     re.I,
 )
+_AFFIRMATIVE_CONTACT_NEGATION_PATTERN = re.compile(
+    r"\b(?:please\s+)?(?:do\s+not|don['’]t|never)\s+hesitate\s+to\s+"
+    r"(?:call|contact|email)\b",
+    re.I,
+)
 _WORD_PATTERN = re.compile(r"[a-z0-9]+(?:['’][a-z]+)?", re.I)
 _NEGATION_TERMS = frozenset(
     {"no", "not", "never", "without", "neither", "nor", "cannot", "non"}
@@ -456,6 +461,14 @@ def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
     return _words_contain_restriction(surrounding_words)
 
 
+def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
+    without_affirmative_idiom = _AFFIRMATIVE_CONTACT_NEGATION_PATTERN.sub(
+        lambda match: " " * len(match.group(0)),
+        text,
+    )
+    return _occurrence_is_negated(without_affirmative_idiom, start, length)
+
+
 def _contact_destination(value: str) -> tuple[str, str] | None:
     parsed = urlsplit(html.unescape(value).strip())
     scheme = parsed.scheme.casefold()
@@ -463,6 +476,22 @@ def _contact_destination(value: str) -> tuple[str, str] | None:
         return None
     destination = unquote(parsed.path).strip()
     return (scheme, destination) if destination else None
+
+
+def _contact_destination_context(context: Any, action: Any, destination: str) -> str:
+    if context is None:
+        return _normalize_text(destination)
+    parts: list[str] = []
+    for node in context.descendants:
+        if node is action:
+            parts.append(destination)
+        if isinstance(node, Comment):
+            continue
+        if isinstance(node, str):
+            parent = node.parent
+            if parent is None or parent.name not in _IGNORED_TEXT_TAGS:
+                parts.append(str(node))
+    return _normalize_text(" ".join(parts))
 
 
 def same_site_origin(first_url: Any, second_url: Any) -> bool:
@@ -852,13 +881,10 @@ class SourceEvidence:
                                 not in _ASSERTION_CONTEXT_TAGS
                             ):
                                 assertion_context = assertion_context.parent
-                            context_text = _normalize_text(
-                                assertion_context.get_text(" ", strip=True)
-                                if assertion_context is not None
-                                else action_label
-                            )
-                            contextual_destination = " ".join(
-                                part for part in (context_text, destination) if part
+                            contextual_destination = _contact_destination_context(
+                                assertion_context,
+                                element,
+                                destination,
                             )
                             if scheme == "mailto":
                                 email_values.append(contextual_destination)
@@ -908,7 +934,11 @@ class SourceEvidence:
                 and component not in _GENERIC_PAGE_IDENTITY_PARTS
             )
             if len(components) == 1:
-                title_identity_parts.extend(components)
+                if (
+                    not explicit_identity_seeds
+                    or components[0] in explicit_identity_seeds
+                ):
+                    title_identity_parts.extend(components)
                 continue
             corroborated = tuple(
                 component
@@ -1016,7 +1046,9 @@ class SourceEvidence:
         for raw_segment in email_values:
             segment = _normalize_text(raw_segment)
             for match in _EMAIL_PATTERN.finditer(segment):
-                if _occurrence_is_negated(segment, match.start(), len(match.group(0))):
+                if _contact_occurrence_is_negated(
+                    segment, match.start(), len(match.group(0))
+                ):
                     continue
                 if _occurrence_is_nonassertive(
                     segment, match.start(), len(match.group(0))
@@ -1027,7 +1059,9 @@ class SourceEvidence:
         for raw_segment in phone_values:
             segment = _normalize_text(raw_segment)
             for match in _PHONE_PATTERN.finditer(segment):
-                if _occurrence_is_negated(segment, match.start(), len(match.group(0))):
+                if _contact_occurrence_is_negated(
+                    segment, match.start(), len(match.group(0))
+                ):
                     continue
                 if _occurrence_is_nonassertive(
                     segment, match.start(), len(match.group(0))

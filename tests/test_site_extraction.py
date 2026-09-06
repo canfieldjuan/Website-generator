@@ -601,7 +601,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             (
                 "phone",
                 "217-555-0100",
-                'Do not call <a href="tel:217-555-0100">this number</a>',
+                (
+                    'Do not call <a href="tel:217-555-0100">this number</a>. '
+                    "Use our main line instead."
+                ),
             ),
             ("email", "billing@acme.test", "Do not email billing@acme.test"),
             (
@@ -642,6 +645,12 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "</p>"
         )
         self.assertEqual(validate_site_analysis(positive, positive_source), positive)
+
+        idiom_source = (
+            "<h1>Acme Cleaning</h1><p>Please do not hesitate to call "
+            "217-555-0100 or email billing@acme.test.</p>"
+        )
+        self.assertEqual(validate_site_analysis(positive, idiom_source), positive)
 
     def test_claim_bearing_service_item_rejects_question_only_evidence(self):
         document = {
@@ -782,6 +791,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         verified_identity = {"site": {"name": "Acme Plumbing"}}
         self.assertEqual(
             validate_site_analysis(verified_identity, explicit_identity_source),
+            verified_identity,
+        )
+
+        conflicting_single_title_source = (
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            "<title>Residential Plumbing</title><h1>Acme Plumbing</h1>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Residential Plumbing"}},
+                conflicting_single_title_source,
+            )
+        self.assertEqual(
+            validate_site_analysis(verified_identity, conflicting_single_title_source),
             verified_identity,
         )
 
@@ -1462,8 +1485,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             },
             pipeline._redesign_contact_contract({}),
             source_content=(
-                '<a href="/source-link">Source</a><form action="/submit">'
-                '<input type="submit" value="Submit"></form>'
+                '<a href="/source-link">Source</a>'
+                '<a href="/image-action">Schedule <img alt="Visit"></a>'
+                '<form action="/submit"><input type="submit" value="Submit"></form>'
+                '<input type="image" alt="Pay Now" formaction="/pay">'
                 '<img src="/source-image.jpg">'
             ),
             extra_urls=("/current-page",),
@@ -1484,6 +1509,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "/jane",
                 "/current-page",
                 "/source-link",
+                "/image-action",
+                "/pay",
             ),
         )
         self.assertEqual(
@@ -1499,7 +1526,24 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "Jane",
                 "Request a Quote",
                 "Source",
+                "Schedule Visit",
                 "Submit",
+                "Pay Now",
+            ),
+        )
+        self.assertEqual(
+            contract.allowed_pairs,
+            (
+                ("Contact", "/contact"),
+                ("Book", "/book"),
+                ("Office", "/services/office"),
+                ("Facebook", "/facebook"),
+                ("Privacy", "/privacy"),
+                ("About", "/about"),
+                ("Jane", "/jane"),
+                ("Source", "/source-link"),
+                ("Schedule Visit", "/image-action"),
+                ("Pay Now", "/pay"),
             ),
         )
 
