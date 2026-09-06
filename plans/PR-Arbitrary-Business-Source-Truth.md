@@ -124,10 +124,10 @@ by enumerating English predicates.
 
 ## Verification
 
-Current pre-commit working-tree evidence is based on published head
-`b3fd88875001720a0b72dd684b7a3c1193ed3640` with only the five files listed
-in this plan modified. The generated artifact and evidence logs are ignored
-outputs, not source changes. The earlier evidence recorded against
+Current implementation evidence is based on commit
+`855da8c8400c331349e914ad72e4f54607a29348`; the working tree was clean when
+the local PR review bundle ran. The generated artifact and evidence logs are
+ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
 
@@ -167,14 +167,15 @@ content.
 
 No live OpenRouter request was made; doing so would spend provider credit and
 is unnecessary to prove the provider-independent prompt and admission contract.
-`git diff --check` also passed. After the implementation commit,
-`bash scripts/local_pr_review.sh` is rerun so its clean-worktree and final-head
-evidence apply to the published revision.
+`git diff --check` also passed. On implementation commit
+`855da8c8400c331349e914ad72e4f54607a29348`,
+`bash scripts/local_pr_review.sh` passed its diff-check and plan-presence gates
+against merge base `758626d2df23865449f41b5b185a19cd79fd847b`.
 
 ## Estimated diff size
 
-The current tracked diff is 858 changed lines across the five declared files,
-exceeding the 400-line soft target. It remains one indivisible
+The current PR diff is 1,557 changed lines across the 11 declared source files
+plus this plan, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
 and admission must reject any service-list drift. Splitting any one boundary
