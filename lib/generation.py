@@ -42,6 +42,7 @@ DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS = 300.0
 MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS = 900.0
 LOCAL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
 LOCAL_STREAM_CHUNK_BYTES = 64 * 1024
+LOCAL_STREAM_WIRE_BYTES_PER_OUTPUT_TOKEN = 1024
 # Non-HTML generation keeps the historical ceiling. HTML callers apply the
 # tighter body-only ceiling before trusted code assembles the final document.
 DEFAULT_MAX_OUTPUT_TOKENS = 65536
@@ -1021,17 +1022,36 @@ def _disarm_local_response_deadline(response: Any) -> None:
         disarm_deadline()
 
 
+def _local_stream_wire_byte_limit(request_body: dict[str, Any]) -> int:
+    options = request_body.get("options")
+    num_predict = options.get("num_predict") if isinstance(options, dict) else None
+    if (
+        isinstance(num_predict, bool)
+        or not isinstance(num_predict, int)
+        or num_predict <= 0
+    ):
+        raise GenerationConfigurationError(
+            "Local generation requires a positive output-token limit."
+        )
+    return (
+        MAX_LOCAL_STREAM_FRAME_BYTES
+        + num_predict * LOCAL_STREAM_WIRE_BYTES_PER_OUTPUT_TOKEN
+    )
+
+
 def _iter_bounded_local_stream_lines(
     response: Any,
     *,
     connection: Any,
     deadline: float,
     deadline_expired: threading.Event,
+    max_wire_bytes: int,
     no_progress_timeout_seconds: float,
     no_progress_deadline: float,
     progress_stage: str,
 ) -> Iterator[bytes]:
     pending = bytearray()
+    wire_bytes = 0
     raw = getattr(response, "raw", None)
     read_once = getattr(raw, "read1", None)
     if not callable(read_once):
@@ -1095,6 +1115,11 @@ def _iter_bounded_local_stream_lines(
                 )
             raw_line = bytes(pending[:newline])
             del pending[: newline + 1]
+            wire_bytes += len(raw_line) + 1
+            if wire_bytes > max_wire_bytes:
+                raise GenerationResponseError(
+                    "Local generation provider exceeded its cumulative stream limit."
+                )
             if not raw_line:
                 yield raw_line
                 continue
@@ -1119,6 +1144,11 @@ def _iter_bounded_local_stream_lines(
                 "Local generation provider returned an oversized stream frame."
             )
     if pending:
+        wire_bytes += len(pending)
+        if wire_bytes > max_wire_bytes:
+            raise GenerationResponseError(
+                "Local generation provider exceeded its cumulative stream limit."
+            )
         now = time.monotonic()
         if now >= deadline:
             raise GenerationProviderUnavailable(
@@ -1141,6 +1171,7 @@ def _read_local_chat_stream(
     *,
     deadline: float,
     deadline_expired: threading.Event,
+    max_wire_bytes: int,
     no_progress_timeout_seconds: float,
     no_progress_deadline: float,
     progress_stage: str = "generation",
@@ -1157,6 +1188,7 @@ def _read_local_chat_stream(
             connection=connection,
             deadline=deadline,
             deadline_expired=deadline_expired,
+            max_wire_bytes=max_wire_bytes,
             no_progress_timeout_seconds=no_progress_timeout_seconds,
             no_progress_deadline=no_progress_deadline,
             progress_stage=progress_stage,
@@ -1199,7 +1231,8 @@ def _read_local_chat_stream(
                 raise GenerationResponseError(
                     "Local generation provider returned tool calls when none were requested."
                 )
-            content_parts.append(content)
+            if content:
+                content_parts.append(content)
             content_bytes += len(content.encode("utf-8"))
             if content_bytes > MAX_HTML_BYTES:
                 raise GenerationResponseError(
@@ -1238,6 +1271,7 @@ def _request_local_chat_stream(
     progress_stage: str,
 ) -> dict[str, Any]:
     request_timeout = _local_request_timeout(config, deadline)
+    max_wire_bytes = _local_stream_wire_byte_limit(request_body)
     phase_started = time.monotonic()
     no_progress_deadline = phase_started + request_timeout[1]
     establishment_deadline = min(deadline, no_progress_deadline)
@@ -1281,6 +1315,7 @@ def _request_local_chat_stream(
         response,
         deadline=deadline,
         deadline_expired=deadline_state.expired,
+        max_wire_bytes=max_wire_bytes,
         no_progress_timeout_seconds=request_timeout[1],
         no_progress_deadline=no_progress_deadline,
         progress_stage=progress_stage,

@@ -988,6 +988,62 @@ class ProviderBoundaryTests(unittest.TestCase):
                 client=rejected,
             )
 
+    def test_local_stream_bounds_cumulative_wire_bytes(self):
+        terminal_payload = local_chat_payload(content="ok", eval_count=1)
+        terminal_frame = json.dumps(terminal_payload).encode("utf-8")
+        frame_limit = 512
+        wire_limit = frame_limit + 8
+        padded_terminal = terminal_frame + b" " * (frame_limit - len(terminal_frame))
+        accepted_lines = (b"",) * 7 + (padded_terminal,)
+        rejected_lines = (b"",) * 8 + (padded_terminal,)
+        self.assertEqual(
+            sum(len(line) + 1 for line in accepted_lines),
+            wire_limit,
+        )
+        self.assertEqual(
+            sum(len(line) + 1 for line in rejected_lines),
+            wire_limit + 1,
+        )
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            max_output_tokens=1,
+        )
+
+        with (
+            patch("lib.generation.MAX_LOCAL_STREAM_FRAME_BYTES", frame_limit),
+            patch(
+                "lib.generation.LOCAL_STREAM_WIRE_BYTES_PER_OUTPUT_TOKEN",
+                8,
+            ),
+        ):
+            accepted = FakeLocalClient(chat_stream_lines=accepted_lines)
+            generated = generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=accepted,
+            )
+            self.assertEqual(generated.content, "ok")
+
+            rejected = FakeLocalClient(
+                chat_stream_lines=rejected_lines
+            )
+            with self.assertRaisesRegex(
+                GenerationResponseError,
+                "cumulative stream limit",
+            ):
+                generate_text(
+                    selected,
+                    system_prompt="system",
+                    user_parts=(PromptPart("input"),),
+                    temperature=0.4,
+                    client=rejected,
+                )
+
     def test_local_request_rejects_reasoning_or_tools_in_any_stream_frame(self):
         invalid_messages = (
             {"content": "", "thinking": "hidden work"},
