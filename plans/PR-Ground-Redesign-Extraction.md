@@ -88,7 +88,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fojur`: generated ARIA actions bypassed label authority | Source collection and generated-output validation must use one action-identification rule; destination sanitization remains independently mandatory. | `div[role=button]` is recognized by the shared classifier in both consumers: a source-owned label passes and an unsupported generated label rejects. An unlabelled `xlink:href` is still sanitized. | fixed/superseded | `lib/site_extraction.py:752-762,1086-1097`; `lib/generation.py:22-23,2333-2348`; `tests/test_site_extraction.py:594-628`; `tests/test_generation.py:1424-1440` |
 | `PRRT_kwDOTDYaKM6fojus`: a main-only H1 page had no admissible enrichment scope | Page-section ownership must admit one H1-owned `<main>` only when no explicit article/section owns the content. | A common `<main><h1>...<div>...` services page admits; a main containing separate explicit sections cannot become a broad scope that recombines them. | fixed/superseded | `lib/site_extraction.py:968-992`; `tests/test_site_extraction.py:1932-1974` |
 | `PRRT_kwDOTDYaKM6fokih`: `apply to` escaped recipient-scope detection | Claim preservation must be fail-closed around unknown leading predicates and recipient-bearing `to`, not grow a denylist of English verbs. | Shortened claims from both `apply to ...` and the unseen predicate `members redeem ...` reject without adding either predicate to production code; complete forms and explicit action-infinitive wrappers pass. | fixed/superseded | `lib/site_extraction.py:407-420,474-550`; `tests/test_site_extraction.py:542-592` |
-| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `8e0cd4f` controlled retry rewrote the artifact, exited 0, both required scans found zero matches, and a fresh loopback render was inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-8e0cd4f-run2.log`; `/dev/shm/website-generator-pr47-browser-render-8e0cd4f.png` |
+| `PRRT_kwDOTDYaKM6fovtC`: source form endpoints existed only in label/destination pairs | A real source form endpoint must remain usable as a generated form endpoint without becoming link-navigation authority. | A source `<form action="/submit">` now admits the same generated form, while a generated link to `/submit`, a generated form to link-only `/contact`, and contact-derived `tel:`/`mailto:` form actions reject. | fixed/superseded | `pipeline.py:144-237`; `build.py:351-384`; `lib/generation.py:375-428,2301-2404`; `tests/test_site_extraction.py:1720-1798`; `tests/test_generation.py:1194-1263,1563-1592` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `74b2a74` invocation rewrote the artifact, exited 0, both required scans found zero matches, and a fresh loopback render was inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-74b2a74.log`; `/dev/shm/website-generator-pr47-browser-render-74b2a74.png` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 
 ## Mechanism
@@ -129,12 +130,14 @@ phone or email display value remains
 bound to its matching contact destination unless that exact source action pair
 was observed. Submit buttons and image inputs resolve their effective destination
 from `formaction`, an explicitly referenced form, or their owning ancestor form;
-source collection and output pair admission use the same resolver. Output URL
-sanitization separately checks every declared destination attribute, including an
-inert or orphaned `formaction`, without promoting that attribute into source
-authority. Pair evidence does not itself grant URL authority: raw form actions can
-bind a label to an already admitted destination, but cannot become generated link
-destinations.
+source collection and output pair admission use the same resolver. Link navigation
+and form submission use separate destination-authority sets: a source form action
+or effective submit override can remain a generated form endpoint but cannot
+become a generated link, and a source link cannot become a generated form
+endpoint. Output URL sanitization separately checks every declared destination
+attribute, including an inert or orphaned `formaction`, without promoting that
+attribute into source authority. Pair evidence does not itself grant either kind
+of URL authority.
 Flat heading records
 stop before sibling structural containers, including list wrappers, so a section
 heading cannot turn a collection of independent cards into one evidence record.
@@ -286,7 +289,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-05)
 
-- Code revision under test: `8e0cd4f44d4d2e65814c233ecae9ee23efaaadd3`.
+- Code revision under test: `74b2a74c01485d92f862361dc8ec6997072854ab`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -312,6 +315,12 @@ business-specific claims.
   newly reported verb or duplicate action tags. It uses one shared action
   classifier, fail-closed claim-prefix admission with explicit safe wrappers, a
   uniform same-type leaf-record rule, and a bounded main/H1 page-scope rule.
+- The next exact-head review reproduced one additional shared-contract defect:
+  source form endpoints were retained in label/destination pairs but omitted from
+  URL admission. The action contract now carries separate link and form endpoint
+  sets through source collection, prompt instructions, build generation, and
+  output validation. This admits exact source forms without granting those
+  endpoints to links or granting contact-derived schemes to forms.
 - Focused both-side regressions: `python -m unittest -v
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_analyze_site_admits_grounded_contacts_images_and_relative_urls
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_contact_evidence_preserves_assertion_context
@@ -325,42 +334,38 @@ business-specific claims.
   and destination-only `xlink:href` sanitization after sibling consumers were
   audited.
 - Affected modules: `python -m unittest -q tests.test_site_extraction
-  tests.test_generation`: 211 tests passed.
-- Full suite: `python -m unittest discover -s tests -q`: 353 tests passed with
+  tests.test_generation`: 212 tests passed.
+- Full suite: `python -m unittest discover -s tests -q`: 354 tests passed with
   34 skipped.
 - Scoped static checks passed:
-  `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
-  tests/test_site_extraction.py tests/test_generation.py`;
-  `python -m compileall -q pipeline.py build.py lib tests`; and
-  `git diff --check`. The broad formatter check remains historical repository
-  formatting noise and was not applied as an unrelated whole-file rewrite.
+  `ruff check --ignore F401,F541 build.py pipeline.py lib/generation.py
+  tests/test_site_extraction.py tests/test_generation.py` and
+  `python -m compileall -q build.py pipeline.py lib/generation.py
+  tests/test_site_extraction.py tests/test_generation.py`. An initial run without
+  the `F541` exclusion found ten pre-existing findings on unchanged print calls in
+  `build.py` and `pipeline.py`; they were not folded into this slice.
 - The final-revision fixture used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
-  --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The first
-  clean invocation began at `2026-09-05T21:53:47-05:00` with no
-  resident model and exited 1 after both responses repeated the unsupported
-  `Not a Franchise` claim; admission did not rewrite the old artifact. One
-  controlled retry began at `2026-09-05T21:55:30-05:00` with the same configured
-  model resident 100% on the GPU and exited 0 before the post-run capture at
-  `2026-09-05T21:56:22-05:00`. No email or deployment path ran. Logs:
-  `/dev/shm/website-generator-pr47-fixture-8e0cd4f.log` and
-  `/dev/shm/website-generator-pr47-fixture-8e0cd4f-run2.log`.
+  --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
+  invocation began after the `2026-09-05T22:20:33-05:00` capture with the model
+  resident 100% on the GPU and exited 0 before the `2026-09-05T22:21:20-05:00`
+  post-run capture. No email or deployment path ran. Log:
+  `/dev/shm/website-generator-pr47-fixture-74b2a74.log`.
 - The successful invocation rewrote
-  `outputs/builds/drees-plumbing-inc/index.html` at
-  `2026-09-05 21:56:13.420243592 -0500`; size was 71981 bytes, inode 3309618,
-  and SHA-256 was
-  `5528f4c2795c8bf27f18ef1b105354f515ead7c98930f7cdf3ed3855239900ed`.
+  `outputs/builds/drees-plumbing-inc/index.html`; size was 71954 bytes, inode
+  3309963, mtime was `1788664874592749921` ns, and SHA-256 was
+  `5b57fe46110d90d88b6f6b4fcfe18eeac32198d3c2980b524ed87d43c89aaacd`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-8e0cd4f.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-8e0cd4f.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-74b2a74.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-74b2a74.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3890 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-8e0cd4f.png`,
+  `/dev/shm/website-generator-pr47-browser-render-74b2a74.png`,
   SHA-256
-  `f2610c3985adb5bdb3ba30b2958caf0a656abd46faa0f77daa44ef099ef30dc4`.
+  `acbcfc089c22fdcb8be3b6c989beaaedb93f12907adab83854785b3020f8dbef`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
   after this evidence block is committed; the handoff records that exact result
   rather than claiming a dirty-tree advisory run as final proof.
