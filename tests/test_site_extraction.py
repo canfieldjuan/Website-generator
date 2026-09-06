@@ -842,10 +842,36 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 explicit_identity_source,
             )
 
+        partial_h1_source = (
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            "<h1>Plumbing</h1>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Plumbing"}},
+                partial_h1_source,
+            )
+
+        partial_title_source = (
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            "<title>Plumbing | Services</title><h1>Acme Plumbing</h1>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Plumbing"}},
+                partial_title_source,
+            )
+
         canonical_wrapper_source = "<h1>Welcome to Acme Cleaning</h1>"
         self.assertEqual(
             validate_site_analysis(valid, canonical_wrapper_source),
             valid,
+        )
+
+        spaced_hyphen_title = "<title>Home - Acme Plumbing</title><h1>Services</h1>"
+        self.assertEqual(
+            validate_site_analysis(verified_identity, spaced_hyphen_title),
+            verified_identity,
         )
 
         conflicting_single_title_source = (

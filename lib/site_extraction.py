@@ -653,7 +653,7 @@ def source_action_accessible_name(
 
 
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
-_TITLE_SEPARATOR_PATTERN = re.compile(r"\s*(?:\||[–—•·])\s*")
+_TITLE_SEPARATOR_PATTERN = re.compile(r"(?:\s*[|–—•·]\s*|\s+-\s+)")
 _GENERIC_PAGE_IDENTITY_PARTS = frozenset(
     {
         "about",
@@ -716,6 +716,13 @@ def _identity_canonical_variants(value: str) -> tuple[str, ...]:
             if candidate and candidate not in variants:
                 variants.append(candidate)
     return tuple(variants)
+
+
+def _identity_candidates_agree(first: str, second: str) -> bool:
+    return bool(
+        set(_identity_canonical_variants(first))
+        & set(_identity_canonical_variants(second))
+    )
 
 
 def _heading_owned_fragment(heading: Any) -> str:
@@ -1032,8 +1039,7 @@ class SourceEvidence:
                 component
                 for component in components
                 if any(
-                    next(_phrase_occurrences(seed, component), None) is not None
-                    or next(_phrase_occurrences(component, seed), None) is not None
+                    _identity_candidates_agree(seed, component)
                     for seed in explicit_identity_seeds
                 )
             )
@@ -1058,8 +1064,7 @@ class SourceEvidence:
                 for part in candidate_h1_parts
                 if (normalized := _normalize_text(part))
                 and any(
-                    next(_phrase_occurrences(seed, normalized), None) is not None
-                    or next(_phrase_occurrences(normalized, seed), None) is not None
+                    _identity_candidates_agree(seed, normalized)
                     for seed in identity_seeds
                 )
             ]

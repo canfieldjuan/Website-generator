@@ -165,8 +165,12 @@ The same complete name and its effective destination become the generation
 contract pair. Identity admission likewise accepts only a complete identity
 surface or a small code-owned canonical wrapper variant (for example,
 `Welcome to …` or `… logo`); an arbitrary inner phrase cannot become the business
-name. A parent article or section containing multiple nested semantic containers
-is excluded from section evidence so sibling cards cannot be recombined.
+name. Title components and H1 candidates use that same exact canonical agreement
+when stronger identity metadata must corroborate them; bidirectional substring
+matching cannot promote a partial name. Common spaced ASCII hyphens join the
+existing title separators without splitting hyphenated business words. A parent
+article or section containing multiple nested semantic containers is excluded
+from section evidence so sibling cards cannot be recombined.
 Business identity is further limited to title, a single primary H1, site-name
 metadata, and explicit brand/logo evidence; on a multiple-H1 page, title,
 site-name, or logo evidence corroborates the admitted H1, with only the first
@@ -290,6 +294,9 @@ business-specific claims.
   complete multi-target accessible names, image replacement text, fail-closed
   partial references, controlled identity wrappers versus arbitrary name
   substrings, and leaf ownership across sibling nested articles.
+- Latest identity-corroboration probe rejects partial H1 and title components
+  against a longer explicit site name while accepting a full business component
+  from a `Home - Business Name` title.
 - `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
   tests/test_site_extraction.py tests/test_generation.py`: passed. The unignored
   scoped run still reports two pre-existing unused contract imports in
