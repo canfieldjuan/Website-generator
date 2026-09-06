@@ -120,6 +120,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fpyOY`: flat heading walks absorbed peer sections | Heading claim ownership must follow the document hierarchy, and paragraph facts must not inherit unrelated heading text. | A heading owns following claim elements only until a same-or-higher peer heading or field boundary. Paragraph/small-text runs remain directional and local, so `Licensed and insured.` under About admits without absorbing the peer Hours section. | fixed/superseded | `lib/site_extraction.py:716-722,1394-1466`; `tests/test_site_extraction.py:675-686` |
 | `PRRT_kwDOTDYaKM6fp4hx`: adjacent leaf block claims remained tag-dependent | Assertion ownership must follow actual direct source contexts while preserving explicit independent-record, heading, and field boundaries; the HTML spelling of a leaf block cannot change its owner. | Sibling leaf `<div>` blocks now share their direct parent owner, so `Free Estimates` cannot discard `Members only`; the complete owned assertion admits. Existing independent record containers and peer heading sections remain separate. | fixed/superseded | `lib/site_extraction.py:1394-1484`; `tests/test_site_extraction.py:606-699` |
 | `PRRT_kwDOTDYaKM6fp4hy`: validated brand identity and home destination were authorized independently | A code-owned generated navigation action must bind its exact validated label to its exact code-owned destination, just as source actions do. | The redesign action contract carries the exact site name paired with the catalog-owned `/` home route. A linked brand to `/` admits; rebinding that name to another otherwise admitted URL rejects. | fixed/superseded | `pipeline.py:146-247`; `lib/generation.py:2218-2382`; `tests/test_generation.py:4720-4774`; `tests/test_site_extraction.py:2213-2377` |
+| `PRRT_kwDOTDYaKM6fp-5p`: list/wrapper restrictions fell outside a heading owner | An assertion owner must include the text-bearing sibling subtree, not only a sibling that is itself the nearest text context, while record and heading boundaries remain intact. | An H3 followed by a `ul/li` restriction now owns the list subtree; the shortened benefit rejects and the complete qualified assertion admits. Nested same-or-higher headings and independent semantic records stop the owner. | fixed/superseded | `lib/site_extraction.py:1394-1514`; `tests/test_site_extraction.py:688-714` |
+| `PRRT_kwDOTDYaKM6fp-5q`: content-bearing labels were classified as neutral actions | Neutral fallback wording cannot assert that an About, FAQ, gallery, map, service, team, or work destination exists. Those labels require exact source label/pair authority. | The content/capability category was removed from the bounded neutral set. `Meet Our Team` pointed at an otherwise admitted contact URL rejects; the exact source-owned `Meet Our Team` to `/team` pair admits. Truly generic `Contact Us`, `Learn More`, and `Request Service` controls remain neutral. | fixed/superseded | `lib/generation.py:2152-2200,2350-2366`; `tests/test_generation.py:1460-1528` |
 
 ## Mechanism
 
@@ -130,9 +132,9 @@ to the extraction model, normalizes browser-equivalent text, gathers link/image
 attributes and their source-relative absolute forms, and checks every
 source-owned leaf through a field-specific evidence rule. Claim-bearing text uses
 DOM-local assertion contexts so inline markup cannot hide negation while separate
-elements cannot alter one another's meaning. Direct leaf claim contexts share an
-owner independently of their HTML tag, but independent semantic records, peer
-heading sections, and schema-known fields remain explicit boundaries. CTA labels must exactly match an
+elements cannot alter one another's meaning. Direct text-bearing sibling subtrees
+share an owner independently of their HTML wrapper tag, but independent semantic
+records, peer heading sections, and schema-known fields remain explicit boundaries. CTA labels must exactly match an
 interactive element. Phone and email fields use canonical comparison against
 visible text or the scheme-specific `tel:`/`mailto:` destination, excluding URI
 parameters and cross-scheme tokens. Link destinations and image resources are
@@ -149,7 +151,10 @@ generated action label must exactly match a source-owned label; a bounded neutra
 vocabulary permits only presentation, navigation, contact, and the code-owned
 generated service-request form. This allow-by-authority rule prevents booking,
 quote, commerce, donation, registration, subscription, and ticket claims without
-depending on an incomplete capability-verb denylist.
+depending on an incomplete capability-verb denylist. Content-bearing navigation
+labels such as About, FAQ, gallery, services, and team are not neutral: they require
+an exact source label and label/destination pair so the fallback cannot fabricate a
+destination or misdescribe another admitted URL.
 A source-owned label remains bound to the destination on its source action, even
 when that wording also belongs to the neutral vocabulary. Accessible action
 labels include replacement text from image, area, and image-input controls;

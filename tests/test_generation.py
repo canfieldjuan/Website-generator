@@ -1477,6 +1477,47 @@ class BodyAssemblyTests(unittest.TestCase):
                 expected_action_urls=destination_only,
             )
 
+        for capability_label in (
+            "About Us",
+            "Coverage Area",
+            "Directions",
+            "FAQ",
+            "Gallery",
+            "Map",
+            "Meet Our Team",
+            "Our Services",
+            "Service",
+            "Service Area",
+            "Services",
+            "Team",
+            "View Our Services",
+            "View Services",
+            "Work",
+        ):
+            with self.subTest(capability_label=capability_label), self.assertRaisesRegex(
+                GeneratedBodyError, "non-neutral action label"
+            ):
+                validate_generated_body(
+                    body_result(
+                        f'<body><a href="/contact">{capability_label}</a></body>'
+                    ),
+                    expected_action_urls=destination_only,
+                )
+
+        source_owned_team = ActionUrlAdmissionContract(
+            allowed_urls=("/team",),
+            allowed_labels=("Meet Our Team",),
+            allowed_pairs=(("Meet Our Team", "/team"),),
+        )
+        owned_team = '<body><a href="/team">Meet Our Team</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(owned_team),
+                expected_action_urls=source_owned_team,
+            ),
+            owned_team,
+        )
+
         source_owned_reviews = ActionUrlAdmissionContract(
             allowed_urls=("/reviews",),
             allowed_labels=("Read All Reviews",),

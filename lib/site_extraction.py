@@ -1405,6 +1405,34 @@ class SourceEvidence:
                 and _assertion_heading_level(element) is None
             )
 
+        def claim_component_heading_level(element: Any) -> int | None:
+            direct_level = _assertion_heading_level(element)
+            if direct_level is not None or not isinstance(element, Tag):
+                return direct_level
+            nested_heading = element.find(_HEADING_TAG_PATTERN)
+            return _assertion_heading_level(nested_heading)
+
+        def is_owned_claim_component(
+            element: Any, owner_heading_level: int | None
+        ) -> bool:
+            if not isinstance(element, Tag):
+                return False
+            if not _group_heading_claims:
+                return element.name in paragraph_claim_tags
+            if element.name in _INDEPENDENT_RECORD_TAGS or element.find(
+                _INDEPENDENT_RECORD_TAGS
+            ) is not None:
+                return False
+            if not _normalize_text(element.get_text(" ", strip=True)):
+                return False
+            component_heading_level = claim_component_heading_level(element)
+            if owner_heading_level is None:
+                return component_heading_level is None
+            return (
+                component_heading_level is None
+                or component_heading_level > owner_heading_level
+            )
+
         def is_claim_scope_context(element: Any) -> bool:
             return is_flat_claim_context(element) or (
                 _group_heading_claims
@@ -1440,19 +1468,13 @@ class SourceEvidence:
                         if heading_level is not None:
                             while (
                                 last + 1 < len(siblings)
-                                and is_claim_scope_context(siblings[last + 1])
+                                and is_owned_claim_component(
+                                    siblings[last + 1], heading_level
+                                )
                             ):
                                 next_sibling = siblings[last + 1]
                                 if _starts_presentation_field(
                                     next_sibling.get_text(" ", strip=True)
-                                ):
-                                    break
-                                next_heading_level = _assertion_heading_level(
-                                    next_sibling
-                                )
-                                if (
-                                    next_heading_level is not None
-                                    and next_heading_level <= heading_level
                                 ):
                                     break
                                 last += 1
@@ -1460,7 +1482,9 @@ class SourceEvidence:
                             if not _starts_presentation_field(local_segment):
                                 while (
                                     first > 0
-                                    and is_flat_claim_context(siblings[first - 1])
+                                    and is_owned_claim_component(
+                                        siblings[first - 1], None
+                                    )
                                 ):
                                     first -= 1
                                     if _starts_presentation_field(
@@ -1469,7 +1493,9 @@ class SourceEvidence:
                                         break
                             while (
                                 last + 1 < len(siblings)
-                                and is_flat_claim_context(siblings[last + 1])
+                                and is_owned_claim_component(
+                                    siblings[last + 1], None
+                                )
                                 and not _starts_presentation_field(
                                     siblings[last + 1].get_text(" ", strip=True)
                                 )

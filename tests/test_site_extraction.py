@@ -699,6 +699,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             complete_nested_blocks,
         )
 
+        list_owned_scope = (
+            '<meta property="og:site_name" content="Acme"><div>'
+            "<h3>Free Estimates</h3><ul><li>Members only.</li></ul></div>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(shortened, list_owned_scope)
+        complete_list_owned_scope = {
+            "site": {"name": "Acme", "tagline": "Free Estimates Members only."}
+        }
+        self.assertEqual(
+            validate_site_analysis(complete_list_owned_scope, list_owned_scope),
+            complete_list_owned_scope,
+        )
+
     def test_contact_facts_allow_only_field_owned_presentation_labels(self):
         labeled = {
             "site": {
