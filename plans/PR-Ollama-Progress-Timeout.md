@@ -24,7 +24,7 @@ continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
 This five-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +1328 / -29. The native stream decoder is a new
+the final diff is +1407 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -73,6 +73,10 @@ and remaining total deadline. It assembles bounded newline-delimited JSON
 frames, joins only assistant content, retains the terminal `done_reason` and
 token counts, and rejects malformed, error, reasoning, tool, oversized,
 duplicate-terminal, or incomplete streams through the existing error types.
+The absolute inactivity deadline created before connect is passed unchanged
+into the body reader. Completing response headers therefore does not grant a
+second inactivity window; only a complete non-empty NDJSON frame renews that
+deadline.
 There is no unbounded buffered request, producer thread, concurrent response
 close, or unbounded handoff on either request path.
 
@@ -106,7 +110,7 @@ Ollama clients cannot be required to participate.
 - User-interface progress rendering is separate; this slice makes the provider
   transport progress-aware and bounded.
 
-## Verification
+## Historical verification
 
 Initial local evidence, recorded 2026-09-06 against base
 `826f0c8919615d4ed2849ebed8fb511bc6bc994b` plus only the four declared working
@@ -221,9 +225,36 @@ Current shared-stream evidence, gathered from the final working tree based on
   the output is byte-identical to the fresh rendered spot-check at
   `/dev/shm/website-generator-pr46-fixture-final-read1.png`.
 
+## Current revision-bound evidence
+
+Commit `3c820de4b1250ef2c4b87e660b52189e9b099554` preserves one absolute
+inactivity deadline across connect, request write, response headers, and the
+first streamed frame. A deterministic regression spent 0.04 seconds receiving
+headers under a 0.05-second inactivity limit, then proved the body reader used
+only the remaining budget: it raised the prompt-probe no-progress error before
+0.075 seconds. The focused provider-boundary class passed 42 tests. The full
+repository command `timeout 180s python -m unittest discover -s tests` passed
+302 tests in 14.977 seconds with 34 skipped; log:
+`/dev/shm/website-generator-pr46-full-tests-final-clock.log`.
+
+After `ollama ps` became empty, the required no-deploy fixture ran from
+`2026-09-06T12:08:25-05:00` through `2026-09-06T12:09:18-05:00` with exit
+status 0. The clean tree was at the commit above. The artifact modification
+timestamp changed from `1788713846` to `1788714558`, proving this invocation
+rewrote it. The resulting 71,983-byte
+`outputs/builds/drees-plumbing-inc/index.html` retained SHA-256
+`1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22` and
+is byte-identical to the fresh rendered spot-check at
+`/dev/shm/website-generator-pr46-fixture-final-read1.png`. Both required scans
+returned status 1 with zero matches. Logs:
+`/dev/shm/website-generator-pr46-fixture-final-shared-deadline.log`,
+`/dev/shm/website-generator-pr46-fixture-final-shared-deadline-envelope.txt`,
+`/dev/shm/website-generator-pr46-placeholder-scan-final.txt`, and
+`/dev/shm/website-generator-pr46-forbidden-claim-scan-final.txt`.
+
 ## Estimated diff size
 
-Actual: five declared files, +1328 / -29. The stream decoder and
+Actual: five declared files, +1407 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.
