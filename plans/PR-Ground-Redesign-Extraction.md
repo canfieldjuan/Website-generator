@@ -104,7 +104,9 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fpGr9`: metadata image alt lost its image owner | Bounded Open Graph/Twitter image metadata must preserve ordered URL/alt ownership rather than admit unrelated page-wide text. | `og:image` followed by its `og:image:alt` admits the exact pair; a different alt rejects. | fixed/superseded | `lib/site_extraction.py:241-251,1198-1220`; `tests/test_site_extraction.py:1446-1470` |
 | `PRRT_kwDOTDYaKM6fpOBq`: input action `value` bypassed generated label admission | Every independently rendered, accessible, or tooltip label surface on one action must pass the same source-owned or bounded-neutral policy in every consumer. | A submit input whose admitted ARIA label hides an unsupported visible `value` now rejects; when both labels and their destination pairs are source-owned, it admits. | fixed/superseded | `lib/site_extraction.py:742-773,856-876,1253-1271`; `pipeline.py:208-234`; `lib/generation.py:2260-2280,2367-2382`; `tests/test_generation.py:1427-1458`; `tests/test_site_extraction.py:2050-2072` |
 | `PRRT_kwDOTDYaKM6fpOBr`: neutral action tokens composed an unsupported review claim | Capability-neutral fallback labels must be bounded complete phrases; token membership cannot authorize a new semantic assertion. | `Read All Reviews` now rejects without source label/pair authority while exact neutral `Contact Us`, `Learn More`, and `Request Service` labels admit; the same review label admits when source-owned. | fixed/superseded | `lib/generation.py:404-432,2152-2215,2367-2382`; `tests/test_generation.py:1460-1492` |
-| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `031bd78` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-031bd78.log`; `/dev/shm/website-generator-pr47-browser-render-031bd78.png` |
+| `PRRT_kwDOTDYaKM6fpZkx`: unknown trailing claim predicates could be discarded | Asserted fields may omit only an explicit meaning-preserving leading wrapper; every unknown trailing clause remains part of the assertion regardless of its vocabulary. | `Free Estimates` from `Free Estimates require membership` rejects without adding `require` to a denylist; the complete qualified claim admits. Other trailing assertions now follow the same fail-closed rule. | fixed/superseded | `lib/site_extraction.py:557-592,1623-1648`; `tests/test_site_extraction.py:386-462,553-590` |
+| `PRRT_kwDOTDYaKM6fpZk0`: conflicting explicit identity metadata independently authorized both names | Identity authority must resolve one uniquely best-supported canonical identity across independent metadata, structured DOM, title, and H1 channels; a tied conflict authorizes neither candidate. | Conflicting `application-name` and `og:site_name` now select the name corroborated by title/H1 and reject the other; without corroboration both reject. | fixed/superseded | `lib/site_extraction.py:1010-1052,1260-1446,1580-1594`; `tests/test_site_extraction.py:1051-1078` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `6ee2c00` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-6ee2c00.log`; `/dev/shm/website-generator-pr47-browser-render-6ee2c00.png` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 
 ## Mechanism
@@ -304,7 +306,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-05)
 
-- Code revision under test: `031bd787680e5645238b10e2dfe7e977643f61f4`.
+- Code revision under test: `6ee2c009838856254b94528b9a9d3dbaad17e5de`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -369,20 +371,22 @@ business-specific claims.
   multi-surface action-label extractor. Capability-neutral fallbacks are bounded
   complete phrases, while any review wording requires exact source label/pair
   authority.
+- The next exact-head review reproduced two remaining root-policy gaps. Asserted
+  text now rejects every unknown trailing clause instead of trying to enumerate
+  predicates that might restrict it; only explicit meaning-preserving leading
+  wrappers may be omitted. Identity candidates now compete by support from
+  independent metadata, structured DOM, title, and H1 channels, and tied
+  conflicts grant no identity authority.
 - Focused both-side regressions: `python -m unittest -q
-  tests.test_generation.BodyAssemblyTests.test_body_input_actions_validate_every_rendered_label_surface
-  tests.test_generation.BodyAssemblyTests.test_neutral_action_labels_are_bounded_complete_phrases
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_preserves_every_source_label_surface
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_action_labels_use_complete_accessible_names_and_replacement_text
-  tests.test_generation.AtomicWriteAndCliTests.test_redesign_generators_bind_identity_and_action_destinations`:
-  5 tests passed, covering both rejected bypasses, admitted source-owned controls,
-  bounded neutral controls, and the invalid partial-ARIA boundary. The first
-  focused invocation named the wrong generation test class and produced two
-  discovery errors; the corrected command above is the recorded result.
-- Affected modules: `python -m unittest -q tests.test_site_extraction
-  tests.test_generation`: 223 tests passed after its first run exposed an old
-  partial-ARIA expectation and an artificial token-composition fixture; both were
-  reconciled to the shared contract before the passing rerun.
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_recipient_and_purchase_qualifiers
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_complete_negated_claim_and_separate_positive_occurrence_are_admitted
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_business_name_requires_assertive_identity_evidence`:
+  3 tests passed, covering rejected shortened requirements, admitted complete
+  claims, rejected uncorroborated identities, and the uniquely corroborated
+  identity. The first focused run exposed one old trailing-assertion positive
+  control; that case was moved to complete-claim coverage before the passing run.
+- Affected module: `python -m unittest -q tests.test_site_extraction`: 72 tests
+  passed.
 - Full suite: `python -m unittest discover -s tests -q`: 365 tests passed with
   34 skipped.
 - Scoped static checks passed:
@@ -397,25 +401,25 @@ business-specific claims.
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-05T23:56:15-05:00` capture with no model
-  resident and exited 0 before the `2026-09-05T23:57:15-05:00` post-run capture;
+  invocation began after the `2026-09-06T00:15:58-05:00` capture with no model
+  resident and exited 0 before the `2026-09-06T00:17:03-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
-  path ran. Log: `/dev/shm/website-generator-pr47-fixture-031bd78.log`.
+  path ran. Log: `/dev/shm/website-generator-pr47-fixture-6ee2c00.log`.
 - The successful invocation rewrote
-  `outputs/builds/drees-plumbing-inc/index.html`; size was 72026 bytes, inode
-  3311297, mtime was `2026-09-05 23:57:11.317169519 -0500`, and SHA-256 was
-  `55a740ba7f04ece7af9b914bd93ff55defd322539a4b51bfdeb9ca4fad72a4d9`.
+  `outputs/builds/drees-plumbing-inc/index.html`; size was 72027 bytes, inode
+  3309618, mtime was `2026-09-06 00:16:53.995297826 -0500`, and SHA-256 was
+  `8991ac64600a198bcf5f14d6feae6fe33e0cbca5ee752d23da033dbaaaa2b309`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-031bd78.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-031bd78.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-6ee2c00.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-6ee2c00.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
-  produced a nonblank 1440x3245 styled page showing Drees Plumbing identity,
+  produced a nonblank 1440x3300 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
   artifact has the same SHA-256 as the HTML used for that render. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-031bd78.png`,
+  `/dev/shm/website-generator-pr47-browser-render-6ee2c00.png`,
   SHA-256
-  `936cbea6dba78570f9e0be3f2ca1de3a11d2ddd7b820a070bd6797f381311069`.
+  `b78d4efefc36cbe104585e540848b9357da946d35f45d9d048be7d93b2977c68`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
   after this evidence block is committed; the handoff records that exact result
   rather than claiming a dirty-tree advisory run as final proof.
