@@ -2358,6 +2358,33 @@ def _require_site_facts(
             )
 
 
+def _canonicalize_admitted_image_urls(
+    document: dict, source_url: str | None
+) -> None:
+    """Resolve every admitted image resource against its source document."""
+    if not source_url:
+        return
+
+    def visit(value: Any, *, image_record: bool = False) -> None:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if isinstance(nested, str) and (
+                    key in {"image_url", "logo_url"}
+                    or (image_record and key == "url")
+                ):
+                    value[key] = urljoin(source_url, html.unescape(nested).strip())
+                elif key == "images" and isinstance(nested, list):
+                    for image in nested:
+                        visit(image, image_record=True)
+                else:
+                    visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested, image_record=image_record)
+
+    visit(document)
+
+
 def validate_site_analysis(
     document: Any, source_html: str, source_url: str | None = None
 ) -> dict:
@@ -2368,6 +2395,7 @@ def validate_site_analysis(
         raise SiteExtractionError(error)
     evidence = SourceEvidence.from_html(source_html, source_url)
     _require_site_facts(admitted, evidence, source_url)
+    _canonicalize_admitted_image_urls(admitted, source_url)
     return admitted
 
 
@@ -2457,4 +2485,5 @@ def validate_enrichment_result(
             raise SiteExtractionError(
                 "Content enrichment headline and items must share one source section."
             )
+    _canonicalize_admitted_image_urls(admitted, source_url)
     return admitted

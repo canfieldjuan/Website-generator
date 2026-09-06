@@ -613,7 +613,8 @@ Before outputting, verify:
 - [ ] Above-the-fold shows headline (service + location) and dual CTAs; an
       evidence-backed trust strip is also visible there when one exists
 - [ ] Dual CTA pattern matches conversion_profile.urgency_type
-- [ ] CTA labels are specific and action-oriented (no "Submit" or "Contact Us")
+- [ ] CTA labels are exact admitted source labels or bounded capability-neutral
+      labels; no capability-bearing wording is invented
 - [ ] Phone number is in the sticky nav if urgency_type is emergency or both
 - [ ] Trust strip is omitted when SITE JSON has no source-owned trust value
 - [ ] When source-owned trust exists, at least one trust signal appears near every major CTA

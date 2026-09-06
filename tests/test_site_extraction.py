@@ -1,5 +1,6 @@
 import copy
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -85,11 +86,11 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     "addresses": ["100 Main Street, Effingham, IL"],
                 },
             },
-            "nav": [{"label": "Contact", "url": "https://acme.test/contact"}],
-            "brand": {"logo_url": "https://acme.test/logo.png"},
+            "nav": [{"label": "Contact", "url": "/contact"}],
+            "brand": {"logo_url": "/logo.png"},
             "images": [
                 {
-                    "url": "https://acme.test/hero.jpg",
+                    "url": "/hero.jpg",
                     "alt": "Acme cleaning crew",
                     "context": "hero",
                 }
@@ -126,7 +127,35 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with patch.object(pipeline, "get_openrouter_client", return_value=client):
             admitted = pipeline.analyze_site(html, source_url="https://acme.test/")
 
-        self.assertEqual(admitted, document)
+        expected = copy.deepcopy(document)
+        expected["brand"]["logo_url"] = "https://acme.test/logo.png"
+        expected["images"][0]["url"] = "https://acme.test/hero.jpg"
+        self.assertEqual(admitted, expected)
+        self.assertEqual(document["brand"]["logo_url"], "/logo.png")
+        self.assertEqual(document["images"][0]["url"], "/hero.jpg")
+        self.assertEqual(admitted["nav"][0]["url"], "/contact")
+        image_response = SimpleNamespace(
+            status_code=200,
+            headers={"Content-Type": "image/jpeg"},
+            content=b"verified-image",
+        )
+        with (
+            tempfile.TemporaryDirectory() as output_dir,
+            patch.object(pipeline.requests, "get", return_value=image_response) as get,
+        ):
+            mirrored = pipeline.mirror_images_locally(
+                copy.deepcopy(admitted), output_dir
+            )
+            get.assert_called_once_with(
+                "https://acme.test/hero.jpg",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            self.assertEqual(mirrored["images"][0]["url"], "images/hero_0.jpg")
+            self.assertEqual(
+                Path(output_dir, "images", "hero_0.jpg").read_bytes(),
+                b"verified-image",
+            )
         supplied_prompt = client.calls[0]["messages"][1]["content"]
         self.assertIn("SOURCE_URL: https://acme.test/", supplied_prompt)
 
@@ -859,13 +888,17 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             '<a href="/contact">Contact</a><a href="#about">About</a>'
             '<section id="about"><h2>About</h2></section>'
         )
+        expected_valid_document = copy.deepcopy(valid_document)
+        expected_valid_document["images"][0]["url"] = (
+            "https://acme.test/hero.jpg"
+        )
         self.assertEqual(
             validate_site_analysis(
                 valid_document,
                 valid_source,
                 "https://acme.test/",
             ),
-            valid_document,
+            expected_valid_document,
         )
 
     def test_existing_cta_requires_an_exact_source_action_label(self):
@@ -1663,6 +1696,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "site": {"name": "Acme"},
                 "images": [{"url": "/hero.jpg", "alt": None, "context": "hero"}],
             }
+            expected = copy.deepcopy(document)
+            expected["images"][0]["url"] = "https://acme.test/hero.jpg"
             with self.subTest(property_name=property_name):
                 self.assertEqual(
                     validate_site_analysis(
@@ -1671,7 +1706,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                         "<h1>Acme</h1>",
                         "https://acme.test/",
                     ),
-                    document,
+                    expected,
                 )
 
         for property_name, value in (
@@ -1713,6 +1748,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "site": {"name": "Acme"},
             "images": [{"url": "/hero.webp", "alt": None, "context": "hero"}],
         }
+        expected_picture = copy.deepcopy(picture)
+        expected_picture["images"][0]["url"] = "https://acme.test/hero.webp"
         self.assertEqual(
             validate_site_analysis(
                 picture,
@@ -1720,7 +1757,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 '<img src="/hero.jpg"></picture>',
                 "https://acme.test/",
             ),
-            picture,
+            expected_picture,
         )
 
     def test_css_image_evidence_is_bound_to_image_declarations(self):
@@ -1739,6 +1776,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "site": {"name": "Acme"},
             "images": [{"url": "/hero.jpg", "alt": None, "context": "hero"}],
         }
+        expected_hero = copy.deepcopy(hero)
+        expected_hero["images"][0]["url"] = "https://acme.test/hero.jpg"
         self.assertEqual(
             validate_site_analysis(
                 hero,
@@ -1746,7 +1785,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "<h1>Acme</h1>",
                 "https://acme.test/",
             ),
-            hero,
+            expected_hero,
         )
 
     def test_image_metadata_pairs_alt_with_its_resource(self):
@@ -1765,9 +1804,11 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             '<meta property="og:image:alt" content="Technician at work">'
             "<h1>Acme</h1>"
         )
+        expected = copy.deepcopy(document)
+        expected["images"][0]["url"] = "https://acme.test/hero.jpg"
         self.assertEqual(
             validate_site_analysis(document, source, "https://acme.test/"),
-            document,
+            expected,
         )
 
         mismatched = copy.deepcopy(document)
@@ -2485,6 +2526,10 @@ class EnrichmentGroundingTests(unittest.TestCase):
         )
 
         self.assertEqual(admitted["source_url"], source_url)
+        self.assertEqual(
+            admitted["items"][0]["image_url"],
+            "https://acme.test/office.jpg",
+        )
         self.assertEqual(document["source_url"], "https://attacker.test/spoofed")
 
     def test_content_enrichment_headline_and_items_share_one_source_section(self):
@@ -3115,6 +3160,14 @@ class RedesignPromptAuthorityTests(unittest.TestCase):
         self.assertNotIn('"Schedule a Visit"', prompt)
         self.assertIn("Capability-bearing CTA text must exactly copy", prompt)
         self.assertIn("use capability-neutral source wording", prompt)
+        self.assertIn(
+            "CTA labels are exact admitted source labels or bounded capability-neutral",
+            prompt,
+        )
+        self.assertNotIn(
+            'CTA labels are specific and action-oriented (no "Submit" or "Contact Us")',
+            prompt,
+        )
         self.assertNotIn("Build the headline from `site.type`", prompt)
         self.assertIn("do not substitute `site.type` as", prompt)
         self.assertNotIn("Every redesign includes a trust strip", prompt)
