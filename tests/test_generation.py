@@ -110,18 +110,29 @@ def services_grid(services, descriptions=None):
     )
 COMPLETE_BENEFITS_GRID = (
     '<div class="benefits-grid">'
-    + '<div class="benefit-card"></div>' * 3
+    '<div class="benefit-card"><div class="benefit-title">Services</div>'
+    '<div class="benefit-desc">Review the services listed on this page.</div></div>'
+    '<div class="benefit-card"><div class="benefit-title">Contact</div>'
+    '<div class="benefit-desc">Use the contact information on this page.</div></div>'
+    '<div class="benefit-card"><div class="benefit-title">Request Service</div>'
+    '<div class="benefit-desc">Send a service request through this page.</div></div>'
     + "</div>"
 )
 COMPLETE_BUILD_BODY = (
     '<body class="theme-light"><nav class="site-nav"><span>Test Business</span>'
     '<a href="tel:2175550100">217-555-0100</a></nav>'
-    '<section class="dual-cta-hero"></section><div class="coverage-band"></div>'
+    '<section class="dual-cta-hero"></section>'
+    '<h1 class="dual-cta-headline">Test Business</h1>'
+    '<p class="dual-cta-sub">Review our services and send a request.</p>'
+    '<div class="coverage-band"></div>'
     + COMPLETE_SERVICES_GRID
     + COMPLETE_BENEFITS_GRID
-    + '<form class="contact-form-wrap" action="#"></form>'
-    '<footer class="site-footer"><div class="footer-grid"></div>'
-    '<div class="footer-bottom"><p>Copyright</p></div></footer></body>'
+    + '<form class="contact-form-wrap" action="#">'
+    '<p class="form-trust">Use this form to request service.</p></form>'
+    '<footer class="site-footer"><div class="footer-grid">'
+    '<div class="ft-tagline">Test Business — Effingham, IL</div></div>'
+    '<div class="footer-bottom"><p>© 2026 Test Business. All rights reserved.</p>'
+    '</div></footer></body>'
 )
 
 
@@ -4022,6 +4033,96 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             scaffold,
         )
 
+    def test_build_generator_rejects_unsupported_offering_outside_service_cards(self):
+        unsupported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero"><p>We also offer window cleaning</p>'
+            '</section>',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unsupported)),
+            )
+
+    def test_build_generator_rejects_unsupported_accessibility_copy(self):
+        unsupported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero" '
+            'aria-label="We also offer window cleaning"></section>',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unsupported)),
+            )
+
+    def test_arbitrary_business_hero_fallback_is_business_neutral(self):
+        prompt = build.build_hero_prompt(
+            {
+                "trade": "bakery",
+                "city": "Effingham",
+                "state": "IL",
+            }
+        )
+
+        self.assertIn("local bakery business", prompt)
+        self.assertIn("abstract editorial composition", prompt)
+        self.assertNotIn("service van", prompt)
+        self.assertNotIn("residential driveway", prompt)
+        self.assertNotIn("professional tools", prompt)
+
+    def test_visible_copy_contract_keeps_complete_source_hours_clauses(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+            "hours": "Mon-Fri 8-5, 24/7 emergency available",
+            "licensed_and_insured": True,
+            "family_owned": True,
+        }
+
+        contract = build.expected_build_visible_copy(
+            prospect,
+            build.expected_review_contract(prospect),
+        )
+
+        self.assertIn("Mon-Fri 8-5", contract.allowed_fragments)
+        self.assertIn("24/7 emergency available", contract.allowed_fragments)
+        self.assertIn(
+            "Licensed, insured, family-owned.",
+            contract.allowed_fragments,
+        )
+
     def test_uncatalogued_cleaning_brief_uses_only_supplied_services(self):
         services = (
             "Deep Cleaning",
@@ -4038,8 +4139,10 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "217-555-0100",
             "217-207-3097",
         ).replace(
-            '<div class="footer-grid"></div>',
-            '<div class="footer-grid"><div class="ft-address">'
+            '<div class="footer-grid"><div class="ft-tagline">'
+            'Effingham Office Maids — Effingham, IL</div></div>',
+            '<div class="footer-grid"><div class="ft-tagline">'
+            'Effingham Office Maids — Effingham, IL</div><div class="ft-address">'
             '1901 S. 4th Street Suite #1</div></div>',
         )
         client = FakeLocalClient(local_chat_payload(body))
@@ -4483,12 +4586,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             '<div aria-label="Route notes"><p>21</p>'
             "<p>7-555-0199</p></div></nav>",
         )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(block_separated_numbers)),
-        )
-        self.assertIn("Route notes", html)
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(block_separated_numbers)),
+            )
 
         non_exposed_attribute_phones = body_without_coverage.replace(
             "</nav>",
@@ -4506,12 +4612,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "</nav>",
             "<span>Route 2011 covers 12 service zones.</span></nav>",
         )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(non_phone_numbers)),
-        )
-        self.assertIn("Route 2011 covers 12 service zones", html)
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(non_phone_numbers)),
+            )
 
         prospect["phone"] = "217-555-0100"
         with self.assertRaisesRegex(
@@ -4649,12 +4758,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             '<p>Ask about our “Comfort Club” plan.</p>'
             '<form class="contact-form-wrap"',
         )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(ordinary_quotation)),
-        )
-        self.assertIn("Ask about our “Comfort Club” plan.", html)
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(ordinary_quotation)),
+            )
 
         unscored_widget = COMPLETE_BUILD_BODY.replace(
             "</nav>",
@@ -4737,14 +4849,16 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         exact_ambient = admitted_body.replace(
             "</nav>",
             '<span class="trust-stars" style="--score: 4.4">★★★★★</span>'
-            "<span>Rated 4.4 by 12 customers</span></nav>",
+            "<span>4.4 out of 5</span>"
+            "<span>Based on 12 reviews on Google</span></nav>",
         )
         html = build.generate_build_html(
             prospect,
             config(),
             FakeLocalClient(local_chat_payload(exact_ambient)),
         )
-        self.assertIn("Rated 4.4 by 12 customers", html)
+        self.assertIn("4.4 out of 5", html)
+        self.assertIn("Based on 12 reviews on Google", html)
 
         wrong_count = build_body_with_review_section(
             aggregate_review_section("4.4", "127")
@@ -5123,12 +5237,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             ">217-555-0100</a>",
             ">217\u2011555\u20110100</a>",
         )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(unicode_formatted_verified_phone)),
-        )
-        self.assertIn("217\u2011555\u20110100", html)
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unicode_formatted_verified_phone)),
+            )
 
         matching_optional_action = COMPLETE_BUILD_BODY.replace(
             "</nav>",
@@ -5215,29 +5332,33 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             )
 
         prospect["service_promises"] = ["Flat-rate pricing"]
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">Upfront Flat-Rate</section>',
+        )
         html = build.generate_build_html(
             prospect,
             config(),
-            FakeLocalClient(local_chat_payload(unsupported)),
+            FakeLocalClient(local_chat_payload(supported)),
         )
-        self.assertIn("Upfront <strong>Flat-Rate</strong> pricing", html)
+        self.assertIn("Upfront Flat-Rate", html)
 
     def test_build_generator_gates_field_owned_claim_families(self):
         field_claims = (
-            ("licensed_and_insured", True, "Licensed & Insured"),
-            ("family_owned", True, "Family Owned & Operated"),
-            ("locally_owned", True, "Locally Owned, Not a Franchise"),
-            ("has_24_7", True, "24/7 Service"),
-            ("same_day_service", True, "Same-Day Service"),
-            ("same_day_service", True, "Same-day replacement available"),
-            ("same_day_service", True, "Same-day repair"),
-            ("epa_certified", True, "EPA-Certified Technicians"),
+            ("licensed_and_insured", True, "Licensed"),
+            ("licensed_and_insured", True, "Insured"),
+            ("family_owned", True, "Family Owned"),
+            ("locally_owned", True, "Locally Owned"),
+            ("locally_owned", True, "Not a Franchise"),
+            ("has_24_7", True, "24/7"),
+            ("same_day_service", True, "Same Day"),
+            ("epa_certified", True, "EPA Certified"),
             (
                 "master_electrician_license",
                 "IL-123",
                 "Master Electrician licensed, #IL-123",
             ),
-            ("ibew_local_number", "176", "IBEW Local 176 Member"),
+            ("ibew_local_number", "176", "IBEW Local 176"),
         )
         base_prospect = {
             "business_name": "Test Business",
@@ -5312,7 +5433,6 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "Master Electrician licensed, #IL-123",
             "Master Licensed, #IL-123",
             "Master-Licensed, #IL-123",
-            "Master <span>Electrician licensed, #IL-123</span>",
         ):
             with self.subTest(exact_claim=exact_claim):
                 html = build.generate_build_html(
@@ -5359,10 +5479,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
         def with_address(value):
             return COMPLETE_BUILD_BODY.replace(
-                '<div class="footer-grid"></div>',
-                '<div class="footer-grid"><div>'
-                f'<div class="ft-address">{value}</div>'
-                '</div></div>',
+                '<div class="footer-grid"><div class="ft-tagline">'
+                'Test Business — Effingham, IL</div></div>',
+                '<div class="footer-grid"><div class="ft-tagline">'
+                'Test Business — Effingham, IL</div><div>'
+                f'<div class="ft-address">{value}</div></div></div>',
             )
 
         invented = with_address("123 Main St.<br>Effingham, IL 62401")
@@ -5419,9 +5540,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY)),
             )
 
-        verified = with_address(
-            "100 W Elm St,<br><span>Dieterich, IL 62424</span><br>Mon-Fri 8-5"
-        )
+        verified = with_address("100 W Elm St, Dieterich, IL 62424")
         html = build.generate_build_html(
             prospect,
             config(),
@@ -5483,15 +5602,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     local_chat_payload(with_claim("Serving since 1999"))
                 ),
             )
-        exact_established = with_claim(
-            "Serving <span>since</span> <span>2011</span>"
-        )
+        exact_established = with_claim("Established in 2011")
         html = build.generate_build_html(
             established_prospect,
             config(),
             FakeLocalClient(local_chat_payload(exact_established)),
         )
-        self.assertIn("<span>2011</span>", html)
+        self.assertIn("Established in 2011", html)
 
         years_prospect = {**base_prospect, "years_in_business": 12}
         with self.assertRaisesRegex(GeneratedBodyError, "years in business"):
@@ -5502,27 +5619,29 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     local_chat_payload(with_claim("20 years of plumbing service"))
                 ),
             )
-        exact_years = with_claim("12 years of plumbing service")
+        exact_years = with_claim("12 years in business")
         html = build.generate_build_html(
             years_prospect,
             config(),
             FakeLocalClient(local_chat_payload(exact_years)),
         )
-        self.assertIn("12 years of plumbing service", html)
+        self.assertIn("12 years in business", html)
 
-        for exact_bare_claim in (
+        for unsupported_bare_claim in (
             "12 years experience",
             "Serving families for 12 years",
         ):
-            with self.subTest(exact_bare_claim=exact_bare_claim):
-                html = build.generate_build_html(
+            with self.subTest(unsupported_bare_claim=unsupported_bare_claim), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
                     years_prospect,
                     config(),
                     FakeLocalClient(
-                        local_chat_payload(with_claim(exact_bare_claim))
+                        local_chat_payload(with_claim(unsupported_bare_claim))
                     ),
                 )
-                self.assertIn(exact_bare_claim, html)
 
         wrong_attribute = with_claim(
             '<span title="Serving since 1999">Serving since 2011</span>'
@@ -5535,12 +5654,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             )
 
         non_tenure_years = with_claim("Includes a sourced 2-year parts warranty")
-        html = build.generate_build_html(
-            base_prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(non_tenure_years)),
-        )
-        self.assertIn("2-year parts warranty", html)
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                base_prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(non_tenure_years)),
+            )
 
     def test_build_generator_binds_location_and_radius_claims_to_source(self):
         prospect = {
@@ -5592,28 +5714,20 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn("Serving Effingham, IL", html)
 
-        inline_verified_location = with_location(
-            "Serving <span>Effingham</span>, <span>IL</span>."
-        )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(inline_verified_location)),
-        )
-        self.assertIn("<span>Effingham</span>, <span>IL</span>", html)
-
         for claim in (
             "We serve Effingham and surrounding communities.",
             "Test Business serves the Effingham area.",
             "We serve homeowners and businesses.",
         ):
-            with self.subTest(claim=claim):
-                html = build.generate_build_html(
+            with self.subTest(claim=claim), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
                     prospect,
                     config(),
                     FakeLocalClient(local_chat_payload(with_location(claim))),
                 )
-                self.assertIn(claim, html)
 
         ordinary_prose = (
             "Call today, or request service online.",
@@ -5621,13 +5735,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "Fast response, no surprises.",
         )
         for claim in ordinary_prose:
-            with self.subTest(claim=claim):
-                html = build.generate_build_html(
+            with self.subTest(claim=claim), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
                     prospect,
                     config(),
                     FakeLocalClient(local_chat_payload(with_location(claim))),
                 )
-                self.assertIn(claim, html)
 
         adverse = (
             ("Serving Springfield and surrounding communities within 25 miles.", "service location"),
@@ -5649,6 +5765,16 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     config(),
                     FakeLocalClient(local_chat_payload(with_location(claim))),
                 )
+
+        split_location = with_location(
+            '<div>Serving</div><div>Springfield area</div>'
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "service location"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(split_location)),
+            )
 
         no_radius = {**prospect, "service_radius": None}
         with self.assertRaisesRegex(GeneratedBodyError, "service radius"):
@@ -5808,15 +5934,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     FakeLocalClient(local_chat_payload(with_claim(claim))),
                 )
 
-        split_exact = with_claim(
-            "Proud <span>IBEW</span> <span>Local 176</span> Member"
-        )
+        split_exact = with_claim("IBEW Local 176")
         html = build.generate_build_html(
             prospect,
             config(),
             FakeLocalClient(local_chat_payload(split_exact)),
         )
-        self.assertIn("<span>IBEW</span> <span>Local 176</span>", html)
+        self.assertIn("IBEW Local 176", html)
 
         wrong_attribute = with_claim(
             '<span aria-label="IBEW Local 1 Member">IBEW Local 176 Member</span>'
@@ -5896,7 +6020,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         wrong_override_body = verified_body.replace(
             "</form>",
             '<button type="submit" formaction="https://formspree.io/f/wrong">'
-            "Send</button></form>",
+            "Send My Request</button></form>",
             1,
         )
         with self.assertRaisesRegex(GeneratedBodyError, "alternate unverified"):
@@ -5909,7 +6033,8 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         verified_override_body = verified_body.replace(
             "</form>",
             '<button type="submit" '
-            'formaction="https://formspree.io/f/verified">Send</button></form>',
+            'formaction="https://formspree.io/f/verified">'
+            'Send My Request</button></form>',
             1,
         )
         html = build.generate_build_html(
@@ -5998,12 +6123,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "</nav>",
             "<p>invented@</p><p>example.com</p></nav>",
         )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(block_separated_fragments)),
-        )
-        self.assertIn("<p>invented@</p><p>example.com</p>", html)
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(block_separated_fragments)),
+            )
 
         prospect["owner_email"] = "owner@realbusiness.test"
         verified_email = COMPLETE_BUILD_BODY.replace(
@@ -6022,12 +6150,15 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "</nav>",
             "<p><span>owner@</span><span>realbusiness.test</span></p></nav>",
         )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(split_verified_email)),
-        )
-        self.assertIn("<span>owner@</span><span>realbusiness.test</span>", html)
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(split_verified_email)),
+            )
 
         prefixed_verified_email = COMPLETE_BUILD_BODY.replace(
             "</nav>",

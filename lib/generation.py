@@ -293,6 +293,7 @@ _EXPECTED_SERVICE_LOCATION_UNSET = object()
 _EXPECTED_IMAGES_UNSET = object()
 _EXPECTED_ACTION_URLS_UNSET = object()
 _EXPECTED_SERVICES_UNSET = object()
+_EXPECTED_VISIBLE_COPY_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -433,6 +434,14 @@ class ServiceLocationAdmissionContract:
 class ImageAdmissionContract:
     allowed_urls: tuple[str, ...] = ()
     nav_logo_url: str | None = None
+
+
+@dataclass(frozen=True)
+class VisibleCopyAdmissionContract:
+    """Exact visible-copy authority for one generated body."""
+
+    allowed_fragments: tuple[str, ...] = ()
+    required_class_text: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str:
@@ -3120,6 +3129,8 @@ def _validate_source_contacts(
 def _validate_location_claims(
     claim_surfaces: Iterable[str],
     contract: LocationAdmissionContract,
+    *,
+    composed_claim_surfaces: Iterable[str] = (),
 ) -> None:
     if not isinstance(contract, LocationAdmissionContract):
         raise GeneratedBodyError("Expected location admission contract is invalid.")
@@ -3152,19 +3163,13 @@ def _validate_location_claims(
         for source in source_location_surfaces
         if source
     )
-    for raw_surface in claim_surfaces:
+    direct_surfaces = tuple(claim_surfaces)
+    composed_surfaces = tuple(composed_claim_surfaces)
+    for raw_surface in (*direct_surfaces, *composed_surfaces):
         for match in SERVICE_RADIUS_CLAIM_PATTERN.finditer(raw_surface):
             if int(match.group("miles")) not in source_radius_values:
                 raise GeneratedBodyError(
                     "Generated body service radius does not match verified location data."
-                )
-        for match in CITY_STATE_CLAIM_PATTERN.finditer(raw_surface):
-            location = _normalize_claim_match_text(
-                f"{match.group('city')}, {match.group('state')}"
-            )
-            if not any(location in source for source in normalized_sources):
-                raise GeneratedBodyError(
-                    "Generated body location does not match verified location data."
                 )
         for match in SERVICE_PLACE_CLAIM_PATTERN.finditer(raw_surface):
             place = match.group("place").strip()
@@ -3180,6 +3185,15 @@ def _validate_location_claims(
             ):
                 raise GeneratedBodyError(
                     "Generated body service location does not match verified location data."
+                )
+    for raw_surface in direct_surfaces:
+        for match in CITY_STATE_CLAIM_PATTERN.finditer(raw_surface):
+            location = _normalize_claim_match_text(
+                f"{match.group('city')}, {match.group('state')}"
+            )
+            if not any(location in source for source in normalized_sources):
+                raise GeneratedBodyError(
+                    "Generated body location does not match verified location data."
                 )
 
 
@@ -3382,6 +3396,108 @@ def _validate_tenure_claims(
                     )
 
 
+def _validate_visible_copy(
+    body_root: Tag,
+    contract: VisibleCopyAdmissionContract,
+) -> None:
+    """Reject visible or accessibility copy outside one exact authority set."""
+    if not isinstance(contract, VisibleCopyAdmissionContract):
+        raise GeneratedBodyError("Visible-copy admission contract is invalid.")
+    allowed_fragments = _contract_text_values(
+        contract.allowed_fragments,
+        "Visible-copy fragment",
+    )
+    normalized_allowed = {
+        _normalize_source_owned_text(fragment) for fragment in allowed_fragments
+    }
+
+    required_classes: set[str] = set()
+    for class_name, expected_values in contract.required_class_text:
+        if (
+            not isinstance(class_name, str)
+            or not class_name
+            or class_name in required_classes
+        ):
+            raise GeneratedBodyError(
+                "Visible-copy required-class contract is invalid."
+            )
+        required_classes.add(class_name)
+        normalized_expected = tuple(
+            _normalize_source_owned_text(value)
+            for value in _contract_text_values(
+                expected_values,
+                f"Visible-copy {class_name}",
+            )
+        )
+        actual = tuple(
+            _normalize_source_owned_text(element.get_text(" ", strip=True))
+            for element in _elements_with_class(body_root, class_name)
+        )
+        if actual != normalized_expected:
+            raise GeneratedBodyError(
+                "Generated body visible copy does not match the code-owned "
+                f"{class_name} contract."
+            )
+
+    def is_exposed(element: Tag) -> bool:
+        return not any(
+            is_render_suppressed_element(candidate)
+            or (
+                isinstance(candidate.get("aria-hidden"), str)
+                and candidate["aria-hidden"].strip().casefold() == "true"
+            )
+            for candidate in (element, *element.parents)
+            if isinstance(candidate, Tag)
+        )
+
+    exposed_fragments: list[str] = []
+    for node in body_root.descendants:
+        if (
+            isinstance(node, NavigableString)
+            and not isinstance(node, Comment)
+            and isinstance(node.parent, Tag)
+            and is_exposed(node.parent)
+        ):
+            fragment = _normalize_source_owned_text(str(node))
+            if fragment:
+                exposed_fragments.append(fragment)
+
+    exposed_attributes = (
+        "alt",
+        "aria-label",
+        "aria-description",
+        "placeholder",
+        "title",
+    )
+    for element in (body_root, *body_root.find_all(True)):
+        if not is_exposed(element):
+            continue
+        for attribute in exposed_attributes:
+            value = element.get(attribute)
+            if isinstance(value, str):
+                fragment = _normalize_source_owned_text(value)
+                if fragment:
+                    exposed_fragments.append(fragment)
+        if element.name.casefold() == "input" and str(
+            element.get("type") or ""
+        ).casefold() in {"button", "reset", "submit"}:
+            value = element.get("value")
+            if isinstance(value, str):
+                fragment = _normalize_source_owned_text(value)
+                if fragment:
+                    exposed_fragments.append(fragment)
+
+    unsupported = sorted(
+        {fragment for fragment in exposed_fragments if fragment not in normalized_allowed},
+        key=str.casefold,
+    )
+    if unsupported:
+        raise GeneratedBodyError(
+            "Generated body contains visible copy outside the source-owned "
+            f"catalog: {unsupported[0]!r}."
+        )
+
+
 def validate_generated_body(
     result: GenerationResult,
     *,
@@ -3405,6 +3521,7 @@ def validate_generated_body(
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
     expected_services: object = _EXPECTED_SERVICES_UNSET,
+    expected_visible_copy: object = _EXPECTED_VISIBLE_COPY_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -3653,7 +3770,11 @@ def validate_generated_body(
             exact_claim_surfaces,
         )
     if expected_location is not _EXPECTED_LOCATION_UNSET:
-        _validate_location_claims(location_claim_surfaces, expected_location)
+        _validate_location_claims(
+            location_claim_surfaces,
+            expected_location,
+            composed_claim_surfaces=exposure_surfaces,
+        )
     if expected_service_locations is not _EXPECTED_SERVICE_LOCATION_UNSET:
         _validate_service_location_claims(body_root, expected_service_locations)
     if expected_images is not _EXPECTED_IMAGES_UNSET:
@@ -3843,6 +3964,8 @@ def validate_generated_body(
         )
     if expected_services is not _EXPECTED_SERVICES_UNSET:
         _validate_service_cards(body_root, expected_services)
+    if expected_visible_copy is not _EXPECTED_VISIBLE_COPY_UNSET:
+        _validate_visible_copy(body_root, expected_visible_copy)
     return body
 
 
@@ -3999,6 +4122,7 @@ def assemble_generated_html(
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
     expected_services: object = _EXPECTED_SERVICES_UNSET,
+    expected_visible_copy: object = _EXPECTED_VISIBLE_COPY_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -4036,6 +4160,7 @@ def assemble_generated_html(
         expected_form_action=expected_form_action,
         expected_reviews=expected_reviews,
         expected_services=expected_services,
+        expected_visible_copy=expected_visible_copy,
         required_class_counts=required_class_counts,
         required_child_class_sequences=required_child_class_sequences,
     )

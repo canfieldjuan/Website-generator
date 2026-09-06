@@ -53,19 +53,17 @@ Content source rules:
   When PROSPECT_JSON omits a customer fact, omit the fact from the page.
 - Never fabricate review counts, awards, years-in-business, certifications,
   or specific factual claims. Those must come from PROSPECT_JSON only.
-- Service descriptions, trust signal phrasing, and section structure may draw
-  from universal INDUSTRY GUIDANCE. Offered services, hours, availability,
-  credentials, and service-area facts must come from PROSPECT_JSON; never fill
-  those customer facts from industry examples or trade stereotypes.
+- Section structure may draw from universal INDUSTRY GUIDANCE. The final
+  response boundary supplies an exhaustive visible-copy catalog and pins every
+  free-copy owner to exact code-owned text. Do not write any other sales copy.
+  Offered services, hours, availability, credentials, and service-area facts
+  must come from PROSPECT_JSON; never fill those customer facts from industry
+  examples or trade stereotypes.
 
 Brand display rule:
-- Render `business_name` in TITLE CASE for all on-page display
-  ("Drees Plumbing", not "DREES PLUMBING INC"). Strip legal suffixes
-  ("Inc.", "LLC", "Co.") from the nav, hero, footer brand line, and
-  any prominent headings. Preserve the full legal name ONLY in the
-  footer copyright line (e.g. "© 2026 Drees Plumbing Inc."). If the
-  prospect supplied `display_name` explicitly, use it verbatim and
-  ignore this rule.
+- The final response boundary supplies the exact code-owned display identity.
+  Copy it verbatim in every pinned brand owner. Preserve the full legal
+  `business_name` only in the exact code-owned copyright line.
 
 Trade display rule:
 - `prospect.trade` is a lowercase JSON key (`"plumber"`, `"hvac"`,
@@ -296,7 +294,7 @@ The per-section rules:
      </div>
    </div>
    ```
-6. Why choose us -- EXACTLY 3 differentiators (the `.benefits-grid` is
+6. Why choose us -- EXACTLY 3 page-function cards (the `.benefits-grid` is
    a 3-column desktop grid; 4 cards leaves an orphan trailing cell).
    Wrap the whole section in `<section class="section-band">` instead
    of the standard `<div class="page-wrap section-gap">` so it lands
@@ -311,51 +309,26 @@ The per-section rules:
          <span class="sec-title"><span class="sec-dot"></span>Why Choose Us</span>
        </div>
        <div class="benefits-grid benefits-grid--three">
-         <!-- exactly 3 .benefit-card entries -->
+         <div class="benefit-card">
+           <div class="benefit-title">Services</div>
+           <div class="benefit-desc">Review the services listed on this page.</div>
+         </div>
+         <div class="benefit-card">
+           <div class="benefit-title">Contact</div>
+           <div class="benefit-desc">Use the contact information on this page.</div>
+         </div>
+         <div class="benefit-card">
+           <div class="benefit-title">Request Service</div>
+           <div class="benefit-desc">Send a service request through this page.</div>
+         </div>
        </div>
      </div>
    </section>
    ```
 
-   **Gating rule (extends the `[TRUST_TRAILER]` / `[SERVICE_PROMISE]`
-   fabrication guard from 07's intro into the benefits grid).** Every card must
-   be backed by prospect data or describe a visible function of this page:
-
-   - **Verified trust signal** -- gated to a specific
-     `[TRUST_TRAILER]` component (`family_owned`, `locally_owned`,
-     `licensed_and_insured`).
-   - **Verified service promise** -- requires a matching entry in
-     `prospect.service_promises`. Never inferred from `has_24_7`,
-     prior tenure, or other adjacent fields.
-   - **Verified trade credential** -- gated to its explicit prospect field.
-   - **Source-derived fact** -- exact supplied service, city/service area,
-     phone, or other prospect value.
-   - **Page function** -- the visible service list, direct phone link when
-     present, or request form. Describe only what the rendered page provides.
-
-   **Selection order:**
-
-   1. Verified-trust cards first (whichever components qualify).
-   2. Verified-trade-credential card (if applicable).
-   3. Verified-service-promise cards from `prospect.service_promises`.
-   4. Fill remaining cards with source-derived facts or page functions.
-
-   **Never fabricate a business characteristic just to fill the 3rd slot.**
-   Without explicit prospect evidence, do not claim local ownership,
-   non-franchise status, direct technician access, same-crew service,
-   call-center avoidance, special responsiveness, or similar operational
-   traits. The exact three-card structure does not override source authority.
-
-   **Consolidate overlapping claims.** When the verified-trust pass
-   would yield two cards saying nearly the same thing (e.g.
-   `Family Owned` + `Locally Owned`), consolidate into a single
-   card and pull one more from the next priority bucket.
-
-   **Anti-pattern from PR #6 review (do not repeat).** Earlier builds rendered
-   an unsupported pricing promise even though `prospect.service_promises: []`.
-   A service-promise card may not render without a matching entry. The same
-   discipline applies to every business-practice claim in 07's
-   positive-signals list.
+   Copy these three title/description pairs exactly and in order. They describe
+   only visible page functions, so the model cannot turn a benefit card into a
+   new service or business-practice claim.
 7. Customer Reviews -- branching logic based on what prospect data
    contains. Three possible renderings:
 
@@ -481,7 +454,7 @@ on the page. Build it as follows:
        Formspree-branded thank-you page, which is fine and is the
        desired behavior). -->
   <button class="form-submit" type="submit">Send My Request</button>
-  <p class="form-trust">[ONE verifiable trust signal line drawn from prospect data -- see rules below]</p>
+  <p class="form-trust">Use this form to request service.</p>
 </form>
 ```
 
@@ -493,47 +466,8 @@ Rules:
 - Submit button label MUST be specific and first-person. "Send My
   Request", "Get My Estimate", "Schedule My Service" -- NEVER "Submit"
   or "Contact Us".
-- The `.form-trust` line must reference ONLY facts present in the
-  prospect JSON or in INDUSTRY_DEFAULTS. Never fabricate response-time
-  promises, satisfaction guarantees, or other unverifiable claims. Pick
-  in this priority order:
-    1. `[TRUST_TRAILER]` -- the expansion defined at the top of
-       `07-industry-defaults.md`. Fires when the 07 expansion
-       yields a non-empty result. Produces a comma-separated
-       sentence with whatever components are verified: `Licensed,
-       insured.` (minimum, when only `licensed_and_insured` is
-       true), up through `Licensed, insured, family-owned, locally
-       owned.` when every flag is true. `locally owned` appears
-       only when `prospect.locally_owned` is explicitly true --
-       there is no implicit inference from `family_owned`, and it
-       is NEVER derived from `licensed_and_insured` alone.
-
-       **Exception (defers to option 2):** if
-       `prospect.licensed_and_insured` is NOT true AND
-       `prospect.family_owned` is true AND
-       `prospect.established_year` is set, skip option 1 and
-       prefer option 2 -- the "since YYYY" framing is stronger
-       than the bare `family-owned.` component the trailer would
-       otherwise produce.
-    2. `Family-owned since [established_year].` -- fires per the
-       exception in option 1: when `licensed_and_insured` is not
-       true, `family_owned` is true, and `established_year` is
-       set.
-    3. `Serving [SERVICE_AREA] since [established_year].` -- if
-       `prospect.established_year` is set and the higher-priority
-       options didn't fire.
-    4. `[TRADE_DISPLAY] serving [CITY].` -- always-valid geographic
-       fallback. Use the `[TRADE_DISPLAY]` mapping defined under
-       the Trade display rule above, NEVER the raw `prospect.trade`
-       JSON value (e.g., for `prospect.trade == "hvac"` render
-       `HVAC contractor serving [CITY].`, not `hvac serving
-       [CITY].`). Do NOT prepend "Licensed, insured" here -- option 1
-       covers the licensed case; this option is what we fall to
-       when no credential or tenure claim is supported by prospect
-       data.
-  Do NOT invent "We respond within X hours", "100% satisfaction", "free
-  consultation", "no obligation", etc. unless they appear verbatim in
-  the prospect JSON.
+- Copy the `.form-trust` line exactly. It describes the page function rather
+  than making a claim about the business.
 - Add `id="contact"` to the section wrapping the form so the hero's
   secondary CTA can anchor to `#contact`.
 
@@ -643,7 +577,7 @@ Left column (brand) markup:
   <div class="ft-brand-name">[PROSPECT.business_name -- apply the
     Brand display rule from the SYSTEM PROMPT: title-case, strip
     legal suffixes ("Inc.", "LLC", "Co.")]</div>
-  <div class="ft-tagline">[Short tagline, e.g. "[CITY]'s Trusted [TRADE]"]</div>
+  <div class="ft-tagline">[Exact code-owned display identity] — [PROSPECT.city], [PROSPECT.state]</div>
   <span class="ft-phone-label">Call us</span>
   <a href="tel:[phone_digits]" class="ft-phone">[PROSPECT.phone]</a>
   <div class="ft-address">
@@ -670,9 +604,9 @@ Rules:
   prompt sees them; if the field arrives as null, omit it.
 
 Middle and right columns use `.ft-col-title` headers and `.ft-links`
-lists. Typical content: middle column = Hours OR Services list, right
-column = Service Area list OR Social links. Tailor to what the prospect
-data supports.
+lists. Use only complete source strings from the final visible-copy catalog;
+do not split a service-area or hours field into inferred city or schedule
+entries. Omit a column that cannot be populated from complete catalog entries.
 
 Close the footer with exactly one compact copyright row after `.footer-grid`:
 
@@ -709,7 +643,7 @@ mile count like 20 -- that misrepresents coverage.) Markup:
     <text x="80" y="10" text-anchor="middle" font-family="inherit" font-size="8" font-weight="700" fill="currentColor" opacity="0.7" letter-spacing="0.8">[N]-MILE RADIUS</text>
   </svg>
   <ul class="ft-links">
-    <!-- 3-4 list items max; consolidate "City1 &middot; City2" pairs to keep the list short -->
+    <li>[Exact prospect.service_radius string]</li>
   </ul>
 </div>
 ```

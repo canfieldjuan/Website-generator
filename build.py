@@ -43,6 +43,7 @@ from lib.generation import (
     ReviewAdmissionContract,
     ReviewEvidence,
     TenureAdmissionContract,
+    VisibleCopyAdmissionContract,
     action_url_contract_instruction,
     assemble_generated_html,
     atomic_write_text,
@@ -99,6 +100,35 @@ BUILD_FORM_SUBMIT_LABELS = (
     "Schedule My Service",
 )
 BUILD_CODE_OWNED_ACTION_PAIRS = (("Request Service", "#contact"),)
+BUILD_PAGE_FUNCTION_BENEFITS = (
+    ("Services", "Review the services listed on this page."),
+    ("Contact", "Use the contact information on this page."),
+    ("Request Service", "Send a service request through this page."),
+)
+BUILD_HERO_SUBHEADLINE = "Review our services and send a request."
+BUILD_FORM_TRUST_COPY = "Use this form to request service."
+BUILD_FIXED_VISIBLE_COPY = (
+    "Request Service",
+    "Not sure if we cover your area?",
+    "Services",
+    "Why Choose Us",
+    "Customer Reviews",
+    "Your name",
+    "Phone number",
+    "Email (optional)",
+    "What's going on?",
+    "Send My Request",
+    "Get My Estimate",
+    "Schedule My Service",
+    "Call us",
+    "Hours",
+    "Service Area",
+    "Read All on Google",
+    "Read All Reviews on Google",
+    "out of 5",
+    "or",
+    "★★★★★",
+)
 BUILD_RESPONSE_BOUNDARY_REMINDER = (
     "RESPONSE BOUNDARY: Begin your response immediately with <body. "
     "End immediately with </body>. Emit no leading comment, preamble, markdown "
@@ -158,16 +188,23 @@ BOOLEAN_CLAIM_FIELDS = frozenset(
 BUILD_REQUIRED_CLASS_COUNTS = (
     ("site-nav", 1),
     ("dual-cta-hero", 1),
+    ("dual-cta-headline", 1),
+    ("dual-cta-sub", 1),
     ("coverage-band", 1),
     ("services-grid", 1),
     ("benefits-grid", 1),
     ("benefit-card", 3),
+    ("benefit-title", 3),
+    ("benefit-desc", 3),
     ("contact-form-wrap", 1),
+    ("form-trust", 1),
+    ("ft-tagline", 1),
     *REQUIRED_FOOTER_CLASS_COUNTS,
 )
 BUILD_REQUIRED_CHILD_CLASS_SEQUENCES = (
     ("service-card", ("service-card-name", "service-card-desc")),
     ("benefits-grid", ("benefit-card",) * 3),
+    ("benefit-card", ("benefit-title", "benefit-desc")),
     *REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
 )
 
@@ -422,6 +459,185 @@ def build_services_response_scaffold(services):
         )
         + '\n  </div>\n'
         '</div>'
+    )
+
+
+def expected_build_display_name(prospect):
+    """Return the exact source-owned display identity used in generated copy."""
+    display_name = prospect.get("display_name")
+    if isinstance(display_name, str) and display_name.strip():
+        return display_name.strip()
+    legal_name = prospect["business_name"].strip()
+    without_suffix = re.sub(
+        r"\s*,?\s+(?:incorporated|inc|llc|l\.l\.c|co|company)\.?$",
+        "",
+        legal_name,
+        flags=re.IGNORECASE,
+    ).strip()
+    return without_suffix.title() or legal_name
+
+
+def expected_build_visible_copy(prospect, review_contract):
+    """Build the exhaustive visible-copy authority for from-scratch output."""
+    display_name = expected_build_display_name(prospect)
+    footer_tagline = f"{display_name} — {prospect['city']}, {prospect['state']}"
+    build_year = str(prospect.get("build_date") or date.today().isoformat())[:4]
+    copyright_line = (
+        f"© {build_year} {prospect['business_name']}. All rights reserved."
+    )
+    allowed = [
+        *BUILD_FIXED_VISIBLE_COPY,
+        BUILD_HERO_SUBHEADLINE,
+        BUILD_FORM_TRUST_COPY,
+        footer_tagline,
+        copyright_line,
+        *(value for pair in BUILD_PAGE_FUNCTION_BENEFITS for value in pair),
+    ]
+    for field in (
+        "business_name",
+        "display_name",
+        "trade",
+        "city",
+        "state",
+        "phone",
+        "owner_email",
+        "address",
+        "hours",
+        "service_radius",
+    ):
+        value = prospect.get(field)
+        if isinstance(value, str) and value.strip():
+            allowed.append(value.strip())
+    allowed.append(display_name)
+    allowed.extend(
+        (
+            f"Serving {prospect['city']}, {prospect['state']}.",
+            f"Serving the {prospect['city']} area.",
+        )
+    )
+    service_radius = prospect.get("service_radius")
+    if isinstance(service_radius, str) and service_radius.strip():
+        allowed.append(f"Serving {service_radius.strip().rstrip('.')}.")
+    hours = prospect.get("hours")
+    if isinstance(hours, str):
+        allowed.extend(
+            clause.strip()
+            for clause in hours.split(",")
+            if clause.strip()
+        )
+
+    for service in prospect["services"]:
+        allowed.extend((service, source_owned_service_description(service)))
+    promises = prospect.get("service_promises")
+    if isinstance(promises, list):
+        allowed.extend(
+            promise.strip()
+            for promise in promises
+            if isinstance(promise, str) and promise.strip()
+        )
+    allowed.extend(verified_source_claim_phrases(prospect))
+    allowed.extend(
+        exact_phrase
+        for _label, _trigger, exact_phrase in exact_source_claim_contracts(prospect)
+    )
+
+    phone = prospect.get("phone")
+    if isinstance(phone, str) and phone.strip():
+        allowed.extend((f"Call {phone.strip()}", f"Call {phone.strip()} →"))
+    if prospect.get("has_24_7") is True:
+        allowed.extend(("Available 24/7", "24/7 Emergency Service Available"))
+    if prospect.get("same_day_service") is True:
+        allowed.append("Same-Day Service")
+    trust_components = []
+    if prospect.get("licensed_and_insured") is True:
+        trust_components.extend(("Licensed", "insured"))
+    if prospect.get("family_owned") is True:
+        trust_components.append("family-owned")
+    if prospect.get("locally_owned") is True:
+        trust_components.append("locally owned")
+    if trust_components:
+        allowed.append(", ".join(trust_components) + ".")
+    established_year = prospect.get("established_year")
+    if isinstance(established_year, int) and not isinstance(established_year, bool):
+        allowed.append(f"Established in {established_year}")
+    years_in_business = prospect.get("years_in_business")
+    if isinstance(years_in_business, int) and not isinstance(years_in_business, bool):
+        allowed.append(f"{years_in_business} years in business")
+
+    if review_contract.mode == "cards":
+        for review in review_contract.source_reviews:
+            allowed.extend(
+                (
+                    review.author,
+                    str(review.rating),
+                    review.date,
+                    review.platform,
+                    review.text,
+                )
+            )
+    if review_contract.aggregate_score is not None:
+        score = review_contract.aggregate_score
+        count = review_contract.aggregate_count
+        allowed.extend(
+            (
+                str(score),
+                f"{score} out of 5",
+                f"Based on {count} Google Reviews",
+                f"· Based on {count} Google Reviews",
+                f"Based on {count} reviews on Google",
+            )
+        )
+
+    radius_match = re.search(
+        r"(?<!\d)(\d{1,4})\s*(?:-\s*)?(?:miles?|mi)\b",
+        str(prospect.get("service_radius") or ""),
+        flags=re.IGNORECASE,
+    )
+    if radius_match:
+        radius = radius_match.group(1)
+        allowed.extend(
+            (
+                f"{radius}-MILE RADIUS",
+                f"{radius}-mile service area centered on "
+                f"{prospect['city']}, {prospect['state']}",
+            )
+        )
+
+    required_class_text = (
+        ("dual-cta-headline", (display_name,)),
+        ("dual-cta-sub", (BUILD_HERO_SUBHEADLINE,)),
+        (
+            "benefit-title",
+            tuple(title for title, _description in BUILD_PAGE_FUNCTION_BENEFITS),
+        ),
+        (
+            "benefit-desc",
+            tuple(description for _title, description in BUILD_PAGE_FUNCTION_BENEFITS),
+        ),
+        ("form-trust", (BUILD_FORM_TRUST_COPY,)),
+        ("ft-tagline", (footer_tagline,)),
+    )
+    return VisibleCopyAdmissionContract(
+        allowed_fragments=tuple(dict.fromkeys(allowed)),
+        required_class_text=required_class_text,
+    )
+
+
+def visible_copy_contract_instruction(contract):
+    if not isinstance(contract, VisibleCopyAdmissionContract):
+        raise ValueError("Visible-copy contract is invalid.")
+    pinned = {
+        class_name: values for class_name, values in contract.required_class_text
+    }
+    return (
+        "VISIBLE COPY CONTRACT (EXHAUSTIVE): Every rendered text node and every "
+        "alt, title, placeholder, aria-label, or aria-description value must be "
+        "one complete, exact entry from this catalog: "
+        f"{json.dumps(contract.allowed_fragments, ensure_ascii=False)}. "
+        "Do not write free-form sales copy and do not split or combine catalog "
+        "entries to construct a new claim. These class owners are mandatory and "
+        "must contain the exact listed values in order: "
+        f"{json.dumps(pinned, ensure_ascii=False)}."
     )
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
@@ -1327,7 +1543,7 @@ def build_hero_prompt(prospect):
     if template:
         return template.replace("[CITY]", city).replace("[STATE]", state)
 
-    # Trade-agnostic fallback. Fires when the prospect's trade key has
+    # Business-neutral fallback. Fires when the prospect's trade key has
     # no matching `## TRADE:` section in 07, or the Path 2 block is
     # missing / unparseable. Keeps the build resilient if 07 is edited
     # in a way that breaks the regex; the prospect still gets a hero.
@@ -1335,10 +1551,10 @@ def build_hero_prompt(prospect):
     return (
         f"Professional photorealistic hero image for a local {display_trade} business in "
         f"{city}, {state}. Wide cinematic crop, golden-hour natural light, depth "
-        f"of field. Subject: a clean service van in a residential driveway OR a "
-        f"close-up of professional tools in use. NO text, NO logos, NO faces "
-        f"clearly visible, no branded apparel from any specific company. "
-        f"Generic-but-professional. Avoid stock-photo cliches."
+        f"of field. Subject: an abstract editorial composition of natural light, "
+        f"texture, and architectural geometry suitable for a professional local "
+        f"business. NO trade-specific equipment, products, vehicles, residential "
+        f"property, text, logos, or clearly visible faces. Avoid stock-photo cliches."
     )
 
 
@@ -1360,6 +1576,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         industry_defaults = f.read()
     industry_defaults = industry_generation_guidance(industry_defaults)
     review_contract = expected_review_contract(prospect)
+    visible_copy_contract = expected_build_visible_copy(prospect, review_contract)
     system_prompt = filter_review_prompt_branches(system_prompt, review_contract.mode)
     system_prompt = filter_unverified_claim_examples(system_prompt, prospect)
     industry_defaults = filter_unverified_claim_examples(industry_defaults, prospect)
@@ -1487,6 +1704,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{services_response_scaffold}\n"
         "MANDATORY EXACT SUBSTITUTIONS: "
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
+        f"{visible_copy_contract_instruction(visible_copy_contract)}\n"
         f"{source_claim_boundary_instruction(prospect)}\n"
         f"{tenure_contract_instruction(tenure_contract)}\n"
         f"{location_contract_instruction(location_contract)}\n"
@@ -1540,6 +1758,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             expected_form_action=expected_build_form_action(prospect),
             expected_reviews=review_contract,
             expected_services=tuple(prospect["services"]),
+            expected_visible_copy=visible_copy_contract,
             required_class_counts=required_class_counts,
             required_child_class_sequences=required_child_class_sequences,
         )

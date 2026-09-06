@@ -41,6 +41,12 @@ mandatory `services` field; unrelated cleanup remains excluded.
    an unsupported offering.
 7. Bring checked-in runnable prospects across the new required-services
    boundary using only evidence already present in each fixture.
+8. Remove free-form factual authority from every visible body surface. The
+   model may arrange the admitted page components, but each visible text
+   fragment must be either exact prospect evidence or finite code-owned page
+   copy. Pin the hero, benefits, form-trust line, and footer tagline to exact
+   code-owned owners so an unsupported offering cannot move outside the
+   service cards and bypass admission.
 
 ### Files touched
 
@@ -85,6 +91,15 @@ review records sanitary lift-pump replacement, while Olney's verified business
 name directly supplies Heating and Air Conditioning. Their comments no longer
 claim that an empty list triggers defaults.
 
+The build path also supplies one visible-copy admission contract. It contains
+only exact prospect fields, exact source reviews and promises, exact service
+names/descriptions, and a finite set of code-owned interface strings. The
+validator checks every rendered or accessibility-exposed text fragment against
+that contract and separately pins the free-copy owner classes to their exact
+expected values. This is the shared authority boundary for hero, benefit,
+footer, and any other body surface; it does not attempt to recognize offerings
+by enumerating English predicates.
+
 ## Intentional
 
 - Keep the JSON field named `trade` for compatibility with existing files and
@@ -109,10 +124,12 @@ claim that an empty list triggers defaults.
 
 ## Verification
 
-Final working-tree evidence is based on commit
-`758626d2df23865449f41b5b185a19cd79fd847b` with only the files listed in
-this plan modified. The generated artifact is ignored output, not a source
-change.
+Current pre-commit working-tree evidence is based on published head
+`b3fd88875001720a0b72dd684b7a3c1193ed3640` with only the five files listed
+in this plan modified. The generated artifact and evidence logs are ignored
+outputs, not source changes. The earlier evidence recorded against
+`758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
+this block.
 
 Commands and results:
 
@@ -124,48 +141,40 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 372 passed, 34 skipped, 650 subtests passed
+# 376 passed, 34 skipped, 649 subtests passed in 35.04s
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
   --skip-image-gen --skip-email-draft --skip-deploy
+# 2026-09-06T17:43:58-05:00 through 2026-09-06T17:44:26-05:00
 # Exit 0; local:qwen3-30b-a3b:latest; no deploy, email, or image generation
 ```
 
-The final fixture invocation completed without a correction and wrote
+The final fixture invocation completed without a correction. Its complete log
+is `/tmp/pr50-visible-copy-fixture-final.log` with SHA-256
+`0cac0464e6df5f68859870b23316cf9f22ccaace7c2cf2089d3626b3fcd6a784`.
+The invocation wrote
 `outputs/builds/drees-plumbing-inc/index.html` at
-`2026-09-06 15:27:44.311697513 -0500`. The artifact is 72,058 bytes with
-SHA-256 `3551345cd8aa55d614a2674ae903fda8f29c29dc1fee992a06badc9aff321364`.
+`2026-09-06 17:44:26.777937232 -0500`. The artifact is 71,969 bytes with
+SHA-256 `36add0592973501916edbc769c5c9f25c8a38f0c616ed9a2276b5482af6b7c56`.
 Both the required placeholder pattern and the case-insensitive forbidden-claim
-pattern returned zero matches. Parsed artifact inspection confirmed all eight
-source-cased service names and their exact code-owned descriptions. A headless
-Chrome render wrote `/tmp/website-generator-drees-pr50-review.png` (327,272
-bytes); visual inspection confirmed the card names and descriptions render in
-the service grid.
-
-The production-shaped desktop request used the EOM form values, the local
-provider, and the real `execute_desktop_request()` path. It returned an admitted
-`effingham-office-maids-homepage.html` artifact of 68,625 bytes with SHA-256
-`d668836e3a727947057c36c71c6bf7274e93dd2c2d1cfea7668191b4e94bb4e7`.
-Its first response invented an unsupported radius; the existing single bounded
-correction removed it and returned an admitted artifact.
-Before the shared location-boundary correction, that same request was rejected
-because the city/state scanner parsed adjacent UI text such as `Serving` as part
-of the city. The focused regression now passes together with 14 negative/edge
-subtests, including unsupported `Springfield, IL`.
+pattern returned zero matches. Parsed artifact inspection confirmed the exact
+code-owned hero, benefit, and form-trust copy. A headless Chrome render of these
+exact artifact bytes wrote `/tmp/pr50-drees-render.png` with SHA-256
+`d6c277ec62ae76e37d40cf27b960990472fa5b90978748b8e2ea7327e9fab79c`;
+visual inspection confirmed coherent hero, service-grid, and page-function
+content.
 
 No live OpenRouter request was made; doing so would spend provider credit and
 is unnecessary to prove the provider-independent prompt and admission contract.
-After the implementation commit, `bash scripts/local_pr_review.sh` passed its
-diff-check and plan-presence gates against merge base
-`758626d2df23865449f41b5b185a19cd79fd847b`. The bundle is rerun after this
-verification note is committed so its clean-worktree evidence applies to the
-final revision.
+`git diff --check` also passed. After the implementation commit,
+`bash scripts/local_pr_review.sh` is rerun so its clean-worktree and final-head
+evidence apply to the published revision.
 
 ## Estimated diff size
 
-The tracked implementation/test diff is 594 changed lines before this plan is
-counted, exceeding the 400-line soft target. It remains one indivisible
+The current tracked diff is 858 changed lines across the five declared files,
+exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
 and admission must reject any service-list drift. Splitting any one boundary
