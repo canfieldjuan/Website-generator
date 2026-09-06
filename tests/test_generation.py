@@ -3,7 +3,6 @@ import json
 import os
 import subprocess
 import tempfile
-import threading
 import time
 import unittest
 from pathlib import Path
@@ -217,6 +216,12 @@ class FakeLocalResponse:
         self.json_calls = 0
         self.close_calls = 0
         self.closed = False
+        self.socket_timeouts = []
+        self.raw = SimpleNamespace(
+            connection=SimpleNamespace(
+                sock=SimpleNamespace(settimeout=self.socket_timeouts.append)
+            )
+        )
 
     def raise_for_status(self):
         if self.status_error:
@@ -909,40 +914,6 @@ class ProviderBoundaryTests(unittest.TestCase):
                         client=client,
                     )
 
-    def test_local_stream_bounds_and_cancels_producer_handoff(self):
-        class FloodingResponse(FakeLocalResponse):
-            def __init__(self):
-                super().__init__()
-                self.extra_frames_produced = 0
-                self.finished = threading.Event()
-
-            def iter_content(self, *, chunk_size):
-                try:
-                    yield b"not-json\n"
-                    for _ in range(1000):
-                        self.extra_frames_produced += 1
-                        yield json.dumps(
-                            {"message": {"content": "x"}, "done": False}
-                        ).encode("utf-8") + b"\n"
-                finally:
-                    self.finished.set()
-
-        client = FakeLocalClient()
-        client.chat_response = FloodingResponse()
-
-        with self.assertRaisesRegex(GenerationResponseError, "streaming JSON"):
-            generate_text(
-                config(),
-                system_prompt="system",
-                user_parts=(PromptPart("input"),),
-                temperature=0.4,
-                client=client,
-            )
-
-        self.assertTrue(client.chat_response.finished.wait(timeout=0.5))
-        self.assertLess(client.chat_response.extra_frames_produced, 1000)
-        self.assertEqual(client.chat_response.close_calls, 1)
-
     def test_local_stream_bounds_raw_frame_before_ndjson_assembly(self):
         terminal_payload = local_chat_payload()
         terminal = json.dumps(terminal_payload).encode("utf-8")
@@ -1083,16 +1054,11 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(client.calls[0][2]["timeout"], (3.0, 3.0))
 
     def test_local_stream_read_cannot_overrun_total_deadline(self):
-        gate = threading.Event()
-
         class BlockingResponse(FakeLocalResponse):
             def iter_content(self, *, chunk_size):
-                gate.wait()
-                yield json.dumps(local_chat_payload()).encode("utf-8") + b"\n"
-
-            def close(self):
-                super().close()
-                gate.set()
+                time.sleep(self.socket_timeouts[-1])
+                raise requests.ReadTimeout("blocked until socket deadline")
+                yield  # pragma: no cover
 
         selected = GenerationConfig(
             provider="local",
@@ -1123,17 +1089,57 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertLess(elapsed, 0.5)
         self.assertEqual(client.chat_response.close_calls, 1)
 
-    def test_local_stream_read_honors_no_progress_before_total_deadline(self):
-        gate = threading.Event()
+    def test_local_stream_socket_timeout_shrinks_after_progress(self):
+        class NearDeadlineResponse(FakeLocalResponse):
+            def __init__(self):
+                super().__init__()
+                self.timeouts_at_reads = []
 
+            def iter_content(self, *, chunk_size):
+                self.timeouts_at_reads.append(self.socket_timeouts[-1])
+                time.sleep(0.1)
+                yield json.dumps(
+                    {"message": {"content": "partial"}, "done": False}
+                ).encode("utf-8") + b"\n"
+                self.timeouts_at_reads.append(self.socket_timeouts[-1])
+                time.sleep(self.socket_timeouts[-1])
+                raise requests.ReadTimeout("stalled after progress")
+
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            timeout_seconds=0.2,
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+            local_no_progress_timeout_seconds=1,
+        )
+        client = FakeLocalClient()
+        client.chat_response = NearDeadlineResponse()
+
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "exceeded its configured request deadline",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=client,
+            )
+
+        first, second = client.chat_response.timeouts_at_reads
+        self.assertLess(second, first)
+        self.assertLess(second, 0.15)
+        self.assertEqual(client.chat_response.close_calls, 1)
+
+    def test_local_stream_read_honors_no_progress_before_total_deadline(self):
         class BlockingResponse(FakeLocalResponse):
             def iter_content(self, *, chunk_size):
-                gate.wait()
-                yield json.dumps(local_chat_payload()).encode("utf-8") + b"\n"
-
-            def close(self):
-                super().close()
-                gate.set()
+                time.sleep(self.socket_timeouts[-1])
+                raise requests.ReadTimeout("blocked until socket deadline")
+                yield  # pragma: no cover
 
         selected = GenerationConfig(
             provider="local",

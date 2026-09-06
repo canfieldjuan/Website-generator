@@ -6,10 +6,8 @@ import ipaddress
 import json
 import math
 import os
-import queue
 import re
 import tempfile
-import threading
 import time
 import unicodedata
 from dataclasses import dataclass, replace
@@ -846,9 +844,60 @@ def _local_no_progress_error(
     )
 
 
-def _iter_bounded_local_stream_lines(response: Any) -> Iterator[bytes]:
+def _set_local_stream_socket_timeout(response: Any, timeout_seconds: float) -> None:
+    raw = getattr(response, "raw", None)
+    connection = getattr(raw, "connection", None)
+    sock = getattr(connection, "sock", None)
+    settimeout = getattr(sock, "settimeout", None)
+    if not callable(settimeout):
+        raise GenerationProviderUnavailable(
+            "Ollama response does not expose a socket for deadline enforcement."
+        )
+    try:
+        settimeout(timeout_seconds)
+    except (OSError, ValueError) as exc:
+        raise GenerationProviderUnavailable(
+            "Ollama response socket rejected deadline enforcement."
+        ) from exc
+
+
+def _iter_bounded_local_stream_lines(
+    response: Any,
+    *,
+    deadline: float,
+    no_progress_timeout_seconds: float,
+) -> Iterator[bytes]:
     pending = bytearray()
-    for chunk in response.iter_content(chunk_size=LOCAL_STREAM_CHUNK_BYTES):
+    chunks = iter(response.iter_content(chunk_size=LOCAL_STREAM_CHUNK_BYTES))
+    last_progress = time.monotonic()
+    while True:
+        now = time.monotonic()
+        total_remaining = deadline - now
+        progress_remaining = no_progress_timeout_seconds - (now - last_progress)
+        if total_remaining <= 0:
+            raise GenerationProviderUnavailable(
+                "Local generation exceeded its configured request deadline."
+            )
+        if progress_remaining <= 0:
+            raise _local_no_progress_error(
+                "generation", no_progress_timeout_seconds
+            )
+        _set_local_stream_socket_timeout(
+            response,
+            min(total_remaining, progress_remaining),
+        )
+        try:
+            chunk = next(chunks)
+        except StopIteration:
+            break
+        except requests.RequestException as exc:
+            if time.monotonic() >= deadline:
+                raise GenerationProviderUnavailable(
+                    "Local generation exceeded its configured request deadline."
+                ) from exc
+            raise _local_no_progress_error(
+                "generation", no_progress_timeout_seconds
+            ) from exc
         if not chunk:
             continue
         if not isinstance(chunk, bytes):
@@ -866,12 +915,24 @@ def _iter_bounded_local_stream_lines(response: Any) -> Iterator[bytes]:
                 )
             raw_line = bytes(pending[:newline])
             del pending[: newline + 1]
+            if not raw_line:
+                yield raw_line
+                continue
+            if time.monotonic() >= deadline:
+                raise GenerationProviderUnavailable(
+                    "Local generation exceeded its configured request deadline."
+                )
+            last_progress = time.monotonic()
             yield raw_line
         if len(pending) > MAX_LOCAL_STREAM_FRAME_BYTES:
             raise GenerationResponseError(
                 "Local generation provider returned an oversized stream frame."
             )
     if pending:
+        if time.monotonic() >= deadline:
+            raise GenerationProviderUnavailable(
+                "Local generation exceeded its configured request deadline."
+            )
         yield bytes(pending)
 
 
@@ -885,71 +946,14 @@ def _read_local_chat_stream(
     content_bytes = 0
     terminal: dict[str, Any] | None = None
 
-    events: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
-    cancelled = threading.Event()
-
-    def emit(event: tuple[str, Any]) -> bool:
-        while not cancelled.is_set():
-            try:
-                events.put(event, timeout=0.05)
-                return True
-            except queue.Full:
-                continue
-        return False
-
-    def pump_stream() -> None:
-        try:
-            for raw_line in _iter_bounded_local_stream_lines(response):
-                if not emit(("line", raw_line)):
-                    return
-        except Exception as exc:
-            emit(("error", exc))
-        finally:
-            emit(("eof", None))
-
-    threading.Thread(
-        target=pump_stream,
-        name="ollama-response-stream",
-        daemon=True,
-    ).start()
-    last_progress = time.monotonic()
-
     try:
-        while True:
-            now = time.monotonic()
-            total_remaining = deadline - now
-            progress_remaining = no_progress_timeout_seconds - (
-                now - last_progress
-            )
-            if total_remaining <= 0:
-                raise GenerationProviderUnavailable(
-                    "Local generation exceeded its configured request deadline."
-                )
-            if progress_remaining <= 0:
-                raise _local_no_progress_error(
-                    "generation", no_progress_timeout_seconds
-                )
-            try:
-                event, value = events.get(
-                    timeout=min(total_remaining, progress_remaining)
-                )
-            except queue.Empty as exc:
-                if time.monotonic() >= deadline:
-                    raise GenerationProviderUnavailable(
-                        "Local generation exceeded its configured request deadline."
-                    ) from exc
-                raise _local_no_progress_error(
-                    "generation", no_progress_timeout_seconds
-                ) from exc
-
-            if event == "error":
-                raise value
-            if event == "eof":
-                break
-            raw_line = value
+        for raw_line in _iter_bounded_local_stream_lines(
+            response,
+            deadline=deadline,
+            no_progress_timeout_seconds=no_progress_timeout_seconds,
+        ):
             if not raw_line:
                 continue
-            last_progress = time.monotonic()
             try:
                 frame = json.loads(raw_line)
             except (TypeError, ValueError) as exc:
@@ -1000,7 +1004,6 @@ def _read_local_chat_stream(
                     "Ollama returned a stream frame without completion state."
                 )
     finally:
-        cancelled.set()
         response.close()
 
     if terminal is None:

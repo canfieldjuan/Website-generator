@@ -24,7 +24,7 @@ continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
 This four-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +933 / -29. The native stream decoder is a new
+the final diff is +925 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -62,14 +62,14 @@ default. The prompt probe stays a one-token non-streaming request because its
 entire response is itself the progress unit. Its socket read is bounded by the
 smaller of the remaining generation ceiling and the no-progress timeout.
 
-The full native `/api/chat` request uses `stream: true`. The adapter consumes
-newline-delimited JSON frames, joins only assistant content, retains the terminal
-`done_reason` and token counts, and rejects malformed, error, reasoning, tool,
-oversized, duplicate-terminal, or incomplete streams through the existing error
-types. The socket read timeout becomes an inactivity bound between progress
-frames rather than a limit on the whole generation. Elapsed wall time is checked
-against the existing generation timeout so continuous output cannot silently
-remove that ceiling.
+The full native `/api/chat` request uses `stream: true`. One synchronous reader
+consumes bounded raw chunks and assembles bounded newline-delimited JSON frames.
+Before every raw socket read, it sets the live loopback socket timeout to the
+smaller of the remaining inactivity window and remaining total deadline. The
+same thread then joins only assistant content, retains the terminal `done_reason`
+and token counts, and rejects malformed, error, reasoning, tool, oversized,
+duplicate-terminal, or incomplete streams through the existing error types.
+There is no producer thread, concurrent response close, or unbounded handoff.
 
 No runtime-residency check is used as authority. `/api/ps` can show a loaded
 model but cannot prove whether the queue is free, and checking it would retain a
@@ -130,7 +130,7 @@ files:
   at 1440x1200; the header, phone/CTA, hero, coverage prompt, and service cards
   were visible without raw placeholders or an obvious broken layout. The local
   screenshot is `/dev/shm/website-generator-pr46-fixture.png`.
-- Focused timeout and exact byte-boundary regressions passed: 5 tests, 0
+- Focused timeout and exact byte-boundary regressions passed: 6 tests, 0
   failures. An earlier complete generation-module run passed 150 tests. After
   the deadline-aware stream-reader correction, the final full repository suite
   passed: 298 tests, 34 skipped, 0 failures; log:
@@ -145,51 +145,34 @@ against merge base `826f0c8919615d4ed2849ebed8fb511bc6bc994b`: committed-diff wh
 and plan-presence checks both passed. GitHub CI and review remain to be
 reconciled against the exact published head.
 
-Review-correction evidence: the shared reader was changed to deliver streamed
-frames through a deadline-aware queue. Deterministic blocked-stream probes prove
-both directions: a 0.05-second total deadline interrupts a longer inactivity
-window, and a 0.05-second inactivity window interrupts a longer total deadline;
-each closes the response and returns in less than 0.5 seconds. The deadline-reader
-fixture ran after the observed Document Summarizer test exited, from
-`2026-09-06T10:38:04-05:00` through `2026-09-06T10:38:59-05:00`, with exit
-status 0. Its pre-run modification timestamp was `1788708188`; the post-run
-timestamp was `1788709138`, proving this invocation rewrote the artifact. The
-new artifact remained byte-identical to the rendered and scanned artifact above
-at 71,983 bytes and SHA-256
-`1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22`.
-Both required scans again returned status 1. Log:
-`/dev/shm/website-generator-pr46-fixture-final.log`.
+Review reconciliation replaced the intermediate queue/thread design after
+review proved concurrent `response.close()` could wait on a buffered read. That
+intermediate evidence is historical, not the final execution model.
 
-Bounded-handoff correction evidence: the producer-to-consumer queue now holds at
-most one unvalidated frame and observes cancellation after the consumer returns.
-A deterministic 1,000-frame flood behind an invalid first frame was cancelled
-before producing the whole response, the producer exited, and the response was
-closed. The queue-bounded final fixture ran from
-`2026-09-06T10:47:55-05:00` through `2026-09-06T10:48:48-05:00` with exit
-status 0. Its modification timestamp changed from `1788709138` to `1788709728`;
-the 71,983-byte artifact again had SHA-256
-`1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22`, so it
-is byte-identical to the rendered artifact. Both scans again returned status 1.
-Log: `/dev/shm/website-generator-pr46-fixture-final-bounded.log`.
+Final single-reader evidence:
 
-Raw-NDJSON correction evidence: the producer now consumes 64 KiB raw chunks and
-assembles newline-delimited frames under a bounded raw-frame ceiling before
-enqueueing them. Boundary tests admit an exactly-maximal frame, reject one byte
-over, and preserve the existing exactly-2-MiB decoded Unicode response even
-when JSON escaping expands its wire representation. The exact-reader fixture
-ran from `2026-09-06T10:58:09-05:00` through
-`2026-09-06T10:59:25-05:00` with exit status 0 and changed the artifact
-timestamp from `1788709728` to `1788710365`. The resulting 71,970-byte artifact
-has SHA-256
-`098c17edbe569afe7bbfc7286718e9d2b8e3b2b384592f4501818ba1a0a6a43a`;
-both required scans returned status 1. A 3,000-millisecond virtual-time Chrome
-render showed the header, hero, verified phone/CTA, coverage prompt, and service
-cards. Screenshot: `/dev/shm/website-generator-pr46-fixture-final-raw-delayed.png`;
-log: `/dev/shm/website-generator-pr46-fixture-final-raw.log`.
+- Deterministic probes prove total-before-inactivity, inactivity-before-total,
+  and a shorter second socket timeout after a frame arrives near the total
+  deadline. Exactly-maximal raw frames pass, max-plus-one unterminated frames
+  fail, and exactly-2-MiB decoded Unicode content remains admitted under
+  worst-case JSON escaping.
+- A real local HTTP server sent one frame after 0.25 seconds and then held the
+  Requests socket open beyond a 0.4-second total deadline. The adapter returned
+  `GenerationProviderUnavailable` with the total-deadline message after exactly
+  0.400 seconds; no fake `close()` behavior was involved.
+- The final fixture ran after confirming no Document Summarizer or other GPU
+  process was active, from `2026-09-06T11:11:32-05:00` through
+  `2026-09-06T11:12:25-05:00`, with exit status 0. Its modification timestamp
+  changed from `1788710365` to `1788711145`. The resulting 71,983-byte artifact
+  has SHA-256
+  `1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22`,
+  byte-identical to the rendered artifact recorded above. Both required scans
+  again returned status 1. Log:
+  `/dev/shm/website-generator-pr46-fixture-final-single-reader.log`.
 
 ## Estimated diff size
 
-Actual: four declared files, +933 / -29. The stream decoder and
+Actual: four declared files, +925 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.
