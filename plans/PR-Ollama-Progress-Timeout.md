@@ -24,7 +24,7 @@ continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
 This five-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +1568 / -29. The native stream decoder is a new
+the final diff is +1664 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -76,6 +76,9 @@ The reader assembles bounded newline-delimited JSON
 frames, joins only assistant content, retains the terminal `done_reason` and
 token counts, and rejects malformed, error, reasoning, tool, oversized,
 duplicate-terminal, or incomplete streams through the existing error types.
+It also bounds cumulative wire bytes from the request's declared output-token
+limit and omits empty content fragments from the assembly list, so a peer
+cannot trade zero decoded bytes for unbounded frame bookkeeping.
 The absolute inactivity deadline created before connect is passed unchanged
 into the body reader. Completing response headers therefore does not grant a
 second inactivity window; only a complete non-empty NDJSON frame renews that
@@ -232,7 +235,7 @@ Current shared-stream evidence, gathered from the final working tree based on
 
 ### Current revision-bound evidence
 
-Commit `de93388b64e715dc6d547efc51abf390c759f4e3` preserves one absolute
+Commit `3ca99d69ccc760221e00563bd8bd57ce8d3b3755` preserves one absolute
 inactivity deadline across connect, request write, response headers, and the
 first streamed frame. A deterministic regression spent 0.04 seconds receiving
 headers under a 0.05-second inactivity limit, then proved the body reader used
@@ -241,29 +244,31 @@ only the remaining budget: it raised the prompt-probe no-progress error before
 line one byte every 0.03 seconds; the old implementation took 0.244 seconds
 under a 0.05-second deadline, while the request-scoped watchdog now enforces
 both total-before-inactivity and inactivity-before-total in under 0.15 seconds.
-The focused provider-boundary class passed 43 tests. The full
+A cumulative-wire regression admits the exact request-derived maximum and
+rejects maximum-plus-one, including empty frames that add no decoded content.
+The focused provider-boundary class passed 44 tests. The full
 repository command `timeout 180s python -m unittest discover -s tests` passed
-303 tests in 18.846 seconds with 34 skipped; log:
-`/dev/shm/website-generator-pr46-full-tests-final-watchdog.log`.
+304 tests in 20.012 seconds with 34 skipped; log:
+`/dev/shm/website-generator-pr46-full-tests-final-wire-bound.log`.
 
 After `ollama ps` became empty, the required no-deploy fixture ran from
-`2026-09-06T12:28:22-05:00` through `2026-09-06T12:29:14-05:00` with exit
+`2026-09-06T12:41:59-05:00` through `2026-09-06T12:42:54-05:00` with exit
 status 0. The clean tree was at the commit above. The artifact modification
-timestamp changed from `1788714558` to `1788715754`, proving this invocation
+timestamp changed from `1788715754` to `1788716574`, proving this invocation
 rewrote it. The resulting 71,983-byte
 `outputs/builds/drees-plumbing-inc/index.html` retained SHA-256
 `1d1f424e35b274b9f1e1973fcd3b21784110bbc38f15885f4360cc48d507ea22` and
 is byte-identical to the fresh rendered spot-check at
 `/dev/shm/website-generator-pr46-fixture-final-read1.png`. Both required scans
 returned status 1 with zero matches. Logs:
-`/dev/shm/website-generator-pr46-fixture-final-body-watchdog.log`,
-`/dev/shm/website-generator-pr46-fixture-final-body-watchdog-envelope.txt`,
-`/dev/shm/website-generator-pr46-placeholder-scan-body-watchdog.txt`, and
-`/dev/shm/website-generator-pr46-forbidden-claim-scan-body-watchdog.txt`.
+`/dev/shm/website-generator-pr46-fixture-final-wire-bound.log`,
+`/dev/shm/website-generator-pr46-fixture-final-wire-bound-envelope.txt`,
+`/dev/shm/website-generator-pr46-placeholder-scan-wire-bound.txt`, and
+`/dev/shm/website-generator-pr46-forbidden-claim-scan-wire-bound.txt`.
 
 ## Estimated diff size
 
-Actual: five declared files, +1568 / -29. The stream decoder and
+Actual: five declared files, +1664 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.
