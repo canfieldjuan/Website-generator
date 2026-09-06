@@ -742,6 +742,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             complete_list_owned_scope,
         )
 
+        direct_text_scope = (
+            '<meta property="og:site_name" content="Acme"><div>'
+            "<h3>Free Estimates</h3>Members only.</div>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(shortened, direct_text_scope)
+        complete_direct_text_scope = {
+            "site": {"name": "Acme", "tagline": "Free Estimates Members only."}
+        }
+        self.assertEqual(
+            validate_site_analysis(complete_direct_text_scope, direct_text_scope),
+            complete_direct_text_scope,
+        )
+
     def test_contact_facts_allow_only_field_owned_presentation_labels(self):
         labeled = {
             "site": {
@@ -1215,6 +1229,19 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 {"site": {"name": "Premium Maintenance Club"}},
                 multiple_h1_source,
             )
+
+        uncorroborated_h1_source = (
+            "<h1>Free Estimates</h1><h1>Acme Plumbing</h1>"
+        )
+        for unverified_name in ("Free Estimates", "Acme Plumbing"):
+            with (
+                self.subTest(unverified_name=unverified_name),
+                self.assertRaisesRegex(SiteExtractionError, "identity"),
+            ):
+                validate_site_analysis(
+                    {"site": {"name": unverified_name}},
+                    uncorroborated_h1_source,
+                )
 
         page_title_source = "<title>Services | Acme Cleaning</title><h1>Services</h1>"
         self.assertEqual(
@@ -2255,6 +2282,14 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         }
         self.assertEqual(
             validate_site_analysis(complete, source, "https://acme.test/"),
+            complete,
+        )
+        svg_source = (
+            "<h1>Acme Cleaning</h1><svg>"
+            '<a xlink:href="/contact"><text>Contact Us</text></a></svg>'
+        )
+        self.assertEqual(
+            validate_site_analysis(complete, svg_source, "https://acme.test/"),
             complete,
         )
         empty = {

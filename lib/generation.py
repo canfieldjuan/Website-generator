@@ -2177,7 +2177,6 @@ _NEUTRAL_ACTION_LABELS = frozenset(
         "open menu",
         "previous",
         "read more",
-        "request service",
         "see more",
         "send",
         "show",

@@ -1289,6 +1289,34 @@ class BodyAssemblyTests(unittest.TestCase):
                     expected_action_urls=contract,
                 )
 
+        svg_contract = ActionUrlAdmissionContract(
+            allowed_urls=("/contact",),
+            allowed_labels=("Contact Us",),
+            allowed_pairs=(("Contact Us", "/contact"),),
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "non-neutral action label",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><svg><a xlink:href="/contact">'
+                    "<text>Book Appointment</text></a></svg></body>"
+                ),
+                expected_action_urls=svg_contract,
+            )
+        source_owned_svg = (
+            '<body><svg><a xlink:href="/contact">'
+            "<text>Contact Us</text></a></svg></body>"
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(source_owned_svg),
+                expected_action_urls=svg_contract,
+            ),
+            source_owned_svg,
+        )
+
         with self.assertRaisesRegex(
             GeneratedBodyError,
             "non-neutral action label",
@@ -1383,7 +1411,7 @@ class BodyAssemblyTests(unittest.TestCase):
         neutral_body = (
             '<body><a href="https://source.test/book">Contact Us</a>'
             '<a href="https://source.test/book">Book</a>'
-            '<a href="#contact">Request Service</a></body>'
+            '<a href="#contact">Learn More</a></body>'
         )
         self.assertEqual(
             validate_generated_body(
@@ -1459,7 +1487,7 @@ class BodyAssemblyTests(unittest.TestCase):
 
     def test_neutral_action_labels_are_bounded_complete_phrases(self):
         destination_only = ActionUrlAdmissionContract(allowed_urls=("/contact",))
-        for label in ("Contact Us", "Learn More", "Request Service"):
+        for label in ("Contact Us", "Learn More"):
             body = f'<body><a href="/contact">{label}</a></body>'
             with self.subTest(label=label):
                 self.assertEqual(
@@ -1486,6 +1514,7 @@ class BodyAssemblyTests(unittest.TestCase):
             "Map",
             "Meet Our Team",
             "Our Services",
+            "Request Service",
             "Service",
             "Service Area",
             "Services",
@@ -1589,10 +1618,17 @@ class BodyAssemblyTests(unittest.TestCase):
             {"formspree_endpoint": form_action},
             ReviewAdmissionContract(mode="omit"),
         )
-        self.assertEqual(contract.allowed_labels, build.BUILD_FORM_SUBMIT_LABELS)
+        self.assertEqual(
+            contract.allowed_labels,
+            (
+                *build.BUILD_FORM_SUBMIT_LABELS,
+                *(label for label, _destination in build.BUILD_CODE_OWNED_ACTION_PAIRS),
+            ),
+        )
         self.assertEqual(
             contract.allowed_pairs,
-            tuple((label, form_action) for label in build.BUILD_FORM_SUBMIT_LABELS),
+            tuple((label, form_action) for label in build.BUILD_FORM_SUBMIT_LABELS)
+            + build.BUILD_CODE_OWNED_ACTION_PAIRS,
         )
 
         for label in build.BUILD_FORM_SUBMIT_LABELS:
@@ -1608,6 +1644,21 @@ class BodyAssemblyTests(unittest.TestCase):
                     ),
                     body,
                 )
+
+        request_service = '<body><a href="#contact">Request Service</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(request_service), expected_action_urls=contract
+            ),
+            request_service,
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "source-owned action pair"):
+            validate_generated_body(
+                body_result(
+                    '<body><a href="#other">Request Service</a></body>'
+                ),
+                expected_action_urls=contract,
+            )
 
         with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
             validate_generated_body(
@@ -3402,7 +3453,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             build.expected_build_action_url_contract(
                 prospect, review_contract
             ).allowed_labels,
-            (*build.BUILD_FORM_SUBMIT_LABELS, "Read All Reviews on Google"),
+            (
+                *build.BUILD_FORM_SUBMIT_LABELS,
+                *(label for label, _destination in build.BUILD_CODE_OWNED_ACTION_PAIRS),
+                "Read All Reviews on Google",
+            ),
         )
         html = build.generate_build_html(
             prospect,
@@ -3555,7 +3610,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             build.expected_build_action_url_contract(
                 prospect, review_contract
             ).allowed_labels,
-            (*build.BUILD_FORM_SUBMIT_LABELS, "Read All on Google"),
+            (
+                *build.BUILD_FORM_SUBMIT_LABELS,
+                *(label for label, _destination in build.BUILD_CODE_OWNED_ACTION_PAIRS),
+                "Read All on Google",
+            ),
         )
         html = build.generate_build_html(
             prospect,

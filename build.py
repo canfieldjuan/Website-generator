@@ -96,6 +96,7 @@ BUILD_FORM_SUBMIT_LABELS = (
     "Get My Estimate",
     "Schedule My Service",
 )
+BUILD_CODE_OWNED_ACTION_PAIRS = (("Request Service", "#contact"),)
 BUILD_RESPONSE_BOUNDARY_REMINDER = (
     "RESPONSE BOUNDARY: Begin your response immediately with <body. "
     "End immediately with </body>. Emit no leading comment, preamble, markdown "
@@ -358,11 +359,15 @@ def expected_build_form_action(prospect):
 def expected_build_action_url_contract(prospect, review_contract):
     form_action = expected_build_form_action(prospect)
     allowed_urls = []
-    allowed_labels = list(BUILD_FORM_SUBMIT_LABELS)
+    allowed_labels = [
+        *BUILD_FORM_SUBMIT_LABELS,
+        *(label for label, _destination in BUILD_CODE_OWNED_ACTION_PAIRS),
+    ]
     allowed_pairs = [
         (label, form_action)
         for label in BUILD_FORM_SUBMIT_LABELS
     ]
+    allowed_pairs.extend(BUILD_CODE_OWNED_ACTION_PAIRS)
     if review_contract.reviews_url:
         allowed_urls.append(review_contract.reviews_url)
         review_label = (

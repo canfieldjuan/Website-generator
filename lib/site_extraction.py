@@ -327,7 +327,7 @@ _TEXT_ATTRIBUTES = {
     "value",
     "content",
 }
-_ACTION_URL_ATTRIBUTES = {"href"}
+_ACTION_URL_ATTRIBUTES = {"href", "xlink:href"}
 _IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
 _IMAGE_METADATA_URL_PROPERTIES = frozenset(
     {
@@ -1017,7 +1017,7 @@ def is_labelled_action_element(element: Any) -> bool:
     tag_name = str(getattr(element, "name", "") or "").casefold()
     roles = str(element.get("role") or "").casefold().split()
     if tag_name in {"a", "area"}:
-        return element.has_attr("href")
+        return any(element.has_attr(attribute) for attribute in _ACTION_URL_ATTRIBUTES)
     if tag_name == "button" or any(role in {"button", "link"} for role in roles):
         return True
     return tag_name == "input" and (
@@ -1412,18 +1412,29 @@ class SourceEvidence:
             nested_heading = element.find(_HEADING_TAG_PATTERN)
             return _assertion_heading_level(nested_heading)
 
+        def claim_component_text(element: Any) -> str:
+            if isinstance(element, Comment):
+                return ""
+            if isinstance(element, NavigableString):
+                return _normalize_text(str(element))
+            if isinstance(element, Tag):
+                return _normalize_text(element.get_text(" ", strip=True))
+            return ""
+
         def is_owned_claim_component(
             element: Any, owner_heading_level: int | None
         ) -> bool:
+            if not _group_heading_claims:
+                return isinstance(element, Tag) and element.name in paragraph_claim_tags
+            if isinstance(element, NavigableString):
+                return bool(claim_component_text(element))
             if not isinstance(element, Tag):
                 return False
-            if not _group_heading_claims:
-                return element.name in paragraph_claim_tags
             if element.name in _INDEPENDENT_RECORD_TAGS or element.find(
                 _INDEPENDENT_RECORD_TAGS
             ) is not None:
                 return False
-            if not _normalize_text(element.get_text(" ", strip=True)):
+            if not claim_component_text(element):
                 return False
             component_heading_level = claim_component_heading_level(element)
             if owner_heading_level is None:
@@ -1447,7 +1458,9 @@ class SourceEvidence:
                 parent = context.parent
                 if isinstance(parent, Tag) and parent.name in claim_scope_parent_tags:
                     siblings = [
-                        child for child in parent.children if isinstance(child, Tag)
+                        child
+                        for child in parent.children
+                        if isinstance(child, Tag) or claim_component_text(child)
                     ]
                     context_index = next(
                         (
@@ -1474,7 +1487,7 @@ class SourceEvidence:
                             ):
                                 next_sibling = siblings[last + 1]
                                 if _starts_presentation_field(
-                                    next_sibling.get_text(" ", strip=True)
+                                    claim_component_text(next_sibling)
                                 ):
                                     break
                                 last += 1
@@ -1488,7 +1501,7 @@ class SourceEvidence:
                                 ):
                                     first -= 1
                                     if _starts_presentation_field(
-                                        siblings[first].get_text(" ", strip=True)
+                                        claim_component_text(siblings[first])
                                     ):
                                         break
                             while (
@@ -1497,14 +1510,14 @@ class SourceEvidence:
                                     siblings[last + 1], None
                                 )
                                 and not _starts_presentation_field(
-                                    siblings[last + 1].get_text(" ", strip=True)
+                                    claim_component_text(siblings[last + 1])
                                 )
                             ):
                                 last += 1
                         if first != last:
                             owner_segment = _normalize_text(
                                 " ".join(
-                                    sibling.get_text(" ", strip=True)
+                                    claim_component_text(sibling)
                                     for sibling in siblings[first : last + 1]
                                 )
                             )
@@ -1575,17 +1588,23 @@ class SourceEvidence:
                 )
             if element_action_labels:
                 action_labels.update(element_action_labels)
-                raw_href = element.get("href")
-                if element.name in {"a", "area"} and isinstance(raw_href, str):
-                    raw_action_pairs.update(
-                        (label, raw_href) for label in element_action_labels
-                    )
+                if element.name in {"a", "area"}:
+                    for attribute in _ACTION_URL_ATTRIBUTES:
+                        raw_destination = element.get(attribute)
+                        if isinstance(raw_destination, str):
+                            raw_action_pairs.update(
+                                (label, raw_destination)
+                                for label in element_action_labels
+                            )
             for name, raw_value in element.attrs.items():
                 for value in _attribute_values(raw_value):
                     if name in _TEXT_ATTRIBUTES:
                         attribute_parts.append(value)
-                    is_action_url = name == "href" and element.name in {"a", "area"}
-                    if name in _ACTION_URL_ATTRIBUTES and is_action_url:
+                    is_action_url = (
+                        name in _ACTION_URL_ATTRIBUTES
+                        and element.name in {"a", "area"}
+                    )
+                    if is_action_url:
                         raw_action_urls.add(value)
                         contact = _contact_destination(value)
                         if contact is not None:
@@ -1692,7 +1711,11 @@ class SourceEvidence:
             h1_identity_parts = (
                 corroborated_h1_parts
                 if identity_seeds
-                else ([] if has_ambiguous_title_identity else candidate_h1_parts[:1])
+                else (
+                    []
+                    if has_ambiguous_title_identity
+                    else list(_select_supported_identity_parts(candidate_h1_parts))
+                )
             )
         else:
             h1_identity_parts = []
