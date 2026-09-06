@@ -24,7 +24,7 @@ continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
 This five-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +1407 / -29. The native stream decoder is a new
+the final diff is +1409 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -256,7 +256,7 @@ returned status 1 with zero matches. Logs:
 
 ## Estimated diff size
 
-Actual: five declared files, +1407 / -29. The stream decoder and
+Actual: five declared files, +1409 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.
