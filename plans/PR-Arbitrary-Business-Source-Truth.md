@@ -105,7 +105,9 @@ copy from this admission boundary. Direct attributes, rendered input values,
 and all four supported indirect ARIA reference attributes use the same resolver
 and exact catalog. Native control labels and the complete standard set of
 text-valued ARIA properties come from one shared enumerator used by claim and
-copy admission.
+copy admission, including the standards-defined table-header abbreviation.
+The no-radius service-area prompt uses the same exact `Service Area` casing as
+the code-owned catalog.
 
 ## Intentional
 
@@ -132,7 +134,7 @@ copy admission.
 ## Verification
 
 Current implementation evidence is based on commit
-`50c0570447a03f38b6544541541b9269ae22f729`. The generated artifact and evidence logs are
+`c6301804f1ef49c8b112a76aa5085bbf999be3b3`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -147,7 +149,7 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 389 passed, 34 skipped, 668 subtests passed in 53.30s
+# 392 passed, 34 skipped, 668 subtests passed in 39.44s
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
@@ -186,7 +188,7 @@ block after this evidence note is committed.
 
 ## Estimated diff size
 
-The current PR diff is 2,043 changed lines across the 11 declared source files
+The current PR diff is 2,119 changed lines across the 11 declared source files
 plus this plan, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
