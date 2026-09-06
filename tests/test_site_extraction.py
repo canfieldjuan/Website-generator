@@ -1127,8 +1127,11 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "217-555-0100 (fax)",
             "217-555-0100 (Regional Dept. Fax)",
             "217-555-0100 Regional Dept. Fax",
+            "217-555-0100 regional dept. fax",
+            "217-555-0100 fax regional dept. line",
             "Fax No. 217-555-0100",
             "Fax No. 217.555.0100",
+            "fax regional dept. line: 217-555-0100",
         ):
             with (
                 self.subTest(postfix_fax=postfix_fax),
@@ -1170,6 +1173,9 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for postfix_phone in (
             "217-555-0100 (Regional Dept. Phone)",
             "217-555-0100 Regional Dept. Phone",
+            "217-555-0100 regional dept. phone",
+            "217-555-0100 phone regional dept. line",
+            "phone regional dept. line: 217-555-0100",
         ):
             with self.subTest(postfix_phone=postfix_phone):
                 self.assertEqual(
@@ -1193,6 +1199,15 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 base_phone,
                 "<h1>Acme Cleaning</h1><p>"
                 "Fax service is down. Main office: 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>"
+                "Fax inquiries are handled by IT. "
+                "Main office: 217-555-0100</p>",
             ),
             base_phone,
         )
@@ -1975,6 +1990,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             document,
         )
 
+    def test_exact_logo_marker_identifies_source_logo(self):
+        source = (
+            "<h1>Acme Cleaning</h1>"
+            '<a href="/"><img class="logo" src="/logo.png" alt="Acme Cleaning"></a>'
+        )
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "brand": {"logo_url": "https://acme.test/logo.png"},
+        }
+        self.assertEqual(
+            validate_site_analysis(document, source, "https://acme.test/"),
+            document,
+        )
+
     def test_brand_logo_requires_logo_role_on_the_owning_image(self):
         source = (
             "<h1>Acme Cleaning</h1>"
@@ -2462,6 +2491,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "form_fields": ["Email"],
                 "source_url": "https://acme.test/contact",
                 "form_action": "https://acme.test/contact",
+                "form_method": "get",
             },
         )
 
@@ -2497,6 +2527,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "form_fields": ["Email"],
                 "source_url": "https://acme.test/contact",
                 "form_action": "https://acme.test/contact",
+                "form_method": "get",
             },
         )
 
@@ -2809,7 +2840,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             '<meta property="og:site_name" content="Acme">'
             '<nav><a href="#contact">Contact</a></nav>'
             '<section id="contact"><h2>Contact</h2>'
-            '<form action="/submit"><label>Email<input name="email"></label>'
+            '<form action="/submit" method="post">'
+            '<label>Email<input name="email"></label>'
             "</form></section>"
         )
         document = {
@@ -2832,6 +2864,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             admitted["single_page_sections"][0]["content"]["form_action"],
             "https://acme.test/submit",
         )
+        self.assertEqual(
+            admitted["single_page_sections"][0]["content"]["form_method"],
+            "post",
+        )
 
         contract = pipeline._redesign_action_url_contract(
             admitted,
@@ -2840,6 +2876,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             contract.allowed_form_urls,
             ("https://acme.test/submit",),
+        )
+        self.assertEqual(
+            contract.allowed_form_pairs,
+            (("https://acme.test/submit", "post"),),
         )
         self.assertNotIn("https://acme.test/submit", contract.allowed_urls)
 
@@ -3048,6 +3088,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "contact_form": {
                     "source_url": "/contact-source",
                     "form_action": "/contact-submit",
+                    "form_method": "post",
                 },
                 "images": [{"url": "/hero.jpg", "context": "hero"}],
                 "social": [{"platform": "Facebook", "url": "/facebook"}],
@@ -3065,12 +3106,14 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             source_content=(
                 '<a href="/source-link">Source</a>'
                 '<a href="/image-action">Schedule <img alt="Visit"></a>'
-                '<form action="/submit"><input type="submit" value="Submit">'
-                '<input type="image" alt="Pay Now" formaction="/pay"></form>'
+                '<form action="/submit" method="post">'
+                '<input type="submit" value="Submit">'
+                '<input type="image" alt="Pay Now" formaction="/pay" '
+                'formmethod="get"></form>'
                 '<span id="members-label">Members Only</span>'
                 '<a href="/aria-action" aria-labelledby="members-label image-label"></a>'
                 '<img id="image-label" alt="Book Appointment">'
-                '<form id="external-form" action="/external"></form>'
+                '<form id="external-form" action="/external" method="post"></form>'
                 '<button form="external-form">External</button>'
                 '<img src="/source-image.jpg">'
             ),
@@ -3100,6 +3143,15 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             contract.allowed_form_urls,
             ("/contact-submit", "/submit", "/pay", "/external"),
+        )
+        self.assertEqual(
+            contract.allowed_form_pairs,
+            (
+                ("/contact-submit", "post"),
+                ("/submit", "post"),
+                ("/pay", "get"),
+                ("/external", "post"),
+            ),
         )
         self.assertNotIn("/contact-submit", contract.allowed_urls)
         self.assertEqual(
@@ -3148,7 +3200,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             pipeline._redesign_contact_contract({}),
             source_content=(
                 '<base href="/">'
-                '<form action="submit"><button>Send</button></form>'
+                '<form action="submit" method="post"><button>Send</button></form>'
             ),
             source_url="https://acme.test/contact/index.html",
         )
@@ -3156,6 +3208,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             contract.allowed_form_urls,
             ("https://acme.test/submit",),
+        )
+        self.assertEqual(
+            contract.allowed_form_pairs,
+            (("https://acme.test/submit", "post"),),
         )
         self.assertIn(
             ("Send", "https://acme.test/submit"),
@@ -3914,17 +3970,19 @@ class EnrichmentGroundingTests(unittest.TestCase):
             source_url="https://acme.test/contact",
         )
         self.assertEqual(admitted["form_action"], "https://forms.acme.test/v1/submit")
+        self.assertEqual(admitted["form_method"], "get")
 
         submitter_admitted = validate_enrichment_result(
             {"form_fields": ["Email"]},
             page_type="contact",
             source_html=(
                 '<form><label>Email<input name="email"></label>'
-                '<button formaction="/send">Send</button></form>'
+                '<button formaction="/send" formmethod="post">Send</button></form>'
             ),
             source_url="https://acme.test/contact",
         )
         self.assertEqual(submitter_admitted["form_action"], "https://acme.test/send")
+        self.assertEqual(submitter_admitted["form_method"], "post")
 
         same_endpoint_admitted = validate_enrichment_result(
             {"form_fields": ["Email"]},
@@ -3940,6 +3998,7 @@ class EnrichmentGroundingTests(unittest.TestCase):
             same_endpoint_admitted["form_action"],
             "https://acme.test/send",
         )
+        self.assertEqual(same_endpoint_admitted["form_method"], "get")
 
         late_submitter_admitted = validate_enrichment_result(
             {"form_fields": ["Email"]},
@@ -3958,6 +4017,7 @@ class EnrichmentGroundingTests(unittest.TestCase):
             late_submitter_admitted["form_action"],
             "https://acme.test/late-send",
         )
+        self.assertEqual(late_submitter_admitted["form_method"], "get")
 
         with self.assertRaisesRegex(SiteExtractionError, "one source-owned form endpoint"):
             validate_enrichment_result(
@@ -3971,6 +4031,22 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 source_url="https://acme.test/contact",
             )
 
+        with self.assertRaisesRegex(
+            SiteExtractionError,
+            "one source-owned form endpoint and method",
+        ):
+            validate_enrichment_result(
+                {"form_fields": ["Email"]},
+                page_type="contact",
+                source_html=(
+                    '<form action="/send" method="post">'
+                    '<label>Email<input name="email"></label>'
+                    '<button>Send</button>'
+                    '<button formmethod="get">Search</button></form>'
+                ),
+                source_url="https://acme.test/contact",
+            )
+
         contract = pipeline._redesign_action_url_contract(
             {"site": {"name": "Acme"}, "contact_form": admitted},
             pipeline._redesign_contact_contract({}),
@@ -3978,6 +4054,10 @@ class EnrichmentGroundingTests(unittest.TestCase):
         self.assertEqual(
             contract.allowed_form_urls,
             ("https://forms.acme.test/v1/submit",),
+        )
+        self.assertEqual(
+            contract.allowed_form_pairs,
+            (("https://forms.acme.test/v1/submit", "get"),),
         )
         self.assertNotIn("https://forms.acme.test/v1/submit", contract.allowed_urls)
 

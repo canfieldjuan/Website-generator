@@ -1582,6 +1582,91 @@ class BodyAssemblyTests(unittest.TestCase):
             data_input,
         )
 
+    def test_standalone_buttons_do_not_acquire_form_submit_semantics(self):
+        for standalone in (
+            "<body><button>Open menu</button></body>",
+            '<body><button form="missing">Open menu</button></body>',
+            '<body><button type="button" formaction="/inert">Open menu</button></body>',
+        ):
+            with self.subTest(standalone=standalone):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(standalone),
+                        expected_action_urls=ActionUrlAdmissionContract(),
+                    ),
+                    standalone,
+                )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "must declare one admitted action endpoint",
+        ):
+            validate_generated_body(
+                body_result(
+                    "<body><form><button>Open menu</button></form></body>"
+                ),
+                expected_action_urls=ActionUrlAdmissionContract(),
+            )
+
+    def test_body_form_submission_preserves_endpoint_and_method_as_one_pair(self):
+        contract = ActionUrlAdmissionContract(
+            allowed_form_urls=("/submit", "/search"),
+            allowed_form_pairs=(("/submit", "post"), ("/search", "get")),
+            allowed_labels=("Search",),
+            allowed_pairs=(("Search", "/search"),),
+        )
+        for valid in (
+            '<body><form action="/submit" method="post"></form></body>',
+            '<body><form action="/search"><button>Search</button></form></body>',
+        ):
+            with self.subTest(valid=valid):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(valid),
+                        expected_action_urls=contract,
+                    ),
+                    valid,
+                )
+
+        for invalid in (
+            '<body><form action="/submit"></form></body>',
+            '<body><form action="/search" method="post"></form></body>',
+            (
+                '<body><form action="/submit" method="post">'
+                '<button formmethod="get">Search</button></form></body>'
+            ),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "source-owned submission pair",
+            ):
+                validate_generated_body(
+                    body_result(invalid),
+                    expected_action_urls=contract,
+                )
+
+        legacy_url_only = ActionUrlAdmissionContract(allowed_form_urls=("/submit",))
+        legacy_body = '<body><form action="/submit"></form></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(legacy_body),
+                expected_action_urls=legacy_url_only,
+            ),
+            legacy_body,
+        )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "exceeds its URL authority",
+        ):
+            validate_generated_body(
+                body_result(legacy_body),
+                expected_action_urls=ActionUrlAdmissionContract(
+                    allowed_form_urls=("/submit",),
+                    allowed_form_pairs=(("/other", "post"),),
+                ),
+            )
+
     def test_body_input_actions_validate_every_rendered_label_surface(self):
         contact_only = ActionUrlAdmissionContract(
             allowed_form_urls=("/contact",),

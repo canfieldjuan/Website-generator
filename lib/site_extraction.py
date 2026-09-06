@@ -399,6 +399,7 @@ _LOGO_CONTAINER_MARKERS = frozenset(
         "brand-logo",
         "custom-logo-link",
         "header-logo",
+        "logo",
         "logo-link",
         "navbar-brand",
         "site-brand",
@@ -481,7 +482,7 @@ _CONTACT_FIELD_ABBREVIATION_PATTERN = re.compile(
     r"(?<![A-Z0-9])(?P<token>[A-Z0-9]{1,4})$",
     re.I,
 )
-_CONTACT_FIELD_WORD_PATTERN = re.compile(r"[A-Z0-9]+", re.I)
+_CONTACT_FIELD_ABBREVIATIONS = frozenset({"dept", "no"})
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
 _CSS_DECLARATION_PATTERN = re.compile(
     r"(?:^|[;{])\s*([\w-]+)\s*:\s*([^;{}]+)",
@@ -594,12 +595,6 @@ def _normalize_text(value: str) -> str:
     decoded = html.unescape(value)
     normalized = unicodedata.normalize("NFKC", decoded)
     return " ".join(normalized.split()).casefold()
-
-
-def _normalize_contact_text(value: str) -> str:
-    decoded = html.unescape(value)
-    normalized = unicodedata.normalize("NFKC", decoded)
-    return " ".join(normalized.split())
 
 
 def _phone_variants(value: str) -> set[str]:
@@ -794,17 +789,12 @@ def _contact_field_gap_is_structural(
             abbreviation = _CONTACT_FIELD_ABBREVIATION_PATTERN.search(
                 gap[: boundary.start()]
             )
-            if abbreviation is not None:
-                token = abbreviation.group("token")
-                preceding_words = _CONTACT_FIELD_WORD_PATTERN.findall(
-                    gap[: boundary.start()]
-                )
-                if (
-                    token != token.casefold()
-                    or len(preceding_words) == 1
-                    or (not role_before_number and gap.lstrip().startswith("("))
-                ):
-                    continue
+            if abbreviation is not None and (
+                abbreviation.group("token").casefold()
+                in _CONTACT_FIELD_ABBREVIATIONS
+                or (not role_before_number and gap.lstrip().startswith("("))
+            ):
+                continue
         if marker in {"–", "—"}:
             outside = (
                 gap[boundary.end() :]
@@ -974,7 +964,7 @@ def _contact_destination(value: str) -> tuple[str, str] | None:
 
 def _contact_destination_context(context: Any, action: Any, destination: str) -> str:
     if context is None:
-        return _normalize_contact_text(destination)
+        return _normalize_text(destination)
     parts: list[str] = []
     for node in context.descendants:
         if node is action:
@@ -999,7 +989,7 @@ def _contact_destination_context(context: Any, action: Any, destination: str) ->
             parent = node.parent
             if parent is None or parent.name not in _IGNORED_TEXT_TAGS:
                 parts.append(str(node))
-    return _normalize_contact_text(" ".join(parts))
+    return _normalize_text(" ".join(parts))
 
 
 def same_site_origin(first_url: Any, second_url: Any) -> bool:
@@ -1402,14 +1392,37 @@ def action_element_declared_destinations(element: Tag) -> tuple[str, ...]:
     )
 
 
-def is_submit_action_element(element: Tag) -> bool:
+def is_submit_action_element(element: Tag, root: BeautifulSoup | Tag) -> bool:
     """Return whether one button or input submits its owning form."""
     tag_name = element.name.casefold()
     control_type = str(element.get("type") or "").casefold()
+    if _source_form_owner(element, root) is None:
+        return False
     return (
         tag_name == "button" and control_type not in {"button", "reset"}
-        or tag_name == "input" and control_type in {"submit", "image"}
-    )
+    ) or (tag_name == "input" and control_type in {"submit", "image"})
+
+
+def action_element_submission_method(
+    element: Tag,
+    root: BeautifulSoup | Tag,
+) -> str | None:
+    """Return the browser-effective method for one form submission path."""
+    if element.name.casefold() == "form":
+        raw_method = element.get("method")
+    elif is_submit_action_element(element, root):
+        owner = _source_form_owner(element, root)
+        if owner is None:
+            return None
+        raw_method = (
+            element.get("formmethod")
+            if element.has_attr("formmethod")
+            else owner.get("method")
+        )
+    else:
+        return None
+    method = str(raw_method or "").strip().casefold()
+    return method if method in {"dialog", "get", "post"} else "get"
 
 
 def action_element_destinations(
@@ -1420,7 +1433,9 @@ def action_element_destinations(
     tag_name = element.name.casefold()
     if tag_name in {"a", "area", "form"}:
         return action_element_declared_destinations(element)
-    if tag_name not in {"button", "input"} or not is_submit_action_element(element):
+    if tag_name not in {"button", "input"} or not is_submit_action_element(
+        element, root
+    ):
         return ()
 
     owner = _source_form_owner(element, root)
@@ -1483,32 +1498,34 @@ def _source_form_submitters(
     for candidate in root.find_all(["button", "input"]):
         if not is_source_action_available(candidate):
             continue
-        if is_submit_action_element(candidate) and _source_form_owner(candidate, root) is form:
+        if (
+            is_submit_action_element(candidate, root)
+            and _source_form_owner(candidate, root) is form
+        ):
             submitters.append(candidate)
     return tuple(submitters)
 
 
-def _source_form_action_url(
+def _source_form_submission(
     form: Tag,
     root: BeautifulSoup | Tag,
     *,
     resolution_base_url: str | None,
     source_url: str | None,
-) -> str | None:
+) -> tuple[str, str] | None:
     submitters = _source_form_submitters(form, root)
-    raw_actions: list[str | None]
+    action_elements: tuple[Tag, ...]
     if submitters:
-        raw_actions = [
-            next(iter(action_element_destinations(submitter, root)), source_url)
-            for submitter in submitters
-        ]
+        action_elements = submitters
     else:
-        raw_actions = [
-            next(iter(action_element_declared_destinations(form)), source_url)
-        ]
+        action_elements = (form,)
 
-    actions: list[str] = []
-    for raw_action in raw_actions:
+    submissions: list[tuple[str, str]] = []
+    for element in action_elements:
+        raw_action = next(
+            iter(action_element_destinations(element, root)),
+            source_url,
+        )
         action_candidate = urljoin(
             resolution_base_url or "",
             html.unescape(raw_action).strip() if isinstance(raw_action, str) else "",
@@ -1519,9 +1536,13 @@ def _source_form_action_url(
             or not parsed_action.hostname
         ):
             return None
-        if action_candidate not in actions:
-            actions.append(action_candidate)
-    return actions[0] if len(actions) == 1 else None
+        method = action_element_submission_method(element, root)
+        if method is None:
+            return None
+        submission = (action_candidate, method)
+        if submission not in submissions:
+            submissions.append(submission)
+    return submissions[0] if len(submissions) == 1 else None
 
 
 def _marked_identity_text_parts(
@@ -1821,6 +1842,7 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
 class SourceFormEvidence:
     control_labels: tuple[str, ...]
     action_url: str | None
+    action_method: str | None
 
 
 @dataclass(frozen=True)
@@ -1997,7 +2019,7 @@ class SourceEvidence:
                 not isinstance(element, Tag)
                 or _assertion_heading_level(element) is not None
             ):
-                return _normalize_contact_text(source_contact_text(element))
+                return _normalize_text(source_contact_text(element))
             boundary = first_claim_boundary(element)
             if boundary is not None:
                 parts: list[str] = []
@@ -2010,10 +2032,10 @@ class SourceEvidence:
                         descendant, Comment
                     ):
                         parts.append(str(descendant))
-                prefix = _normalize_contact_text(" ".join(parts))
+                prefix = _normalize_text(" ".join(parts))
                 if prefix:
                     return prefix
-            return _normalize_contact_text(source_contact_text(element))
+            return _normalize_text(source_contact_text(element))
 
         def belongs_to_preboundary_fragment(parent: Tag, element: Any) -> bool:
             boundary = first_claim_boundary(parent)
@@ -2155,7 +2177,7 @@ class SourceEvidence:
                                     for sibling in siblings[first : last + 1]
                                 )
                             )
-                            contact_owner_segment = _normalize_contact_text(
+                            contact_owner_segment = _normalize_text(
                                 " ".join(
                                     contact_claim_component_text(sibling)
                                     for sibling in siblings[first : last + 1]
@@ -2436,13 +2458,14 @@ class SourceEvidence:
                 if _source_form_owner(control, soup) is form
                 if (label := _source_form_control_label(control, soup))
             )
-            action_url = _source_form_action_url(
+            submission = _source_form_submission(
                 form,
                 soup,
                 resolution_base_url=resolution_base_url,
                 source_url=source_url,
             )
-            forms.append(SourceFormEvidence(labels, action_url))
+            action_url, action_method = submission or (None, None)
+            forms.append(SourceFormEvidence(labels, action_url, action_method))
 
         form_control_labels: list[str] = []
         for control in data_controls:
@@ -2465,7 +2488,7 @@ class SourceEvidence:
                 emails.add(match.group(0).casefold())
         phones: set[str] = set()
         for raw_segment in phone_values:
-            segment = _normalize_contact_text(raw_segment)
+            segment = _normalize_text(raw_segment)
             for match in _PHONE_PATTERN.finditer(segment):
                 if _contact_occurrence_is_negated(
                     segment, match.start(), len(match.group(0))
@@ -2816,7 +2839,11 @@ class SourceEvidence:
                 f"{path} is not grounded in a source image identified as a logo."
             )
 
-    def require_form_fields(self, path: str, values: Any) -> str | None:
+    def require_form_fields(
+        self,
+        path: str,
+        values: Any,
+    ) -> tuple[str, str] | None:
         normalized_values = tuple(
             _normalize_text(value) if isinstance(value, str) else ""
             for value in values or []
@@ -2839,14 +2866,18 @@ class SourceEvidence:
                 f"{path} are not complete labels of distinct controls owned by one "
                 "source form."
             )
-        actions = tuple(
-            dict.fromkeys(form.action_url for form in matches if form.action_url)
-        )
-        if len(actions) != 1:
-            raise SiteExtractionError(
-                f"{path} do not identify one source-owned form endpoint."
+        submissions = tuple(
+            dict.fromkeys(
+                (form.action_url, form.action_method)
+                for form in matches
+                if form.action_url and form.action_method
             )
-        return actions[0]
+        )
+        if len(submissions) != 1:
+            raise SiteExtractionError(
+                f"{path} do not identify one source-owned form endpoint and method."
+            )
+        return submissions[0]
 
 
 def _validation_error(validator: Draft202012Validator, document: Any) -> str | None:
@@ -3048,7 +3079,9 @@ def _require_site_facts(
         anchor = section.get("anchor")
         content = section.get("content") or {}
 
-        def require_content(section_evidence: SourceEvidence) -> str | None:
+        def require_content(
+            section_evidence: SourceEvidence,
+        ) -> tuple[str, str] | None:
             section_evidence.require_text(
                 f"{path}.content.headline", content.get("headline"), asserted=True
             )
@@ -3061,7 +3094,7 @@ def _require_site_facts(
                 content.get("items"),
                 allow_nonassertive_title=section.get("page_type") == "faq",
             )
-            form_action = section_evidence.require_form_fields(
+            form_submission = section_evidence.require_form_fields(
                 f"{path}.content.form_fields", content.get("form_fields")
             )
             _require_contact(
@@ -3069,14 +3102,14 @@ def _require_site_facts(
                 f"{path}.content.contact_info",
                 content.get("contact_info"),
             )
-            return form_action
+            return form_submission
 
         if anchor is not None:
             evidence.require_action(path, section["nav_label"], anchor)
             section_evidence = evidence.require_section_target(f"{path}.anchor", anchor)
-            form_action = require_content(section_evidence)
-            if form_action is not None:
-                content["form_action"] = form_action
+            form_submission = require_content(section_evidence)
+            if form_submission is not None:
+                content["form_action"], content["form_method"] = form_submission
             continue
 
         evidence.require_action_label(f"{path}.nav_label", section["nav_label"])
@@ -3089,7 +3122,7 @@ def _require_site_facts(
                 section_evidence.require_heading(
                     f"{path}.nav_label", section["nav_label"]
                 )
-                form_action = require_content(section_evidence)
+                form_submission = require_content(section_evidence)
             except SiteExtractionError:
                 continue
             break
@@ -3097,8 +3130,8 @@ def _require_site_facts(
             raise SiteExtractionError(
                 f"{path} navigation and content are not grounded in one source section."
             )
-        if form_action is not None:
-            content["form_action"] = form_action
+        if form_submission is not None:
+            content["form_action"], content["form_method"] = form_submission
 
     conversion = document.get("conversion_profile") or {}
     evidence.require_phone("conversion_profile.phone", conversion.get("phone"))
@@ -3183,7 +3216,7 @@ def validate_enrichment_result(
     evidence = SourceEvidence.from_html(source_html, source_url)
 
     if page_type == "contact":
-        form_action = evidence.require_form_fields(
+        form_submission = evidence.require_form_fields(
             "form_fields", admitted.get("form_fields")
         )
         _require_contact(evidence, "contact_info", admitted.get("contact_info"))
@@ -3194,8 +3227,8 @@ def validate_enrichment_result(
         )
         if not (admitted.get("form_fields") or has_contact_info):
             raise SiteExtractionError("Contact enrichment contains no source content.")
-        if form_action is not None:
-            admitted["form_action"] = form_action
+        if form_submission is not None:
+            admitted["form_action"], admitted["form_method"] = form_submission
         return admitted
 
     expected_type = {

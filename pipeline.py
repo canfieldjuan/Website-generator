@@ -18,6 +18,7 @@ from lib.email import send_pitch_email
 from lib.site_extraction import (
     action_element_destinations,
     action_element_labels,
+    action_element_submission_method,
     css_image_urls,
     SiteExtractionError,
     same_site_origin,
@@ -218,6 +219,7 @@ def _redesign_action_url_contract(
 ):
     allowed_urls = []
     allowed_form_urls = []
+    allowed_form_pairs = []
     allowed_labels = []
     allowed_pairs = []
 
@@ -246,7 +248,18 @@ def _redesign_action_url_contract(
 
     def append_form_action(value):
         if isinstance(value, dict):
-            _append_source_value(allowed_form_urls, value.get("form_action"))
+            destination = value.get("form_action")
+            method = value.get("form_method")
+            _append_source_value(allowed_form_urls, destination)
+            if (
+                isinstance(destination, str)
+                and destination.strip()
+                and isinstance(method, str)
+                and method.strip()
+            ):
+                pair = (destination.strip(), method.strip().casefold())
+                if pair not in allowed_form_pairs:
+                    allowed_form_pairs.append(pair)
 
     def append_item_urls(items):
         if isinstance(items, list):
@@ -308,6 +321,11 @@ def _redesign_action_url_contract(
             if element.name == "form":
                 for destination in destinations:
                     _append_source_value(allowed_form_urls, destination)
+                    method = action_element_submission_method(element, source_root)
+                    if method is not None:
+                        pair = (destination, method)
+                        if pair not in allowed_form_pairs:
+                            allowed_form_pairs.append(pair)
                 continue
             if element.name == "input" and str(
                 element.get("type") or ""
@@ -319,10 +337,18 @@ def _redesign_action_url_contract(
                 for destination in destinations:
                     if element.name in {"button", "input"}:
                         _append_source_value(allowed_form_urls, destination)
+                        method = action_element_submission_method(
+                            element, source_root
+                        )
+                        if method is not None:
+                            pair = (destination, method)
+                            if pair not in allowed_form_pairs:
+                                allowed_form_pairs.append(pair)
                     _append_source_pair(allowed_pairs, label, destination)
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
         allowed_form_urls=tuple(allowed_form_urls),
+        allowed_form_pairs=tuple(allowed_form_pairs),
         phones=contact_contract.phones,
         emails=contact_contract.emails,
         allowed_labels=tuple(allowed_labels),

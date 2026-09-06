@@ -25,6 +25,7 @@ from lib.site_extraction import (
     action_element_declared_destinations,
     action_element_destinations,
     action_element_labels,
+    action_element_submission_method,
     is_render_suppressed_element,
     is_labelled_action_element,
     is_submit_action_element,
@@ -385,6 +386,7 @@ class SourceContactAdmissionContract:
 class ActionUrlAdmissionContract:
     allowed_urls: tuple[str, ...] = ()
     allowed_form_urls: tuple[str, ...] = ()
+    allowed_form_pairs: tuple[tuple[str, str], ...] = ()
     phones: tuple[str, ...] = ()
     emails: tuple[str, ...] = ()
     allowed_labels: tuple[str, ...] = ()
@@ -419,6 +421,8 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     allowed_form_urls = _contract_text_values(
         contract.allowed_form_urls, "Form action URL"
     )
+    allowed_form_pairs = _contract_form_pairs(contract.allowed_form_pairs)
+    _validate_form_pair_membership(allowed_form_pairs, allowed_form_urls)
     phones = _contract_text_values(contract.phones, "Action phone")
     emails = _contract_text_values(contract.emails, "Action email")
     allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
@@ -435,6 +439,10 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
         "or submit override must copy one exact source form endpoint from "
         f"{json.dumps(allowed_form_urls, ensure_ascii=False)}. Do not invent, shorten, or "
         "substitute a booking, social, navigation, or form destination. "
+        "When source form submission pairs are supplied, every form and submit "
+        "override must preserve one exact [endpoint, browser-effective method] pair "
+        f"from {json.dumps(allowed_form_pairs, ensure_ascii=False)}; an omitted or "
+        "invalid HTML method means GET. "
         "Every generated action label must exactly copy one source label from "
         f"{json.dumps(allowed_labels, ensure_ascii=False)}, display an admitted "
         "phone/email value, or copy one exact capability-neutral navigational/contact "
@@ -2105,6 +2113,42 @@ def _contract_action_pairs(values: object) -> tuple[tuple[str, str], ...]:
     return tuple(normalized)
 
 
+def _contract_form_pairs(values: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(values, tuple):
+        raise GeneratedBodyError("Form submission pair contract must be a tuple.")
+    normalized: list[tuple[str, str]] = []
+    for value in values:
+        if not isinstance(value, tuple) or len(value) != 2:
+            raise GeneratedBodyError(
+                "Form submission pair contract contains an invalid pair."
+            )
+        destination, method = value
+        if (
+            not isinstance(destination, str)
+            or not destination.strip()
+            or not isinstance(method, str)
+            or method.strip().casefold() not in {"dialog", "get", "post"}
+        ):
+            raise GeneratedBodyError(
+                "Form submission pair contract contains an invalid pair."
+            )
+        pair = (destination.strip(), method.strip().casefold())
+        if pair not in normalized:
+            normalized.append(pair)
+    return tuple(normalized)
+
+
+def _validate_form_pair_membership(
+    pairs: tuple[tuple[str, str], ...],
+    allowed_form_urls: tuple[str, ...],
+) -> None:
+    url_authority = set(allowed_form_urls)
+    if any(destination not in url_authority for destination, _method in pairs):
+        raise GeneratedBodyError(
+            "Form submission pair contract exceeds its URL authority."
+        )
+
+
 def _validate_action_pair_membership(
     pairs: tuple[tuple[str, str], ...],
     allowed_labels: tuple[str, ...],
@@ -2181,6 +2225,8 @@ def _validate_action_urls(
     allowed_form_url_values = _contract_text_values(
         contract.allowed_form_urls, "Form action URL"
     )
+    contract_form_pairs = _contract_form_pairs(contract.allowed_form_pairs)
+    _validate_form_pair_membership(contract_form_pairs, allowed_form_url_values)
     allowed_label_values = _contract_text_values(
         contract.allowed_labels, "Action label"
     )
@@ -2191,6 +2237,7 @@ def _validate_action_urls(
     )
     allowed_urls = set(allowed_url_values)
     allowed_form_urls = set(allowed_form_url_values)
+    allowed_form_pairs = set(contract_form_pairs)
     allowed_labels = {
         _normalize_claim_match_text(label)
         for label in allowed_label_values
@@ -2214,6 +2261,7 @@ def _validate_action_urls(
 
     link_action_values: list[str] = []
     form_action_values: list[str] = []
+    form_submission_pairs: list[tuple[str, str]] = []
     action_entries: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
@@ -2225,19 +2273,29 @@ def _validate_action_urls(
             and not declared_destinations
         ):
             continue
+        element_values = action_element_destinations(element, body_root)
         if tag_name in {"a", "area"}:
             link_action_values.extend(declared_destinations)
-        else:
+        elif tag_name == "form":
             form_action_values.extend(declared_destinations)
-        element_values = action_element_destinations(element, body_root)
+        elif is_submit_action_element(element, body_root):
+            form_action_values.extend(element_values)
         if tag_name == "form" and not declared_destinations:
             raise GeneratedBodyError(
                 "Generated body form must declare one admitted action endpoint."
             )
-        if is_submit_action_element(element) and not element_values:
+        if is_submit_action_element(element, body_root) and not element_values:
             raise GeneratedBodyError(
                 "Generated body submit control has no admitted effective form action."
             )
+        if tag_name == "form" or is_submit_action_element(element, body_root):
+            submission_method = action_element_submission_method(element, body_root)
+            if submission_method is None:
+                raise GeneratedBodyError(
+                    "Generated body contains a form action without submission semantics."
+                )
+            for destination in element_values:
+                form_submission_pairs.append((destination, submission_method))
         if is_labelled_action:
             action_entries.append(
                 (action_element_labels(element, body_root), element_values)
@@ -2285,6 +2343,14 @@ def _validate_action_urls(
             allowed_form_urls,
             allow_contact_destinations=False,
         )
+    if allowed_form_pairs:
+        for raw_destination, method in form_submission_pairs:
+            pair = (raw_destination.strip(), method)
+            if pair not in allowed_form_pairs:
+                raise GeneratedBodyError(
+                    "Generated body form endpoint and method do not preserve one "
+                    "source-owned submission pair."
+                )
 
     for action_labels, destinations in action_entries:
         stripped_destinations = tuple(value.strip() for value in destinations)
