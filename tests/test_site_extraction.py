@@ -750,6 +750,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "<main><h3>Free Estimates</h3><p>Members only.</p></main>",
             "<main>Free Estimates<p>Members only.</p></main>",
             "<main>Free Estimates<div>Members only.<h2>Details</h2></div></main>",
+            "<main>Free Estimates<div><p>Members only.</p><h2>Details</h2></div></main>",
+            "<main>Free Estimates<div><div>Members only.</div><h2>Details</h2></div></main>",
         ):
             shell_scope = '<meta property="og:site_name" content="Acme">' + shell
             with (

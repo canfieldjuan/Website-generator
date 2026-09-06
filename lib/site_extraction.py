@@ -1752,6 +1752,7 @@ class SourceEvidence:
             "td",
             "th",
         }
+        transparent_claim_wrapper_tags = {"div", "main"}
         paragraph_claim_tags = {"p", "small"}
         assertion_context_ids = set(context_parts)
 
@@ -1770,7 +1771,7 @@ class SourceEvidence:
             direct_level = _assertion_heading_level(element)
             if direct_level is not None or not isinstance(element, Tag):
                 return direct_level
-            nested_heading = element.find(_HEADING_TAG_PATTERN)
+            nested_heading = element.find(_ALL_HEADING_TAG_PATTERN)
             if nested_heading is not None and claim_component_prefix(element, nested_heading):
                 return None
             return _assertion_heading_level(nested_heading)
@@ -1798,12 +1799,27 @@ class SourceEvidence:
         def claim_component_text(element: Any) -> str:
             if not isinstance(element, Tag) or _assertion_heading_level(element) is not None:
                 return raw_claim_component_text(element)
-            nested_heading = element.find(_HEADING_TAG_PATTERN)
+            nested_heading = element.find(_ALL_HEADING_TAG_PATTERN)
             if nested_heading is not None:
                 prefix = claim_component_prefix(element, nested_heading)
                 if prefix:
                     return prefix
             return raw_claim_component_text(element)
+
+        def belongs_to_preheading_fragment(parent: Tag, element: Any) -> bool:
+            heading = parent.find(_ALL_HEADING_TAG_PATTERN)
+            if heading is None or not claim_component_prefix(parent, heading):
+                return False
+            if isinstance(element, Tag) and any(
+                descendant is heading for descendant in element.descendants
+            ):
+                return False
+            for descendant in parent.descendants:
+                if descendant is element:
+                    return True
+                if descendant is heading:
+                    return False
+            return False
 
         def is_owned_claim_component(
             element: Any, owner_heading_level: int | None
@@ -1849,6 +1865,13 @@ class SourceEvidence:
                         if isinstance(child, Tag) or claim_component_text(child)
                     ]
                     if parent.name in claim_scope_parent_tags and len(siblings) > 1:
+                        if (
+                            parent.name in transparent_claim_wrapper_tags
+                            and belongs_to_preheading_fragment(parent, scope_context)
+                        ):
+                            scope_context = parent
+                            parent = parent.parent
+                            continue
                         break
                     if (
                         parent.name in _INDEPENDENT_RECORD_TAGS
