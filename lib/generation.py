@@ -20,6 +20,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from openai import DefaultHttpxClient, OpenAI
+from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 
@@ -748,6 +749,7 @@ def create_local_generation_client(config: GenerationConfig) -> requests.Session
     session.trust_env = False
     session.headers.update(
         {
+            "Accept-Encoding": "identity",
             "Authorization": f"Bearer {config.api_key}",
             "Content-Type": "application/json",
         }
@@ -868,7 +870,12 @@ def _iter_bounded_local_stream_lines(
     no_progress_timeout_seconds: float,
 ) -> Iterator[bytes]:
     pending = bytearray()
-    chunks = iter(response.iter_content(chunk_size=LOCAL_STREAM_CHUNK_BYTES))
+    raw = getattr(response, "raw", None)
+    read_once = getattr(raw, "read1", None)
+    if not callable(read_once):
+        raise GenerationProviderUnavailable(
+            "Ollama response does not expose bounded streaming reads."
+        )
     last_progress = time.monotonic()
     while True:
         now = time.monotonic()
@@ -887,10 +894,13 @@ def _iter_bounded_local_stream_lines(
             min(total_remaining, progress_remaining),
         )
         try:
-            chunk = next(chunks)
-        except StopIteration:
-            break
-        except requests.RequestException as exc:
+            # urllib3.read1 performs at most one underlying receive when
+            # content decoding is disabled. Re-entering this loop after every
+            # receive makes both elapsed deadlines independent of byte flow;
+            # a peer trickling bytes faster than the socket timeout cannot
+            # hold a larger buffered read open indefinitely.
+            chunk = read_once(LOCAL_STREAM_CHUNK_BYTES, decode_content=False)
+        except (OSError, requests.RequestException, Urllib3HTTPError) as exc:
             if time.monotonic() >= deadline:
                 raise GenerationProviderUnavailable(
                     "Local generation exceeded its configured request deadline."
@@ -898,8 +908,12 @@ def _iter_bounded_local_stream_lines(
             raise _local_no_progress_error(
                 "generation", no_progress_timeout_seconds
             ) from exc
+        if chunk == b"":
+            break
         if not chunk:
-            continue
+            raise GenerationResponseError(
+                "Local generation provider returned invalid empty stream data."
+            )
         if not isinstance(chunk, bytes):
             raise GenerationResponseError(
                 "Local generation provider returned non-byte stream data."

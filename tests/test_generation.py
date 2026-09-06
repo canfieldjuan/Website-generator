@@ -217,7 +217,11 @@ class FakeLocalResponse:
         self.close_calls = 0
         self.closed = False
         self.socket_timeouts = []
+        self._stream_source_chunks = None
+        self._stream_chunk_index = 0
+        self._stream_chunk_offset = 0
         self.raw = SimpleNamespace(
+            read1=self._read1,
             connection=SimpleNamespace(
                 sock=SimpleNamespace(settimeout=self.socket_timeouts.append)
             )
@@ -244,24 +248,44 @@ class FakeLocalResponse:
             return
         yield json.dumps(self.payload).encode("utf-8")
 
-    def iter_content(self, *, chunk_size):
+    def _read1(self, chunk_size, decode_content=False):
         if self.stream_error:
             raise self.stream_error
-        if self.stream_chunks is not None:
-            source_chunks = self.stream_chunks
-        elif self.stream_lines is not None:
-            source_chunks = tuple(line + b"\n" for line in self.stream_lines)
-        elif self.json_error:
-            source_chunks = (b"not-json\n",)
+        if self._stream_source_chunks is None:
+            if self.stream_chunks is not None:
+                self._stream_source_chunks = tuple(self.stream_chunks)
+            elif self.stream_lines is not None:
+                self._stream_source_chunks = tuple(
+                    line + b"\n" for line in self.stream_lines
+                )
+            elif self.json_error:
+                self._stream_source_chunks = (b"not-json\n",)
+            else:
+                self._stream_source_chunks = (
+                    json.dumps(self.payload).encode("utf-8") + b"\n",
+                )
+        if self._stream_chunk_index >= len(self._stream_source_chunks):
+            return b""
+        source_chunk = self._stream_source_chunks[self._stream_chunk_index]
+        start = self._stream_chunk_offset
+        end = min(start + chunk_size, len(source_chunk))
+        chunk = source_chunk[start:end]
+        if end == len(source_chunk):
+            self._stream_chunk_index += 1
+            self._stream_chunk_offset = 0
         else:
-            source_chunks = (json.dumps(self.payload).encode("utf-8") + b"\n",)
-        for source_chunk in source_chunks:
-            for offset in range(0, len(source_chunk), chunk_size):
-                yield source_chunk[offset : offset + chunk_size]
+            self._stream_chunk_offset = end
+        return chunk
 
     def close(self):
         self.close_calls += 1
         self.closed = True
+        # FakeLocalClient intentionally reuses configured responses across
+        # admission-retry calls. Match the old generator-based fixture by
+        # rewinding its in-memory body after each simulated response closes.
+        self._stream_source_chunks = None
+        self._stream_chunk_index = 0
+        self._stream_chunk_offset = 0
 
 
 class FakeLocalClient:
@@ -623,6 +647,7 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertFalse(session.trust_env)
         session.headers.update.assert_called_once_with(
             {
+                "Accept-Encoding": "identity",
                 "Authorization": "Bearer secret-key",
                 "Content-Type": "application/json",
             }
@@ -1055,10 +1080,9 @@ class ProviderBoundaryTests(unittest.TestCase):
 
     def test_local_stream_read_cannot_overrun_total_deadline(self):
         class BlockingResponse(FakeLocalResponse):
-            def iter_content(self, *, chunk_size):
+            def _read1(self, chunk_size, decode_content=False):
                 time.sleep(self.socket_timeouts[-1])
                 raise requests.ReadTimeout("blocked until socket deadline")
-                yield  # pragma: no cover
 
         selected = GenerationConfig(
             provider="local",
@@ -1095,13 +1119,13 @@ class ProviderBoundaryTests(unittest.TestCase):
                 super().__init__()
                 self.timeouts_at_reads = []
 
-            def iter_content(self, *, chunk_size):
+            def _read1(self, chunk_size, decode_content=False):
                 self.timeouts_at_reads.append(self.socket_timeouts[-1])
-                time.sleep(0.1)
-                yield json.dumps(
-                    {"message": {"content": "partial"}, "done": False}
-                ).encode("utf-8") + b"\n"
-                self.timeouts_at_reads.append(self.socket_timeouts[-1])
+                if len(self.timeouts_at_reads) == 1:
+                    time.sleep(0.1)
+                    return json.dumps(
+                        {"message": {"content": "partial"}, "done": False}
+                    ).encode("utf-8") + b"\n"
                 time.sleep(self.socket_timeouts[-1])
                 raise requests.ReadTimeout("stalled after progress")
 
@@ -1134,12 +1158,52 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertLess(second, 0.15)
         self.assertEqual(client.chat_response.close_calls, 1)
 
+    def test_local_stream_trickle_cannot_overrun_total_deadline(self):
+        class TrickleResponse(FakeLocalResponse):
+            def __init__(self):
+                super().__init__()
+                self.read_calls = 0
+
+            def _read1(self, chunk_size, decode_content=False):
+                self.read_calls += 1
+                time.sleep(0.01)
+                return b"x"
+
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            timeout_seconds=0.05,
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+            local_no_progress_timeout_seconds=1,
+        )
+        client = FakeLocalClient()
+        client.chat_response = TrickleResponse()
+
+        started = time.monotonic()
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "exceeded its configured request deadline",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=client,
+            )
+        elapsed = time.monotonic() - started
+
+        self.assertGreater(client.chat_response.read_calls, 1)
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(client.chat_response.close_calls, 1)
+
     def test_local_stream_read_honors_no_progress_before_total_deadline(self):
         class BlockingResponse(FakeLocalResponse):
-            def iter_content(self, *, chunk_size):
+            def _read1(self, chunk_size, decode_content=False):
                 time.sleep(self.socket_timeouts[-1])
                 raise requests.ReadTimeout("blocked until socket deadline")
-                yield  # pragma: no cover
 
         selected = GenerationConfig(
             provider="local",
