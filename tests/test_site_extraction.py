@@ -2872,6 +2872,19 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 source_url="https://acme.test/faq",
             )
 
+        peer_records = (
+            "<main><h1>FAQ</h1>"
+            "<h2>Do you offer financing?</h2><p>No.</p>"
+            "<h2>Do you offer weekends?</h2><p>Yes.</p></main>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_enrichment_result(
+                document,
+                page_type="faq",
+                source_html=peer_records,
+                source_url="https://acme.test/faq",
+            )
+
     def test_composite_item_fields_must_share_one_source_container(self):
         document = {
             "type": "misc",

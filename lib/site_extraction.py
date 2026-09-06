@@ -1314,11 +1314,14 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
         append("".join(parts))
 
     for main in soup.find_all("main", limit=MAX_ITEMS):
-        h1_candidates = main.find_all("h1", limit=2)
-        if len(h1_candidates) == 1:
+        heading_candidates = main.find_all(_ALL_HEADING_TAG_PATTERN, limit=2)
+        if (
+            len(heading_candidates) == 1
+            and heading_candidates[0].name.casefold() == "h1"
+        ):
             append(
                 _heading_owned_fragment(
-                    h1_candidates[0],
+                    heading_candidates[0],
                     stop_at_record_containers=True,
                 )
             )
