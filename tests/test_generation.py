@@ -1564,6 +1564,8 @@ class BodyAssemblyTests(unittest.TestCase):
         contract = ActionUrlAdmissionContract(
             allowed_urls=("/contact",),
             allowed_form_urls=("/submit",),
+            phones=("217-555-0100",),
+            emails=("office@source.test",),
             allowed_labels=("Contact", "Send"),
             allowed_pairs=(("Contact", "/contact"), ("Send", "/submit")),
         )
@@ -1579,6 +1581,8 @@ class BodyAssemblyTests(unittest.TestCase):
         for invalid in (
             '<body><a href="/submit">Contact</a></body>',
             '<body><form action="/contact"><button>Send</button></form></body>',
+            '<body><form action="tel:2175550100"><button>Send</button></form></body>',
+            '<body><form action="mailto:office@source.test"><button>Send</button></form></body>',
         ):
             with self.subTest(invalid=invalid), self.assertRaisesRegex(
                 GeneratedBodyError, "outside source-owned destinations"

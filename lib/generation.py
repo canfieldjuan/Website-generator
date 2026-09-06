@@ -2360,7 +2360,12 @@ def _validate_action_urls(
         if is_labelled_action:
             action_entries.append((_generated_action_labels(element), element_values))
 
-    def validate_action_value(raw_value: str, admitted_urls: set[str]) -> None:
+    def validate_action_value(
+        raw_value: str,
+        admitted_urls: set[str],
+        *,
+        allow_contact_destinations: bool,
+    ) -> None:
         candidate = raw_value.strip()
         if not candidate:
             raise GeneratedBodyError(
@@ -2373,11 +2378,11 @@ def _validate_action_urls(
             raise GeneratedBodyError(
                 "Generated body contains an action URL outside source-owned destinations."
             )
-        if scheme.casefold() in {"tel", "sms"}:
+        if allow_contact_destinations and scheme.casefold() in {"tel", "sms"}:
             phone_digits = _canonical_phone_digits(target.split("?", 1)[0])
             if phone_digits and phone_digits in allowed_phone_digits:
                 return
-        elif scheme.casefold() == "mailto":
+        elif allow_contact_destinations and scheme.casefold() == "mailto":
             mailbox = _canonical_email_value(target.split("?", 1)[0])
             if mailbox is not None and mailbox in allowed_emails:
                 return
@@ -2386,9 +2391,17 @@ def _validate_action_urls(
         )
 
     for raw_value in link_action_values:
-        validate_action_value(raw_value, allowed_urls)
+        validate_action_value(
+            raw_value,
+            allowed_urls,
+            allow_contact_destinations=True,
+        )
     for raw_value in form_action_values:
-        validate_action_value(raw_value, allowed_form_urls)
+        validate_action_value(
+            raw_value,
+            allowed_form_urls,
+            allow_contact_destinations=False,
+        )
 
     for action_labels, destinations in action_entries:
         stripped_destinations = tuple(value.strip() for value in destinations)
