@@ -103,7 +103,9 @@ by enumerating English predicates. `aria-hidden` removes content from the
 accessibility tree but does not visually hide it, so it never exempts rendered
 copy from this admission boundary. Direct attributes, rendered input values,
 and all four supported indirect ARIA reference attributes use the same resolver
-and exact catalog.
+and exact catalog. Native control labels and the complete standard set of
+text-valued ARIA properties come from one shared enumerator used by claim and
+copy admission.
 
 ## Intentional
 
@@ -130,7 +132,7 @@ and exact catalog.
 ## Verification
 
 Current implementation evidence is based on commit
-`b426c31d52ffad149a423d3831fa4158930e4bbb`. The generated artifact and evidence logs are
+`50c0570447a03f38b6544541541b9269ae22f729`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -145,7 +147,7 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 385 passed, 34 skipped, 658 subtests passed in 38.09s
+# 389 passed, 34 skipped, 668 subtests passed in 53.30s
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
@@ -170,6 +172,12 @@ Chromium computed-style inspection and direct PNG pixel reads confirmed the
 white page, red gradient hero, visible white hero copy, service grid, and
 page-function content.
 
+After the final text-attribute enumerator change, the same artifact body was
+replayed deterministically through the real `generate_build_html()` admission
+path without a model call. Admission passed and produced 70,544 validated bytes
+with SHA-256
+`3ca030e6cc0d2cf3befbdc902b1aa2c92ea08b4572c87b4d65e184dfcf00663b`.
+
 No live OpenRouter request was made; doing so would spend provider credit and
 is unnecessary to prove the provider-independent prompt and admission contract.
 `git diff --check` also passed. The final-head
@@ -178,7 +186,7 @@ block after this evidence note is committed.
 
 ## Estimated diff size
 
-The current PR diff is 1,914 changed lines across the 11 declared source files
+The current PR diff is 2,043 changed lines across the 11 declared source files
 plus this plan, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
