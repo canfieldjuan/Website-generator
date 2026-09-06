@@ -1,6 +1,7 @@
 openai
 resend
 requests
+urllib3>=2.2.0
 beautifulsoup4
 python-dotenv
 playwright

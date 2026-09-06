@@ -23,8 +23,8 @@ have a production-usable no-progress bound, while a healthy long generation may
 continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
-This four-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +1098 / -29. The native stream decoder is a new
+This five-file slice necessarily exceeds the repository's 400-line soft cap:
+the final diff is +1108 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -50,6 +50,7 @@ ship that boundary without its required negative proof.
 
 - `lib/generation.py`
 - `tests/test_generation.py`
+- `requirements.txt`
 - `README.md`
 - `plans/PR-Ollama-Progress-Timeout.md`
 
@@ -70,6 +71,11 @@ rejects malformed, error, reasoning, tool, oversized, duplicate-terminal, or
 incomplete streams through the existing error types. There is no unbounded
 buffered request, producer thread, concurrent response close, or unbounded
 handoff on either request path.
+
+`requirements.txt` declares `urllib3>=2.2.0`, the release that introduced the
+`HTTPResponse.read1()` API used by this boundary. Existing environments are
+therefore upgraded to the public API floor rather than failing at runtime or
+using a version-specific private socket implementation.
 
 No runtime-residency check is used as authority. `/api/ps` can show a loaded
 model but cannot prove whether the queue is free, and checking it would retain a
@@ -189,6 +195,9 @@ Current shared-stream evidence, gathered from the final working tree based on
   tests with 34 skipped in 18.541 seconds. An earlier verbose invocation was
   stopped after an unrelated test-runner deadlock; bounded reruns completed
   normally and the deadlock did not recur.
+- `python -m pip install --dry-run -r requirements-release.txt` resolved the
+  declared `urllib3>=2.2.0` floor to the installed urllib3 2.6.1 without a
+  dependency conflict; that runtime exposes callable `HTTPResponse.read1`.
 - After the observed Document Summarizer compilation finished and `ollama ps`
   was empty, the no-deploy fixture ran from the recorded pre-run envelope at
   `2026-09-06T11:35:36-05:00` through the post-run envelope at
@@ -203,7 +212,7 @@ Current shared-stream evidence, gathered from the final working tree based on
 
 ## Estimated diff size
 
-Actual: four declared files, +1098 / -29. The stream decoder and
+Actual: five declared files, +1108 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.
