@@ -296,7 +296,9 @@ business-specific claims.
   substrings, and leaf ownership across sibling nested articles.
 - Latest identity-corroboration probe rejects partial H1 and title components
   against a longer explicit site name while accepting a full business component
-  from a `Home - Business Name` title.
+  from a `Home - Business Name` title. Lone title components use the same
+  agreement rule, including a metadata-corroborated `Welcome to Business Name`
+  surface.
 - `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
   tests/test_site_extraction.py tests/test_generation.py`: passed. The unignored
   scoped run still reports two pre-existing unused contract imports in

@@ -46,6 +46,34 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pipeline.analyze_site(html)
 
+    def test_analyze_site_propagates_identity_authority(self):
+        wrapped = {"site": {"name": "Welcome to Acme Plumbing"}}
+        wrapped_html = (
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            "<title>Welcome to Acme Plumbing</title><h1>Services</h1>"
+        )
+        with patch.object(
+            pipeline,
+            "get_openrouter_client",
+            return_value=_ExtractionClient(wrapped),
+        ):
+            self.assertEqual(pipeline.analyze_site(wrapped_html), wrapped)
+
+        expanded = {"site": {"name": "Best Acme Plumbing"}}
+        expanded_html = (
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            "<h1>Best Acme Plumbing</h1>"
+        )
+        with (
+            patch.object(
+                pipeline,
+                "get_openrouter_client",
+                return_value=_ExtractionClient(expanded),
+            ),
+            self.assertRaisesRegex(SiteExtractionError, "identity"),
+        ):
+            pipeline.analyze_site(expanded_html)
+
     def test_analyze_site_admits_grounded_contacts_images_and_relative_urls(self):
         document = {
             "site": {
@@ -556,8 +584,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "nav": [{"label": "Contact Us", "url": "/contact"}],
         }
         image_source = (
-            "<h1>Acme Cleaning</h1>"
-            '<a href="/contact"><img alt="Contact Us"></a>'
+            '<h1>Acme Cleaning</h1><a href="/contact"><img alt="Contact Us"></a>'
         )
         self.assertEqual(
             validate_site_analysis(image_action, image_source),
@@ -843,8 +870,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             )
 
         partial_h1_source = (
-            '<meta property="og:site_name" content="Acme Plumbing">'
-            "<h1>Plumbing</h1>"
+            '<meta property="og:site_name" content="Acme Plumbing"><h1>Plumbing</h1>'
         )
         with self.assertRaisesRegex(SiteExtractionError, "identity"):
             validate_site_analysis(
@@ -852,9 +878,19 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 partial_h1_source,
             )
 
+        expanded_h1_source = (
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            "<h1>Best Acme Plumbing</h1>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Best Acme Plumbing"}},
+                expanded_h1_source,
+            )
+
         partial_title_source = (
             '<meta property="og:site_name" content="Acme Plumbing">'
-            "<title>Plumbing | Services</title><h1>Acme Plumbing</h1>"
+            "<title>Plumbing | Repairs</title><h1>Acme Plumbing</h1>"
         )
         with self.assertRaisesRegex(SiteExtractionError, "identity"):
             validate_site_analysis(
@@ -868,10 +904,26 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             valid,
         )
 
+        intrinsic_hyphen = {"site": {"name": "Acme-Plumbing"}}
+        self.assertEqual(
+            validate_site_analysis(intrinsic_hyphen, "<h1>Acme-Plumbing</h1>"),
+            intrinsic_hyphen,
+        )
+
         spaced_hyphen_title = "<title>Home - Acme Plumbing</title><h1>Services</h1>"
         self.assertEqual(
             validate_site_analysis(verified_identity, spaced_hyphen_title),
             verified_identity,
+        )
+
+        corroborated_wrapper_title = (
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            "<title>Welcome to Acme Plumbing</title><h1>Services</h1>"
+        )
+        wrapped_identity = {"site": {"name": "Welcome to Acme Plumbing"}}
+        self.assertEqual(
+            validate_site_analysis(wrapped_identity, corroborated_wrapper_title),
+            wrapped_identity,
         )
 
         conflicting_single_title_source = (

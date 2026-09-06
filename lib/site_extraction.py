@@ -1029,9 +1029,9 @@ class SourceEvidence:
                 and component not in _GENERIC_PAGE_IDENTITY_PARTS
             )
             if len(components) == 1:
-                if (
-                    not explicit_identity_seeds
-                    or components[0] in explicit_identity_seeds
+                if not explicit_identity_seeds or any(
+                    _identity_candidates_agree(seed, components[0])
+                    for seed in explicit_identity_seeds
                 ):
                     title_identity_parts.extend(components)
                 continue
@@ -1289,7 +1289,10 @@ class SourceEvidence:
         normalized = _normalize_text(value)
         if not normalized:
             raise SiteExtractionError(f"{path} is not grounded in source identity.")
-        if normalized in self.identity_exact_segments or normalized in self.identity_segments:
+        if (
+            normalized in self.identity_exact_segments
+            or normalized in self.identity_segments
+        ):
             return
         found = False
         for source_text in self.identity_segments:
