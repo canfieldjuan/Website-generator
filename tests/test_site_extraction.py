@@ -1084,6 +1084,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertFalse(document["pages_to_fetch"][1]["fetchable"])
         self.assertFalse(admitted["pages_to_fetch"][0]["fetchable"])
         self.assertTrue(admitted["pages_to_fetch"][1]["fetchable"])
+        self.assertEqual(
+            admitted["pages_to_fetch"][1]["url"],
+            "https://acme.test/services",
+        )
         self.assertFalse(admitted["pages_to_fetch"][2]["fetchable"])
 
     def test_image_alt_must_belong_to_the_same_image(self):
@@ -1413,14 +1417,70 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             picture,
         )
 
-    def test_ignored_source_containers_cannot_authorize_visible_meaning(self):
-        hidden_claim = (
-            "<h1>Acme</h1>"
-            "<template><div>Free Estimates</div></template>"
+    def test_css_image_evidence_is_bound_to_image_declarations(self):
+        font = {
+            "site": {"name": "Acme"},
+            "images": [{"url": "/brand.woff2", "alt": None, "context": "hero"}],
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "source image URL"):
+            validate_site_analysis(
+                font,
+                '<style>@font-face { src: url("/brand.woff2") }</style><h1>Acme</h1>',
+                "https://acme.test/",
+            )
+
+        hero = {
+            "site": {"name": "Acme"},
+            "images": [{"url": "/hero.jpg", "alt": None, "context": "hero"}],
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                hero,
+                '<style>.hero { background-image: url("/hero.jpg") }</style>'
+                "<h1>Acme</h1>",
+                "https://acme.test/",
+            ),
+            hero,
         )
+
+    def test_image_metadata_pairs_alt_with_its_resource(self):
+        document = {
+            "site": {"name": "Acme"},
+            "images": [
+                {
+                    "url": "/hero.jpg",
+                    "alt": "Technician at work",
+                    "context": "hero",
+                }
+            ],
+        }
+        source = (
+            '<meta property="og:image" content="/hero.jpg">'
+            '<meta property="og:image:alt" content="Technician at work">'
+            "<h1>Acme</h1>"
+        )
+        self.assertEqual(
+            validate_site_analysis(document, source, "https://acme.test/"),
+            document,
+        )
+
+        mismatched = copy.deepcopy(document)
+        mismatched["images"][0]["alt"] = "Different technician"
+        with self.assertRaisesRegex(SiteExtractionError, "same source image"):
+            validate_site_analysis(mismatched, source, "https://acme.test/")
+
+    def test_ignored_source_containers_cannot_authorize_visible_meaning(self):
         claim = {"site": {"name": "Acme", "tagline": "Free Estimates"}}
-        with self.assertRaisesRegex(SiteExtractionError, "site.tagline"):
-            validate_site_analysis(claim, hidden_claim, "https://acme.test/")
+        for hidden_claim in (
+            "<h1>Acme</h1><template><div>Free Estimates</div></template>",
+            "<h1>Acme</h1><div hidden>Free Estimates</div>",
+            '<h1>Acme</h1><div style="display: none !important">Free Estimates</div>',
+        ):
+            with (
+                self.subTest(hidden_claim=hidden_claim),
+                self.assertRaisesRegex(SiteExtractionError, "site.tagline"),
+            ):
+                validate_site_analysis(claim, hidden_claim, "https://acme.test/")
         self.assertEqual(
             validate_site_analysis(
                 claim,
@@ -1977,6 +2037,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 '<template><a href="/hidden">Book Appointment</a>'
                 '<form action="/hidden-form"><button>Send</button></form></template>'
                 '<noscript><a href="/fallback">Fallback</a></noscript>'
+                '<a hidden href="/hidden-attribute">Hidden</a>'
+                '<form style="display:none" action="/hidden-style"></form>'
             ),
         )
 

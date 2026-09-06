@@ -21,6 +21,7 @@ from openai import DefaultHttpxClient, OpenAI
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 from lib.site_extraction import (
+    is_render_suppressed_element,
     is_labelled_action_element,
     source_action_accessible_name,
     source_visible_text,
@@ -1342,22 +1343,6 @@ def _claim_exposure_texts(
             and str(node.get("type") or "").casefold() == "hidden"
         )
 
-    def is_render_suppressed(node: Tag) -> bool:
-        if is_hidden_input(node) or node.has_attr("hidden"):
-            return True
-        style = node.get("style")
-        if not isinstance(style, str):
-            return False
-        return bool(
-            re.search(
-                r"(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|"
-                r"content-visibility\s*:\s*hidden)\s*"
-                r"(?:!\s*important\s*)?(?:;|$)",
-                style,
-                re.IGNORECASE,
-            )
-        )
-
     def replacement_text(node: Tag) -> str:
         if node.name.casefold() == "img":
             value = node.get("alt")
@@ -1383,7 +1368,7 @@ def _claim_exposure_texts(
             return
         if is_excluded(node):
             return
-        if is_render_suppressed(node):
+        if is_render_suppressed_element(node):
             return
         has_text_boundary = node.name.casefold() in DOM_ADJACENCY_BOUNDARY_TAGS
         if has_text_boundary:
@@ -1434,7 +1419,7 @@ def _claim_exposure_texts(
             return ""
         aria_hidden = node.get("aria-hidden")
         if not active_references and (
-            is_render_suppressed(node)
+            is_render_suppressed_element(node)
             or (
                 isinstance(aria_hidden, str)
                 and aria_hidden.strip().casefold() == "true"
@@ -1485,7 +1470,7 @@ def _claim_exposure_texts(
         ):
             return
         aria_hidden = node.get("aria-hidden")
-        if is_render_suppressed(node) or (
+        if is_render_suppressed_element(node) or (
             isinstance(aria_hidden, str)
             and aria_hidden.strip().casefold() == "true"
         ):

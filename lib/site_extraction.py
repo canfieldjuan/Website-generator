@@ -247,6 +247,24 @@ _IMAGE_METADATA_URL_PROPERTIES = frozenset(
         "twitter:image:src",
     }
 )
+_IMAGE_METADATA_ROOT_PROPERTIES = frozenset({"og:image", "twitter:image"})
+_IMAGE_METADATA_ALT_PROPERTIES = frozenset({"og:image:alt", "twitter:image:alt"})
+_IMAGE_CSS_PROPERTIES = frozenset(
+    {
+        "-webkit-mask",
+        "-webkit-mask-image",
+        "background",
+        "background-image",
+        "border-image",
+        "border-image-source",
+        "content",
+        "cursor",
+        "list-style",
+        "list-style-image",
+        "mask",
+        "mask-image",
+    }
+)
 _ACTION_INPUT_TYPES = frozenset(
     {
         "button",
@@ -339,6 +357,15 @@ _PHONE_PATTERN = re.compile(
     re.I,
 )
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
+_CSS_DECLARATION_PATTERN = re.compile(
+    r"(?:^|[;{])\s*([\w-]+)\s*:\s*([^;{}]+)",
+    re.I,
+)
+_RENDER_SUPPRESSION_STYLE_PATTERN = re.compile(
+    r"(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|"
+    r"content-visibility\s*:\s*hidden)\s*(?:!\s*important\s*)?(?:;|$)",
+    re.I,
+)
 _SENTENCE_BREAK_PATTERN = re.compile(r"[.!?;]")
 _CONTRAST_BREAK_PATTERN = re.compile(r"\b(?:but|however|yet|except)\b", re.I)
 _LEADING_PARENTHETICAL_CONTRAST = re.compile(
@@ -618,9 +645,11 @@ def same_site_origin(first_url: Any, second_url: Any) -> bool:
         return False
 
 
-def _is_distinct_fetchable_page(value: Any, source_url: str | None) -> bool:
+def _resolved_distinct_fetchable_page(
+    value: Any, source_url: str | None
+) -> str | None:
     if not isinstance(value, str) or not value.strip() or not source_url:
-        return False
+        return None
     source = urlsplit(source_url)
     destination = urlsplit(urljoin(source_url, html.unescape(value).strip()))
     if (
@@ -629,14 +658,16 @@ def _is_distinct_fetchable_page(value: Any, source_url: str | None) -> bool:
         or not source.hostname
         or not destination.hostname
     ):
-        return False
+        return None
 
     if not same_site_origin(source_url, destination.geturl()):
-        return False
-    return (destination.path or "/", destination.query) != (
+        return None
+    if (destination.path or "/", destination.query) == (
         source.path or "/",
         source.query,
-    )
+    ):
+        return None
+    return destination._replace(fragment="").geturl()
 
 
 def _attribute_values(value: Any) -> Iterable[str]:
@@ -652,6 +683,28 @@ def _srcset_urls(value: str) -> set[str]:
         for candidate in value.split(",")
         if candidate.strip()
     }
+
+
+def css_image_urls(value: str) -> set[str]:
+    """Return URL resources from CSS declarations that carry image content."""
+    urls: set[str] = set()
+    for match in _CSS_DECLARATION_PATTERN.finditer(value):
+        if match.group(1).casefold() in _IMAGE_CSS_PROPERTIES:
+            urls.update(_CSS_URL_PATTERN.findall(match.group(2)))
+    return urls
+
+
+def is_render_suppressed_element(element: Any) -> bool:
+    """Return whether one element is explicitly removed from rendering."""
+    tag_name = str(getattr(element, "name", "") or "").casefold()
+    if tag_name == "input" and str(element.get("type") or "").casefold() == "hidden":
+        return True
+    if element.has_attr("hidden"):
+        return True
+    style = element.get("style")
+    return isinstance(style, str) and bool(
+        _RENDER_SUPPRESSION_STYLE_PATTERN.search(style)
+    )
 
 
 def _element_has_marker(element: Any, markers: frozenset[str]) -> bool:
@@ -766,11 +819,10 @@ def source_accessible_name(
 
 def is_source_semantic_element(element: Any) -> bool:
     """Return whether an element is outside browser-inert source containers."""
-    if getattr(element, "name", None) in _IGNORED_TEXT_TAGS:
-        return False
     return not any(
-        getattr(ancestor, "name", None) in _IGNORED_TEXT_TAGS
-        for ancestor in getattr(element, "parents", ())
+        getattr(candidate, "name", None) in _IGNORED_TEXT_TAGS
+        or is_render_suppressed_element(candidate)
+        for candidate in (element, *getattr(element, "parents", ()))
     )
 
 
@@ -1089,9 +1141,13 @@ class SourceEvidence:
             for image in inventory.find_all("img", limit=MAX_ITEMS):
                 preserved_image_urls.update(_attribute_values(image.get("src")))
         for style in soup.find_all("style", limit=MAX_ITEMS):
-            preserved_image_urls.update(
-                _CSS_URL_PATTERN.findall(style.get_text(" "))
-            )
+            preserved_image_urls.update(css_image_urls(style.get_text(" ")))
+        for suppressed_container in soup.find_all(True):
+            if (
+                suppressed_container.parent is not None
+                and is_render_suppressed_element(suppressed_container)
+            ):
+                suppressed_container.decompose()
         for ignored_container in soup.find_all(tuple(_IGNORED_TEXT_TAGS)):
             ignored_container.decompose()
 
@@ -1139,12 +1195,29 @@ class SourceEvidence:
             heading_parts.append(heading_text)
             if element.name == "h1":
                 h1_parts.append(heading_text)
+        metadata_image_groups: dict[str, list[str]] = {}
         for meta in soup.find_all("meta", limit=MAX_ITEMS):
             property_name = str(
                 meta.get("property") or meta.get("name") or ""
             ).casefold()
             if property_name in {"application-name", "og:site_name"}:
                 identity_parts.extend(_attribute_values(meta.get("content")))
+            metadata_family = property_name.partition(":")[0]
+            metadata_values = tuple(_attribute_values(meta.get("content")))
+            if property_name in _IMAGE_METADATA_ROOT_PROPERTIES:
+                metadata_image_groups[metadata_family] = list(metadata_values)
+                raw_image_urls.update(metadata_values)
+            elif property_name in _IMAGE_METADATA_URL_PROPERTIES:
+                metadata_image_groups.setdefault(metadata_family, []).extend(
+                    metadata_values
+                )
+                raw_image_urls.update(metadata_values)
+            elif property_name in _IMAGE_METADATA_ALT_PROPERTIES:
+                raw_image_pairs.update(
+                    (image_url, alt)
+                    for image_url in metadata_image_groups.get(metadata_family, ())
+                    for alt in metadata_values
+                )
 
         for element in soup.find_all(True):
             action_label = ""
@@ -1194,15 +1267,9 @@ class SourceEvidence:
                         srcset_urls = _srcset_urls(value)
                         raw_image_urls.update(srcset_urls)
                         element_image_urls.update(srcset_urls)
-                    if name == "content":
-                        property_name = str(
-                            element.get("property") or element.get("name") or ""
-                        ).casefold()
-                        if property_name in _IMAGE_METADATA_URL_PROPERTIES:
-                            raw_image_urls.add(value)
             style = element.get("style")
             if isinstance(style, str):
-                raw_image_urls.update(_CSS_URL_PATTERN.findall(style))
+                raw_image_urls.update(css_image_urls(style))
             alt = element.get("alt")
             if element.name == "img" and isinstance(alt, str) and alt.strip():
                 picture = element.find_parent("picture")
@@ -1770,7 +1837,10 @@ def _require_site_facts(
         evidence.require_action(f"footer_links[{index}]", item["label"], item["url"])
     for index, page in enumerate(document.get("pages_to_fetch") or []):
         evidence.require_action(f"pages_to_fetch[{index}]", page["label"], page["url"])
-        page["fetchable"] = _is_distinct_fetchable_page(page["url"], source_url)
+        resolved_url = _resolved_distinct_fetchable_page(page["url"], source_url)
+        page["fetchable"] = resolved_url is not None
+        if resolved_url is not None:
+            page["url"] = resolved_url
 
     for index, section in enumerate(document.get("single_page_sections") or []):
         path = f"single_page_sections[{index}]"

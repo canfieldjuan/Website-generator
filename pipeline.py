@@ -15,6 +15,7 @@ from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
 from lib.site_extraction import (
+    css_image_urls,
     SiteExtractionError,
     same_site_origin,
     source_action_accessible_name,
@@ -492,8 +493,11 @@ def fetch_and_clean_html(url, *, include_source_url=False, required_origin=None)
             if val and val.startswith("http") and any(ext in val.lower() for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]):
                 image_urls.add(val)
     for style in soup.find_all("style"):
-        found = re.findall(r'url\(["\']?(https://[^"\')\s]+)["\']?\)', style.string or "")
-        image_urls.update(found)
+        image_urls.update(
+            url
+            for url in css_image_urls(style.string or "")
+            if url.startswith("https://")
+        )
 
     inventory = BeautifulSoup("", "html.parser")
     inventory_root = inventory.new_tag("template")
