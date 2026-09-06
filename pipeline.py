@@ -1,4 +1,5 @@
 import os
+import html
 import json
 import re
 import urllib.parse
@@ -81,16 +82,21 @@ REDESIGN_DEPLOYMENT_COMMENT_MARKERS = (
 
 
 def _append_source_value(values, value):
-    if isinstance(value, str) and value.strip() and value.strip() not in values:
-        values.append(value.strip())
+    if not isinstance(value, str):
+        return
+    candidate = html.unescape(value).strip()
+    if candidate and candidate not in values:
+        values.append(candidate)
 
 
 def _append_source_pair(pairs, label, destination):
-    if not isinstance(label, str) or not label.strip():
+    if not isinstance(label, str) or not isinstance(destination, str):
         return
-    if not isinstance(destination, str) or not destination.strip():
+    canonical_label = html.unescape(label).strip()
+    canonical_destination = html.unescape(destination).strip()
+    if not canonical_label or not canonical_destination:
         return
-    pair = (label.strip(), destination.strip())
+    pair = (canonical_label, canonical_destination)
     if pair not in pairs:
         pairs.append(pair)
 

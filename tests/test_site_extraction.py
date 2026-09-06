@@ -1066,6 +1066,76 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             document,
         )
 
+    def test_phone_evidence_preserves_callable_role_and_extension(self):
+        base_phone = {
+            "site": {
+                "name": "Acme Cleaning",
+                "contact": {"phone": "217-555-0100"},
+            }
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>Fax: 217-555-0100</p>",
+            )
+        with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+            validate_site_analysis(
+                base_phone,
+                (
+                    "<h1>Acme Cleaning</h1><p>"
+                    '<a href="tel:217-555-0100">Fax</a></p>'
+                ),
+            )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>Phone: 217-555-0100 ext. 42</p>",
+            ),
+            base_phone,
+        )
+
+        replacement_source = (
+            "<h1>Acme Cleaning</h1><p>Call "
+            "<del>217-555-0100</del><ins>217-555-0199</ins></p>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+            validate_site_analysis(base_phone, replacement_source)
+        current_phone = copy.deepcopy(base_phone)
+        current_phone["site"]["contact"]["phone"] = "217-555-0199"
+        self.assertEqual(
+            validate_site_analysis(current_phone, replacement_source),
+            current_phone,
+        )
+
+        retired_action = {
+            "site": {"name": "Acme Cleaning"},
+            "nav": [{"label": "Old booking", "url": "/old-booking"}],
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "one source action"):
+            validate_site_analysis(
+                retired_action,
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    '<del><a href="/old-booking">Old booking</a></del>'
+                    '<ins><a href="/book">Book</a></ins>'
+                ),
+            )
+        current_action = {
+            "site": {"name": "Acme Cleaning"},
+            "nav": [{"label": "Book", "url": "/book"}],
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                current_action,
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    '<del><a href="/old-booking">Old booking</a></del>'
+                    '<ins><a href="/book">Book</a></ins>'
+                ),
+            ),
+            current_action,
+        )
+
     def test_contact_evidence_preserves_assertion_context(self):
         contacts = (
             ("phone", "217-555-0100", "Do not call 217-555-0100"),
@@ -1636,6 +1706,22 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(document["social"][0]["platform"], "Facebook")
         self.assertEqual(admitted["social"][0]["platform"], "Instagram")
 
+        share_destination = "https://facebook.com/sharer/sharer.php?u=acme.test"
+        with self.assertRaisesRegex(SiteExtractionError, "one source action"):
+            validate_site_analysis(
+                {
+                    "site": {"name": "Acme Cleaning"},
+                    "social": [
+                        {"platform": "Facebook", "url": share_destination}
+                    ],
+                },
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    f'<a href="{share_destination}">Share</a>'
+                ),
+                "https://acme.test/",
+            )
+
         unknown_destination = {
             "site": {"name": "Acme Cleaning"},
             "social": [
@@ -2061,6 +2147,41 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SiteExtractionError, "one source container"):
             validate_site_analysis(document, source)
+
+    def test_content_item_title_and_url_share_one_source_action(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "sections": [
+                {
+                    "type": "services",
+                    "headline": "Services",
+                    "items": [
+                        {"title": "Drain Cleaning", "url": "/drain-cleaning"}
+                    ],
+                }
+            ],
+        }
+        unrelated_link = (
+            "<h1>Acme Cleaning</h1><section><h2>Services</h2><article>"
+            "<h3>Drain Cleaning</h3>"
+            '<a href="/drain-cleaning">Careers</a>'
+            "</article></section>"
+        )
+        with self.assertRaisesRegex(
+            SiteExtractionError,
+            "one source (?:action|section)",
+        ):
+            validate_site_analysis(document, unrelated_link)
+
+        linked_title = (
+            "<h1>Acme Cleaning</h1><section><h2>Services</h2><article>"
+            '<a href="/drain-cleaning"><h3>Drain Cleaning</h3>'
+            "<span>Learn more</span></a></article></section>"
+        )
+        self.assertEqual(
+            validate_site_analysis(document, linked_title),
+            document,
+        )
 
     def test_parent_list_item_does_not_span_nested_list_records(self):
         source = (

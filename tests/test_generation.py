@@ -1227,6 +1227,25 @@ class BodyAssemblyTests(unittest.TestCase):
             ),
             valid_body,
         )
+
+        entity_site = {
+            "site": {"name": "Acme Plumbing"},
+            "nav": [
+                {"label": "Search", "url": "/search?a=1&amp;b=2"}
+            ],
+        }
+        entity_contract = pipeline._redesign_action_url_contract(
+            entity_site,
+            pipeline._redesign_contact_contract(entity_site),
+        )
+        decoded_body = '<body><a href="/search?a=1&b=2">Search</a></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(decoded_body),
+                expected_action_urls=entity_contract,
+            ),
+            decoded_body,
+        )
         no_action_body = "<body><main>No actions</main></body>"
         self.assertEqual(
             validate_generated_body(

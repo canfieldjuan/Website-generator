@@ -385,6 +385,15 @@ _SOCIAL_HOST_PLATFORMS = (
     ("youtu.be", "YouTube"),
     ("yelp.com", "Yelp"),
 )
+_RECORD_ITEM_LINK_LABELS = frozenset(
+    {
+        "details",
+        "learn more",
+        "more information",
+        "read more",
+        "view details",
+    }
+)
 _LOGO_CONTAINER_MARKERS = frozenset(
     {
         "brand-logo",
@@ -436,7 +445,15 @@ _ASSERTION_CONTEXT_TAGS = {
     "td",
     "th",
 }
-_IGNORED_TEXT_TAGS = {"noscript", "script", "style", "template"}
+_IGNORED_TEXT_TAGS = {
+    "del",
+    "noscript",
+    "s",
+    "script",
+    "strike",
+    "style",
+    "template",
+}
 _EMAIL_PATTERN = re.compile(
     r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]{1,64}@"
     r"(?:[A-Z0-9-]{1,63}\.)+[A-Z]{2,63}(?![A-Z0-9-])",
@@ -445,6 +462,14 @@ _EMAIL_PATTERN = re.compile(
 _PHONE_PATTERN = re.compile(
     r"(?<!\d)(?:\+?1[\s.()-]*)?(?:\(?\d{3}\)?[\s.()-]*)"
     r"\d{3}[\s.-]*\d{4}(?:\s*(?:x|ext\.?)[\s]*\d+)?(?!\d)",
+    re.I,
+)
+_PHONE_EXTENSION_SUFFIX_PATTERN = re.compile(
+    r"\s*(?:x|ext\.?)\s*\d+\s*$",
+    re.I,
+)
+_NONCALLABLE_PHONE_PREFIX_PATTERN = re.compile(
+    r"\b(?:fax|facsimile)(?:\s+(?:line|number))?\s*[:\-–—]?\s*$",
     re.I,
 )
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
@@ -562,10 +587,17 @@ def _normalize_text(value: str) -> str:
 
 
 def _phone_variants(value: str) -> set[str]:
-    digits = "".join(character for character in value if character.isdigit())
-    variants = {digits} if len(digits) >= 7 else set()
-    if len(digits) == 11 and digits.startswith("1"):
-        variants.add(digits[1:])
+    values = (value, _PHONE_EXTENSION_SUFFIX_PATTERN.sub("", value))
+    variants: set[str] = set()
+    for candidate in values:
+        digits = "".join(
+            character for character in candidate if character.isdigit()
+        )
+        if len(digits) < 7:
+            continue
+        variants.add(digits)
+        if len(digits) == 11 and digits.startswith("1"):
+            variants.add(digits[1:])
     return variants
 
 
@@ -730,6 +762,11 @@ def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
     return _occurrence_is_negated(without_affirmative_idiom, start, length)
 
 
+def _contact_occurrence_is_noncallable(text: str, start: int) -> bool:
+    """Return whether the nearest source field marks a number as non-callable."""
+    return _NONCALLABLE_PHONE_PREFIX_PATTERN.search(text[:start]) is not None
+
+
 def _contact_destination(value: str) -> tuple[str, str] | None:
     parsed = urlsplit(html.unescape(value).strip())
     scheme = parsed.scheme.casefold()
@@ -745,10 +782,24 @@ def _contact_destination_context(context: Any, action: Any, destination: str) ->
     parts: list[str] = []
     for node in context.descendants:
         if node is action:
-            parts.append(destination)
+            action_text = source_visible_text(action)
+            parts.append(action_text)
+            destination_is_visible = (
+                destination.casefold() in action_text.casefold()
+                if "@" in destination
+                else any(
+                    _phone_variants(match.group(0)) & _phone_variants(destination)
+                    for match in _PHONE_PATTERN.finditer(action_text)
+                )
+            )
+            if not destination_is_visible:
+                parts.append(destination)
+            continue
         if isinstance(node, Comment):
             continue
         if isinstance(node, str):
+            if action in node.parents:
+                continue
             parent = node.parent
             if parent is None or parent.name not in _IGNORED_TEXT_TAGS:
                 parts.append(str(node))
@@ -1414,6 +1465,7 @@ class SourceEvidence:
     heading_segments: tuple[str, ...]
     action_labels: frozenset[str]
     action_pairs: frozenset[tuple[str, str]]
+    action_content_pairs: frozenset[tuple[str, str]]
     action_urls: frozenset[str]
     image_urls: frozenset[str]
     image_pairs: frozenset[tuple[str, str]]
@@ -1637,6 +1689,7 @@ class SourceEvidence:
         attribute_parts: list[str] = []
         raw_action_urls: set[str] = set()
         raw_action_pairs: set[tuple[str, str]] = set()
+        raw_action_content_pairs: set[tuple[str, str]] = set()
         raw_image_urls: set[str] = set(preserved_image_urls)
         raw_image_pairs: set[tuple[str, str]] = set()
         raw_logo_urls: set[str] = set()
@@ -1704,6 +1757,18 @@ class SourceEvidence:
                             raw_action_pairs.update(
                                 (label, raw_destination)
                                 for label in element_action_labels
+                            )
+                            raw_action_content_pairs.update(
+                                (owned_text, raw_destination)
+                                for candidate in (
+                                    element,
+                                    *element.find_all(True, limit=MAX_ITEMS),
+                                )
+                                if (
+                                    owned_text := _normalize_text(
+                                        source_visible_text(candidate)
+                                    )
+                                )
                             )
             for name, raw_value in element.attrs.items():
                 for value in _attribute_values(raw_value):
@@ -1916,6 +1981,8 @@ class SourceEvidence:
                     segment, match.start(), len(match.group(0))
                 ):
                     continue
+                if _contact_occurrence_is_noncallable(segment, match.start()):
+                    continue
                 if _occurrence_is_nonassertive(
                     segment, match.start(), len(match.group(0))
                 ):
@@ -2008,6 +2075,11 @@ class SourceEvidence:
             action_pairs=frozenset(
                 (label, destination)
                 for label, raw_url in raw_action_pairs
+                for destination in resolved((raw_url,))
+            ),
+            action_content_pairs=frozenset(
+                (content, destination)
+                for content, raw_url in raw_action_content_pairs
                 for destination in resolved((raw_url,))
             ),
             action_urls=resolved(raw_action_urls),
@@ -2175,12 +2247,29 @@ class SourceEvidence:
                 f"{path}.url and label are not grounded in one source action."
             )
 
+    def require_action_content(self, path: str, content: Any, url: Any) -> None:
+        normalized_content = (
+            _normalize_text(content) if isinstance(content, str) else ""
+        )
+        normalized_url = html.unescape(url).strip() if isinstance(url, str) else ""
+        if (normalized_content, normalized_url) in self.action_content_pairs:
+            return
+        if any(
+            destination == normalized_url and label in _RECORD_ITEM_LINK_LABELS
+            for label, destination in self.action_pairs
+        ):
+            return
+        raise SiteExtractionError(
+            f"{path}.url and content are not grounded in one source action."
+        )
+
     def admit_social_platform(self, path: str, platform: Any, url: Any) -> str:
         self.require_url(f"{path}.url", url)
         normalized_url = html.unescape(url).strip() if isinstance(url, str) else ""
         hostname = (urlsplit(normalized_url).hostname or "").casefold()
         for domain, canonical in _SOCIAL_HOST_PLATFORMS:
             if hostname == domain or hostname.endswith(f".{domain}"):
+                self.require_action(path, canonical, url)
                 return canonical
         self.require_action(path, platform, url)
         return platform
@@ -2328,6 +2417,12 @@ def _require_content_items(
                 f"{item_path}.description", item.get("description"), asserted=True
             )
             container.require_url(f"{item_path}.url", item.get("url"))
+            if item.get("title") is not None and item.get("url") is not None:
+                container.require_action_content(
+                    item_path,
+                    item.get("title"),
+                    item.get("url"),
+                )
             container.require_url(
                 f"{item_path}.image_url", item.get("image_url"), image=True
             )
