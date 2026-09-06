@@ -99,7 +99,14 @@ labels include replacement text from image, area, and image-input controls;
 source collection and generated-body admission construct the same complete,
 whitespace-normalized label. An admitted phone or email display value remains
 bound to its matching contact destination unless that exact source action pair
-was observed.
+was observed. Submit buttons and image inputs resolve their effective destination
+from `formaction`, an explicitly referenced form, or their owning ancestor form;
+source collection and output pair admission use the same resolver. Output URL
+sanitization separately checks every declared destination attribute, including an
+inert or orphaned `formaction`, without promoting that attribute into source
+authority. Pair evidence does not itself grant URL authority: raw form actions can
+bind a label to an already admitted destination, but cannot become generated link
+destinations.
 Flat heading records
 stop before sibling structural containers, including list wrappers, so a section
 heading cannot turn a collection of independent cards into one evidence record.
@@ -259,11 +266,15 @@ business-specific claims.
   phone/email contacts versus positive links, and accessible-label versus
   visible-action wording.
 - Latest paired-authority boundary pass: `python -m unittest -q
-  tests.test_site_extraction tests.test_generation` passed 201 tests. It covers
+  tests.test_site_extraction tests.test_generation` passed 202 tests. It covers
   conflicting versus matching single-title identity, linked and plain-text contact
   negation plus the affirmative "do not hesitate" idiom, image-derived accessible
   labels, valid and swapped source action pairs (including neutral wording), and
-  malformed or authority-exceeding pair contracts.
+  malformed or label-authority-exceeding pair contracts. The final review-boundary
+  cases also cover inherited and externally referenced form actions plus an image
+  node used directly as an `aria-labelledby` target. An inert or orphaned
+  `formaction` remains subject to output URL sanitization but cannot create source
+  URL or pair authority.
 - `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
   tests/test_site_extraction.py tests/test_generation.py`: passed. The unignored
   scoped run still reports two pre-existing unused contract imports in

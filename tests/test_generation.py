@@ -1321,6 +1321,12 @@ class BodyAssemblyTests(unittest.TestCase):
                 'src="https://source.test/button.png" '
                 'formaction="https://source.test/book"></body>'
             ),
+            (
+                '<body><a aria-labelledby="booking-label" '
+                'href="https://source.test/book"></a>'
+                '<img id="booking-label" src="https://source.test/button.png" '
+                'alt="Book Appointment"></body>'
+            ),
         ):
             with (
                 self.subTest(image_action=image_action),
@@ -1358,7 +1364,11 @@ class BodyAssemblyTests(unittest.TestCase):
         )
         valid = (
             '<body><a href="https://source.test/contact">Contact Us</a>'
-            '<a href="https://source.test/order">Order Online</a></body>'
+            '<a href="https://source.test/order">Order Online</a>'
+            '<form action="https://source.test/contact">'
+            '<button>Contact Us</button></form>'
+            '<form id="order-form" action="https://source.test/order"></form>'
+            '<input type="submit" form="order-form" value="Order Online"></body>'
         )
         self.assertEqual(
             validate_generated_body(body_result(valid), expected_action_urls=contract),
@@ -1373,6 +1383,24 @@ class BodyAssemblyTests(unittest.TestCase):
             ):
                 validate_generated_body(
                     body_result(swapped),
+                    expected_action_urls=contract,
+                )
+
+        for swapped_form_control in (
+            (
+                '<body><form action="https://source.test/contact">'
+                '<button>Order Online</button></form></body>'
+            ),
+            (
+                '<body><form id="order-form" action="https://source.test/order">'
+                '</form><button form="order-form">Contact Us</button></body>'
+            ),
+        ):
+            with self.subTest(body=swapped_form_control), self.assertRaisesRegex(
+                GeneratedBodyError, "source-owned action pair"
+            ):
+                validate_generated_body(
+                    body_result(swapped_form_control),
                     expected_action_urls=contract,
                 )
 
@@ -1411,11 +1439,6 @@ class BodyAssemblyTests(unittest.TestCase):
                 allowed_urls=("/contact",),
                 allowed_labels=("Contact",),
                 allowed_pairs=(("Missing", "/contact"),),
-            ),
-            ActionUrlAdmissionContract(
-                allowed_urls=("/contact",),
-                allowed_labels=("Contact",),
-                allowed_pairs=(("Contact", "/missing"),),
             ),
         ):
             with self.subTest(contract=invalid_contract), self.assertRaisesRegex(

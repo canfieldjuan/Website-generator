@@ -1487,8 +1487,12 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             source_content=(
                 '<a href="/source-link">Source</a>'
                 '<a href="/image-action">Schedule <img alt="Visit"></a>'
-                '<form action="/submit"><input type="submit" value="Submit"></form>'
-                '<input type="image" alt="Pay Now" formaction="/pay">'
+                '<form action="/submit"><input type="submit" value="Submit">'
+                '<input type="image" alt="Pay Now" formaction="/pay"></form>'
+                '<a href="/aria-action" aria-labelledby="image-label"></a>'
+                '<img id="image-label" alt="Book Appointment">'
+                '<form id="external-form" action="/external"></form>'
+                '<button form="external-form">External</button>'
                 '<img src="/source-image.jpg">'
             ),
             extra_urls=("/current-page",),
@@ -1510,7 +1514,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "/current-page",
                 "/source-link",
                 "/image-action",
-                "/pay",
+                "/aria-action",
             ),
         )
         self.assertEqual(
@@ -1529,6 +1533,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "Schedule Visit",
                 "Submit",
                 "Pay Now",
+                "Book Appointment",
+                "External",
             ),
         )
         self.assertEqual(
@@ -1543,9 +1549,25 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 ("Jane", "/jane"),
                 ("Source", "/source-link"),
                 ("Schedule Visit", "/image-action"),
+                ("Submit", "/submit"),
                 ("Pay Now", "/pay"),
+                ("Book Appointment", "/aria-action"),
+                ("External", "/external"),
             ),
         )
+
+    def test_inert_formaction_attributes_do_not_create_source_authority(self):
+        contract = pipeline._redesign_action_url_contract(
+            {"site": {"name": "Acme Cleaning"}},
+            pipeline._redesign_contact_contract({}),
+            source_content=(
+                '<button type="button" formaction="/inert">Inert</button>'
+                '<input type="image" formaction="/orphan" alt="Orphan">'
+            ),
+        )
+
+        self.assertEqual(contract.allowed_urls, ())
+        self.assertEqual(contract.allowed_pairs, ())
 
     def test_form_endpoint_cannot_be_repurposed_as_link_destination(self):
         with self.assertRaisesRegex(SiteExtractionError, r"cta\.url"):

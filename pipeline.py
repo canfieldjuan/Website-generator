@@ -30,6 +30,7 @@ from lib.generation import (
     ImageAdmissionContract,
     PromptPart,
     SourceContactAdmissionContract,
+    action_element_destinations,
     action_url_contract_instruction,
     assemble_generated_html,
     atomic_write_text,
@@ -215,7 +216,7 @@ def _redesign_action_url_contract(
             return value if isinstance(value, str) else ""
 
         def text_with_replacements(element):
-            parts = []
+            parts = [replacement_text(element)]
             for child in element.descendants:
                 if isinstance(child, Comment):
                     continue
@@ -225,13 +226,15 @@ def _redesign_action_url_contract(
                     parts.append(replacement_text(child))
             return " ".join(" ".join(part for part in parts if part).split())
 
-        for element in source_root.find_all(["a", "area", "button", "input"]):
-            destination = None
+        for element in source_root.find_all(
+            ["a", "area", "form", "button", "input"]
+        ):
+            destinations = action_element_destinations(element, source_root)
             if element.name in {"a", "area"}:
-                destination = element.get("href")
-            elif element.name in {"button", "input"}:
-                destination = element.get("formaction")
-            _append_source_value(allowed_urls, destination)
+                for destination in destinations:
+                    _append_source_value(allowed_urls, destination)
+            if element.name == "form":
+                continue
             if element.name == "input" and str(
                 element.get("type") or ""
             ).casefold() not in {"submit", "image"}:
@@ -246,12 +249,12 @@ def _redesign_action_url_contract(
             _append_source_value(labels, element.get("aria-label"))
             if element.name == "input":
                 _append_source_value(labels, element.get("value"))
-            _append_source_value(labels, replacement_text(element))
             _append_source_value(labels, text_with_replacements(element))
             _append_source_value(labels, element.get("title"))
             for label in labels:
                 _append_source_value(allowed_labels, label)
-                _append_source_pair(allowed_pairs, label, destination)
+                for destination in destinations:
+                    _append_source_pair(allowed_pairs, label, destination)
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
         phones=contact_contract.phones,

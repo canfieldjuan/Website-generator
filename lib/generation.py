@@ -402,7 +402,7 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     emails = _contract_text_values(contract.emails, "Action email")
     allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
     allowed_pairs = _contract_action_pairs(contract.allowed_pairs)
-    _validate_action_pair_membership(allowed_pairs, allowed_labels, allowed_urls)
+    _validate_action_pair_membership(allowed_pairs, allowed_labels)
     neutral_terms = sorted(_NEUTRAL_ACTION_LABEL_TERMS)
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
@@ -2104,17 +2104,57 @@ def _contract_action_pairs(values: object) -> tuple[tuple[str, str], ...]:
 def _validate_action_pair_membership(
     pairs: tuple[tuple[str, str], ...],
     allowed_labels: tuple[str, ...],
-    allowed_urls: tuple[str, ...],
 ) -> None:
     label_authority = set(allowed_labels)
-    destination_authority = set(allowed_urls)
-    if any(
-        label not in label_authority or destination not in destination_authority
-        for label, destination in pairs
-    ):
-        raise GeneratedBodyError(
-            "Action pair contract exceeds its label or destination authority."
-        )
+    if any(label not in label_authority for label, _destination in pairs):
+        raise GeneratedBodyError("Action pair contract exceeds its label authority.")
+
+
+def _action_element_declared_destinations(element: Tag) -> tuple[str, ...]:
+    tag_name = element.name.casefold()
+    if tag_name in {"a", "area"}:
+        attributes = ("href", "xlink:href")
+    elif tag_name == "form":
+        attributes = ("action",)
+    elif tag_name in {"button", "input"}:
+        attributes = ("formaction",)
+    else:
+        return ()
+    return tuple(
+        value
+        for attribute in attributes
+        if isinstance((value := element.get(attribute)), str)
+    )
+
+
+def action_element_destinations(element: Tag, root: Tag) -> tuple[str, ...]:
+    """Return the browser-effective destinations owned by one action element."""
+    tag_name = element.name.casefold()
+    if tag_name in {"a", "area", "form"}:
+        return _action_element_declared_destinations(element)
+    if tag_name not in {"button", "input"}:
+        return ()
+
+    control_type = str(element.get("type") or "").casefold()
+    is_submit_control = (
+        tag_name == "button" and control_type not in {"button", "reset"}
+        or tag_name == "input" and control_type in {"submit", "image"}
+    )
+    if not is_submit_control:
+        return ()
+
+    form_id = element.get("form")
+    if isinstance(form_id, str) and form_id.strip():
+        owner = root.find("form", id=form_id.strip())
+    else:
+        owner = element.find_parent("form")
+    if owner is None:
+        return ()
+    if element.has_attr("formaction"):
+        formaction = element.get("formaction")
+        return (formaction,) if isinstance(formaction, str) else ()
+    action = owner.get("action")
+    return (action,) if isinstance(action, str) else ()
 
 
 _NEUTRAL_ACTION_LABEL_TERMS = frozenset(
@@ -2205,7 +2245,7 @@ def _generated_action_labels(element: Tag) -> tuple[str, ...]:
         return value if isinstance(value, str) else ""
 
     def text_with_replacements(node: Tag) -> str:
-        parts: list[str] = []
+        parts: list[str] = [replacement_text(node)]
         for child in node.descendants:
             if isinstance(child, Comment):
                 continue
@@ -2229,7 +2269,6 @@ def _generated_action_labels(element: Tag) -> tuple[str, ...]:
     append(element.get("aria-label"))
     if element.name.casefold() == "input":
         append(element.get("value"))
-    append(replacement_text(element))
     append(text_with_replacements(element))
     append(element.get("title"))
     return tuple(labels)
@@ -2249,7 +2288,6 @@ def _validate_action_urls(
     _validate_action_pair_membership(
         contract_pairs,
         allowed_label_values,
-        allowed_url_values,
     )
     allowed_urls = set(allowed_url_values)
     allowed_labels = {
@@ -2277,25 +2315,15 @@ def _validate_action_urls(
     action_entries: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
-        if tag_name in {"a", "area"}:
-            attributes = ("href", "xlink:href")
-        elif tag_name == "form":
-            attributes = ("action",)
-        elif tag_name in {"button", "input"}:
-            attributes = ("formaction",)
-        else:
+        if tag_name not in {"a", "area", "form", "button", "input"}:
             continue
         is_labelled_action = (
             tag_name in {"a", "area", "button"}
             or tag_name == "input"
             and str(element.get("type") or "").casefold() in {"submit", "image"}
         )
-        element_values = tuple(
-            value
-            for attribute in attributes
-            if isinstance((value := element.get(attribute)), str)
-        )
-        action_values.extend(element_values)
+        action_values.extend(_action_element_declared_destinations(element))
+        element_values = action_element_destinations(element, body_root)
         if is_labelled_action:
             action_entries.append((_generated_action_labels(element), element_values))
 
