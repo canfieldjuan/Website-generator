@@ -4,7 +4,7 @@ import re
 import urllib.parse
 import argparse
 import requests
-from bs4 import BeautifulSoup, Comment, NavigableString
+from bs4 import BeautifulSoup
 
 from lib.clients import (
     EXTRACTION_MODEL,
@@ -17,6 +17,7 @@ from lib.email import send_pitch_email
 from lib.site_extraction import (
     SiteExtractionError,
     same_site_origin,
+    source_action_accessible_name,
     validate_enrichment_result,
     validate_site_analysis,
 )
@@ -204,28 +205,6 @@ def _redesign_action_url_contract(
     if isinstance(source_content, str) and "<" in source_content:
         source_root = BeautifulSoup(source_content, "html.parser")
 
-        def replacement_text(element):
-            if element.name in {"img", "area"}:
-                value = element.get("alt")
-            elif element.name == "input" and str(
-                element.get("type") or ""
-            ).casefold() == "image":
-                value = element.get("alt") or element.get("value")
-            else:
-                value = ""
-            return value if isinstance(value, str) else ""
-
-        def text_with_replacements(element):
-            parts = [replacement_text(element)]
-            for child in element.descendants:
-                if isinstance(child, Comment):
-                    continue
-                if isinstance(child, NavigableString):
-                    parts.append(str(child))
-                elif hasattr(child, "name"):
-                    parts.append(replacement_text(child))
-            return " ".join(" ".join(part for part in parts if part).split())
-
         for element in source_root.find_all(
             ["a", "area", "form", "button", "input"]
         ):
@@ -239,22 +218,10 @@ def _redesign_action_url_contract(
                 element.get("type") or ""
             ).casefold() not in {"submit", "image"}:
                 continue
-            labels = []
-            labelled_by = element.get("aria-labelledby")
-            if isinstance(labelled_by, str):
-                for target_id in labelled_by.split():
-                    target = source_root.find(id=target_id)
-                    if target is not None:
-                        _append_source_value(labels, text_with_replacements(target))
-            _append_source_value(labels, element.get("aria-label"))
-            if element.name == "input":
-                _append_source_value(labels, element.get("value"))
-            _append_source_value(labels, text_with_replacements(element))
-            _append_source_value(labels, element.get("title"))
-            for label in labels:
-                _append_source_value(allowed_labels, label)
-                for destination in destinations:
-                    _append_source_pair(allowed_pairs, label, destination)
+            label = source_action_accessible_name(element, source_root)
+            _append_source_value(allowed_labels, label)
+            for destination in destinations:
+                _append_source_pair(allowed_pairs, label, destination)
     return ActionUrlAdmissionContract(
         allowed_urls=tuple(allowed_urls),
         phones=contact_contract.phones,

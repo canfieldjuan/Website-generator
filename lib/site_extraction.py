@@ -12,7 +12,7 @@ from typing import Any, Iterable
 from urllib.parse import unquote, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
-from bs4.element import Comment
+from bs4.element import Comment, NavigableString, Tag
 from jsonschema import Draft202012Validator
 
 
@@ -580,6 +580,78 @@ def _is_source_logo(image: Any) -> bool:
     return any(_element_has_logo_marker(element) for element in candidates)
 
 
+def _source_action_replacement_text(element: Tag) -> str:
+    tag_name = element.name.casefold()
+    if tag_name in {"img", "area"}:
+        value = element.get("alt")
+    elif tag_name == "input" and str(element.get("type") or "").casefold() == "image":
+        value = element.get("alt") or element.get("value")
+    else:
+        value = ""
+    return value if isinstance(value, str) else ""
+
+
+def _source_accessible_text(
+    element: Tag,
+    root: BeautifulSoup | Tag,
+    active_references: frozenset[str],
+) -> str:
+    labelled_by = element.get("aria-labelledby")
+    if isinstance(labelled_by, str) and labelled_by.strip():
+        references = labelled_by.split()
+        if len(references) > MAX_ITEMS:
+            return ""
+        labelled_parts: list[str] = []
+        for target_id in references:
+            if target_id in active_references:
+                return ""
+            targets = root.find_all(id=target_id, limit=2)
+            if len(targets) != 1:
+                return ""
+            target_text = _source_accessible_text(
+                targets[0],
+                root,
+                active_references | {target_id},
+            )
+            if not target_text:
+                return ""
+            labelled_parts.append(target_text)
+        return " ".join(" ".join(labelled_parts).split())
+
+    aria_label = element.get("aria-label")
+    if isinstance(aria_label, str) and aria_label.strip():
+        return " ".join(aria_label.split())
+
+    parts: list[str] = [_source_action_replacement_text(element)]
+    for child in element.children:
+        if isinstance(child, Comment):
+            continue
+        if isinstance(child, NavigableString):
+            parts.append(str(child))
+        elif isinstance(child, Tag):
+            parts.append(_source_accessible_text(child, root, active_references))
+    return " ".join(" ".join(part for part in parts if part).split())
+
+
+def source_action_accessible_name(
+    element: Tag,
+    root: BeautifulSoup | Tag,
+) -> str:
+    """Return one complete source-owned accessible name for an action."""
+    accessible_name = _source_accessible_text(element, root, frozenset())
+    if accessible_name:
+        return accessible_name
+    labelled_by = element.get("aria-labelledby")
+    if isinstance(labelled_by, str) and labelled_by.strip():
+        return ""
+    if element.name.casefold() == "input":
+        value = element.get("value")
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())
+    title = element.get("title")
+    return " ".join(title.split()) if isinstance(title, str) else ""
+
+
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
 _TITLE_SEPARATOR_PATTERN = re.compile(r"\s*(?:\||[–—•·])\s*")
 _GENERIC_PAGE_IDENTITY_PARTS = frozenset(
@@ -601,6 +673,8 @@ _GENERIC_PAGE_IDENTITY_PARTS = frozenset(
         "team",
     }
 )
+_IDENTITY_CANONICAL_PREFIXES = ("welcome to ", "official website of ")
+_IDENTITY_CANONICAL_SUFFIXES = (" logo",)
 _ATOMIC_RECORD_TAGS = {
     "address",
     "blockquote",
@@ -626,6 +700,22 @@ _RECORD_CONTAINER_TAGS = {
     "tr",
     "ul",
 }
+
+
+def _identity_canonical_variants(value: str) -> tuple[str, ...]:
+    normalized = _normalize_text(value)
+    variants = [normalized] if normalized else []
+    for prefix in _IDENTITY_CANONICAL_PREFIXES:
+        if normalized.startswith(prefix):
+            candidate = normalized[len(prefix) :].strip()
+            if candidate and candidate not in variants:
+                variants.append(candidate)
+    for suffix in _IDENTITY_CANONICAL_SUFFIXES:
+        if normalized.endswith(suffix):
+            candidate = normalized[: -len(suffix)].strip()
+            if candidate and candidate not in variants:
+                variants.append(candidate)
+    return tuple(variants)
 
 
 def _heading_owned_fragment(heading: Any) -> str:
@@ -737,7 +827,7 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
             fragments.append(normalized)
 
     for element in soup.find_all(["article", "section"], limit=MAX_ITEMS):
-        if element.find("section") is not None:
+        if len(element.find_all(["article", "section"], limit=2)) > 1:
             continue
         append(str(element))
 
@@ -847,17 +937,15 @@ class SourceEvidence:
                 or element.name == "button"
                 or role == "button"
             ):
-                action_label = _normalize_text(element.get_text(" ", strip=True))
-                if not action_label:
-                    action_label = _normalize_text(
-                        str(element.get("aria-label") or element.get("title") or "")
-                    )
+                action_label = _normalize_text(
+                    source_action_accessible_name(element, soup)
+                )
             if (
                 element.name == "input"
                 and str(element.get("type") or "").casefold() == "submit"
             ):
                 action_label = _normalize_text(
-                    str(element.get("value") or element.get("aria-label") or "")
+                    source_action_accessible_name(element, soup)
                 )
             if action_label:
                 action_labels.add(action_label)
@@ -1130,7 +1218,13 @@ class SourceEvidence:
                     if (segment := _normalize_text(part))
                 )
             ),
-            identity_exact_segments=tuple(dict.fromkeys(title_identity_parts)),
+            identity_exact_segments=tuple(
+                dict.fromkeys(
+                    variant
+                    for part in (*title_identity_parts, *identity_parts)
+                    for variant in _identity_canonical_variants(part)
+                )
+            ),
             heading_segments=tuple(
                 dict.fromkeys(
                     segment
@@ -1190,7 +1284,7 @@ class SourceEvidence:
         normalized = _normalize_text(value)
         if not normalized:
             raise SiteExtractionError(f"{path} is not grounded in source identity.")
-        if normalized in self.identity_exact_segments:
+        if normalized in self.identity_exact_segments or normalized in self.identity_segments:
             return
         found = False
         for source_text in self.identity_segments:
@@ -1200,7 +1294,6 @@ class SourceEvidence:
                     continue
                 if _occurrence_is_nonassertive(source_text, index, len(normalized)):
                     continue
-                return
         if found:
             raise SiteExtractionError(f"{path} drops source identity context.")
         raise SiteExtractionError(f"{path} is not grounded in source identity.")

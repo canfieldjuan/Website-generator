@@ -157,6 +157,16 @@ accessible label, duplicate references to the same source label are collapsed,
 and labels are assigned one-to-one to distinct controls. Social platform names
 are derived from recognized destination hosts; otherwise the name and URL must
 belong to the same source action.
+Source action evidence uses one effective accessible name: every valid
+`aria-labelledby` target is resolved in declaration order, replacement text such
+as image `alt` participates, and a missing, duplicate, cyclic, or oversized
+reference set fails closed rather than falling back to another label surface.
+The same complete name and its effective destination become the generation
+contract pair. Identity admission likewise accepts only a complete identity
+surface or a small code-owned canonical wrapper variant (for example,
+`Welcome to …` or `… logo`); an arbitrary inner phrase cannot become the business
+name. A parent article or section containing multiple nested semantic containers
+is excluded from section evidence so sibling cards cannot be recombined.
 Business identity is further limited to title, a single primary H1, site-name
 metadata, and explicit brand/logo evidence; on a multiple-H1 page, title,
 site-name, or logo evidence corroborates the admitted H1, with only the first
@@ -275,6 +285,11 @@ business-specific claims.
   node used directly as an `aria-labelledby` target. An inert or orphaned
   `formaction` remains subject to output URL sanitization but cannot create source
   URL or pair authority.
+- Latest source-unit boundary pass: `python -m unittest -q
+  tests.test_site_extraction tests.test_generation` passed 203 tests. It covers
+  complete multi-target accessible names, image replacement text, fail-closed
+  partial references, controlled identity wrappers versus arbitrary name
+  substrings, and leaf ownership across sibling nested articles.
 - `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
   tests/test_site_extraction.py tests/test_generation.py`: passed. The unignored
   scoped run still reports two pre-existing unused contract imports in

@@ -550,6 +550,49 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     ),
                 )
 
+    def test_action_labels_use_complete_accessible_names_and_replacement_text(self):
+        image_action = {
+            "site": {"name": "Acme Cleaning"},
+            "nav": [{"label": "Contact Us", "url": "/contact"}],
+        }
+        image_source = (
+            "<h1>Acme Cleaning</h1>"
+            '<a href="/contact"><img alt="Contact Us"></a>'
+        )
+        self.assertEqual(
+            validate_site_analysis(image_action, image_source),
+            image_action,
+        )
+
+        split_name_source = (
+            "<h1>Acme Cleaning</h1>"
+            '<span id="members">Members Only</span>'
+            '<span id="booking">Book Appointment</span>'
+            '<a href="/book" aria-labelledby="members booking"></a>'
+        )
+        incomplete = {
+            "site": {"name": "Acme Cleaning"},
+            "nav": [{"label": "Book Appointment", "url": "/book"}],
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "one source action"):
+            validate_site_analysis(incomplete, split_name_source)
+
+        complete = copy.deepcopy(incomplete)
+        complete["nav"][0]["label"] = "Members Only Book Appointment"
+        self.assertEqual(
+            validate_site_analysis(complete, split_name_source),
+            complete,
+        )
+
+        partial_reference_source = (
+            "<h1>Acme Cleaning</h1>"
+            '<span id="booking">Book Appointment</span>'
+            '<a href="/book" aria-labelledby="booking missing" '
+            'title="Book Appointment"></a>'
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "one source action"):
+            validate_site_analysis(incomplete, partial_reference_source)
+
     def test_navigation_label_and_url_must_share_one_source_action(self):
         document = {
             "site": {"name": "Acme Cleaning"},
@@ -792,6 +835,17 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             validate_site_analysis(verified_identity, explicit_identity_source),
             verified_identity,
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Plumbing"}},
+                explicit_identity_source,
+            )
+
+        canonical_wrapper_source = "<h1>Welcome to Acme Cleaning</h1>"
+        self.assertEqual(
+            validate_site_analysis(valid, canonical_wrapper_source),
+            valid,
         )
 
         conflicting_single_title_source = (
@@ -1251,6 +1305,16 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "one source section"):
             validate_site_analysis(nested_mismatch, nested_sections)
 
+        nested_articles = (
+            "<h1>Acme Cleaning</h1><section>"
+            "<article><h2>Our Team</h2><h3>Jane Doe</h3>"
+            "<p>Operations Manager</p></article>"
+            "<article><h2>Cleaning Services</h2><h3>Office Cleaning</h3>"
+            "<p>Nightly service.</p></article></section>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "one source section"):
+            validate_site_analysis(nested_mismatch, nested_articles)
+
     def test_single_page_section_binds_navigation_and_scopes_content(self):
         source = (
             "<h1>Acme Cleaning</h1><nav>"
@@ -1489,7 +1553,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 '<a href="/image-action">Schedule <img alt="Visit"></a>'
                 '<form action="/submit"><input type="submit" value="Submit">'
                 '<input type="image" alt="Pay Now" formaction="/pay"></form>'
-                '<a href="/aria-action" aria-labelledby="image-label"></a>'
+                '<span id="members-label">Members Only</span>'
+                '<a href="/aria-action" aria-labelledby="members-label image-label"></a>'
                 '<img id="image-label" alt="Book Appointment">'
                 '<form id="external-form" action="/external"></form>'
                 '<button form="external-form">External</button>'
@@ -1533,7 +1598,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 "Schedule Visit",
                 "Submit",
                 "Pay Now",
-                "Book Appointment",
+                "Members Only Book Appointment",
                 "External",
             ),
         )
@@ -1551,7 +1616,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 ("Schedule Visit", "/image-action"),
                 ("Submit", "/submit"),
                 ("Pay Now", "/pay"),
-                ("Book Appointment", "/aria-action"),
+                ("Members Only Book Appointment", "/aria-action"),
                 ("External", "/external"),
             ),
         )
