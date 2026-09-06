@@ -322,7 +322,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `07d14d7224e29b2066a2ffcb436498acd1d63956`.
+- Code revision under test: `bb8a52c6ca24c77ce5ee6b438eeea35bce57e01b`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -419,46 +419,55 @@ business-specific claims.
   same-or-higher peer, while ordinary paragraph facts remain in paragraph runs
   and do not absorb a preceding heading. The same field-label boundary continues
   to separate independently labeled contact facts.
-- Focused ownership boundary: `python -m unittest -q
+- The final paginated reconciliation exposed two more independently reproduced
+  contract gaps. Leaf assertion ownership still depended on `p`/`small`/heading
+  tag names, and the redesign catalog's business-name label was not bound to its
+  internal home route. Direct source contexts now define claim owners within the
+  existing record/heading/field boundaries, and the action contract carries the
+  exact validated site name plus `/` as one code-owned pair.
+- Focused ownership and action boundaries: `python -m unittest -q
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_adjacent_owned_disclaimers
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_contact_facts_allow_only_field_owned_presentation_labels`:
-  2 tests passed. The negative side covers shortened claims across `h1` through
-  `h6`, unlabeled contact corrections with and without sentence punctuation,
-  same-line trailing restrictions, and former-address labels. The positive side
-  covers complete heading-owned claims, a paragraph claim bounded from its peer
-  heading section, independently labeled Address/Hours peers, a standalone
-  labeled field, and an exact heading label wrapping its following field value.
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_keeps_only_action_owned_urls
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_excludes_inert_source_actions
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_preserves_every_source_label_surface
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_inert_formaction_attributes_do_not_create_source_authority
+  tests.test_generation.AtomicWriteAndCliTests.test_redesign_generators_bind_identity_and_action_destinations`:
+  6 tests passed. The negative side covers shortened claims across `h1` through
+  `h6` and adjacent leaf `div` blocks, peer heading boundaries, and rebinding the
+  business identity to another admitted destination. The positive side covers
+  complete heading/block-owned claims, independent record and field boundaries,
+  exact source action pairs, and the catalog-owned business-name-to-`/` pair.
 - Affected module: `python -m unittest -q tests.test_site_extraction`: 75 tests
   passed.
 - Full suite: `python -m unittest discover -s tests -q`: 368 tests passed with
   34 skipped.
 - Scoped static checks passed:
-  `ruff check --ignore F401,F541 lib/site_extraction.py
-  tests/test_site_extraction.py`;
-  `python -m compileall -q lib/site_extraction.py
-  tests/test_site_extraction.py`; and `git diff --check`.
-- The final code revision `07d14d7224e29b2066a2ffcb436498acd1d63956`
+  `ruff check --ignore F401,F541 lib/site_extraction.py pipeline.py
+  tests/test_site_extraction.py tests/test_generation.py`;
+  `python -m compileall -q lib/site_extraction.py pipeline.py
+  tests/test_site_extraction.py tests/test_generation.py`; and `git diff --check`.
+- The final code revision `bb8a52c6ca24c77ce5ee6b438eeea35bce57e01b`
   used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-06T01:45:40-05:00` capture with no model
-  resident and exited 0 before the `2026-09-06T01:46:44-05:00` post-run capture;
+  invocation began after the `2026-09-06T02:03:01-05:00` capture with no model
+  resident and exited 0 before the `2026-09-06T02:04:04-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
-  path ran. Log: `/dev/shm/website-generator-pr47-fixture-07d14d7.log`.
+  path ran. Log: `/dev/shm/website-generator-pr47-fixture-bb8a52c.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`; size was 72027 bytes, inode
-  3311297, mtime was `2026-09-06 01:46:40.516883085 -0500`, and SHA-256 was
+  3311281, mtime was `2026-09-06 02:04:01.321281103 -0500`, and SHA-256 was
   `8991ac64600a198bcf5f14d6feae6fe33e0cbca5ee752d23da033dbaaaa2b309`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-07d14d7.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-07d14d7.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-bb8a52c.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-bb8a52c.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3180 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
   artifact was served directly from this invocation's output. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-07d14d7.png`,
+  `/dev/shm/website-generator-pr47-browser-render-bb8a52c.png`,
   SHA-256
   `06cb49e006365b4e31f2b71f072f8ce5dd2e0b48e47469d60adc3221e8761945`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
