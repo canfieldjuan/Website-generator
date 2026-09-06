@@ -93,7 +93,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fo4Hc`: `role=link` bypassed action-label authority | Source collection and generated output must share one semantic action classifier for native and ARIA actions. | Source-owned ARIA button/link labels admit and unsupported generated ARIA button/link labels reject; an unroled focusable element remains non-action content. | fixed/superseded | `lib/site_extraction.py:761-771,1095-1106`; `lib/generation.py:2345-2361`; `tests/test_site_extraction.py:594-630`; `tests/test_generation.py:1427-1450` |
 | `PRRT_kwDOTDYaKM6fo4Hd`: non-URL image metadata became image authority | Metadata authority must be selected by a bounded resource-URL property set, not by the substring `image`. | Common Open Graph/Twitter image URL properties admit; `og:image:alt`, `og:image:width`, and `og:image:type` cannot become image URLs. | fixed/superseded | `lib/site_extraction.py:238-249,1139-1148`; `tests/test_site_extraction.py:1343-1385` |
 | `PRRT_kwDOTDYaKM6fo4He`: form-control ARIA references used raw descendant text | Every ARIA-labelled consumer must use the same recursive accessible-name resolver, including nested references and replacement text. | Image `alt` and target `aria-label` now supply the control name; conflicting raw target text no longer grants field authority. | fixed/superseded | `lib/site_extraction.py:700-739,1222-1261`; `tests/test_site_extraction.py:1245-1341` |
-| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `8b20fe3` invocation rewrote the artifact, exited 0, and both required scans found zero matches; its bytes equal the inspected rendered artifact. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-8b20fe3.log`; `/dev/shm/website-generator-pr47-browser-render-74b2a74.png` |
+| `PRRT_kwDOTDYaKM6fo8_x`: descendants of ignored source containers became visible evidence | Dormant source containers cannot authorize identity, claims, actions, fields, records, or sections; the explicitly code-owned image inventory must remain available. | A claim, action, and form label found only below `<template>` now reject while their visible equivalents admit. The code-owned image-inventory template still admits its recorded image URL. | fixed/superseded | `lib/site_extraction.py:1043-1090`; `tests/test_site_extraction.py:1386-1465` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `456b9ec` invocation rewrote the artifact, exited 0, and both required scans found zero matches; its bytes equal the inspected rendered artifact. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-456b9ec.log`; `/dev/shm/website-generator-pr47-browser-render-74b2a74.png` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 
 ## Mechanism
@@ -293,7 +294,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-05)
 
-- Code revision under test: `8b20fe3db6cd0d0f5d42129a3fed11426162eb85`.
+- Code revision under test: `456b9ecd8db4a8ed8a0ace07a38a81639b91eace`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -331,18 +332,23 @@ business-specific claims.
   They now use complete-context question admission, the shared semantic action
   classifier, a bounded image-resource property set, and the shared recursive
   accessible-name resolver respectively.
-- Focused both-side regressions: `python -m unittest -v
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_existing_cta_requires_an_exact_source_action_label
-  tests.test_generation.BodyAssemblyTests.test_body_aria_actions_enforce_label_authority
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_form_fields_require_actual_labeled_controls
+- The final exact-head review reproduced one remaining ancestry defect: text
+  nested below an ignored source container could still authorize visible output.
+  `SourceEvidence.from_html()` now preserves only the bounded code-owned image
+  inventory and stylesheet image resources before removing every ignored
+  container. All downstream identity, claim, action, form, record, and section
+  collectors therefore operate on the same visible evidence tree.
+- Focused both-side regressions: `python -m unittest -q
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_ignored_source_containers_cannot_authorize_visible_meaning
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_code_owned_image_inventory_remains_admissible
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_image_metadata_admits_only_resource_url_properties
-  tests.test_site_extraction.EnrichmentGroundingTests.test_faq_titles_preserve_the_complete_source_question
-  tests.test_site_extraction.EnrichmentGroundingTests.test_nested_atomic_records_cannot_authorize_cross_record_items
-  `: 6 tests passed, covering all four new findings plus their pass-side controls
-  and the existing nested-record regression.
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_form_fields_require_actual_labeled_controls
+  tests.test_generation.BodyAssemblyTests.test_body_aria_actions_enforce_label_authority`:
+  5 tests passed. Hidden and visible claim/action/form boundaries were exercised,
+  and the code-owned image-inventory pass side remained admissible.
 - Affected modules: `python -m unittest -q tests.test_site_extraction
-  tests.test_generation`: 214 tests passed.
-- Full suite: `python -m unittest discover -s tests -q`: 356 tests passed with
+  tests.test_generation`: 216 tests passed.
+- Full suite: `python -m unittest discover -s tests -q`: 358 tests passed with
   34 skipped.
 - Scoped static checks passed:
   `ruff check --ignore F401 lib/site_extraction.py
@@ -357,18 +363,18 @@ business-specific claims.
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-05T22:41:40-05:00` capture with no model
-  resident and exited 0 before the `2026-09-05T22:42:47-05:00` post-run capture;
+  invocation began after the `2026-09-05T22:57:28-05:00` capture with no model
+  resident and exited 0 before the `2026-09-05T22:58:35-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
-  path ran. Log: `/dev/shm/website-generator-pr47-fixture-8b20fe3.log`.
+  path ran. Log: `/dev/shm/website-generator-pr47-fixture-456b9ec.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`; size was 71954 bytes, inode
-  3309618, mtime was `1788666161258723984` ns, and SHA-256 was
+  3309963, mtime was `2026-09-05 22:58:24.303206968 -0500`, and SHA-256 was
   `5b57fe46110d90d88b6f6b4fcfe18eeac32198d3c2980b524ed87d43c89aaacd`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-8b20fe3.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-8b20fe3.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-456b9ec.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-456b9ec.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3890 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
