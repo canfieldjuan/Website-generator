@@ -468,13 +468,20 @@ _PHONE_EXTENSION_SUFFIX_PATTERN = re.compile(
     r"\s*(?:x|ext\.?)\s*\d+\s*$",
     re.I,
 )
+_PHONE_ROLE_TOKEN_PATTERN = r"fax|facsimile|phone|telephone|mobile|cell|call"
+_PHONE_ROLE_DESCRIPTOR_PATTERN = (
+    rf"(?!(?:{_PHONE_ROLE_TOKEN_PATTERN})\b)[A-Z][A-Z0-9_-]*\.?"
+)
 _PHONE_ROLE_PATTERN = re.compile(
-    r"\b(?P<role>fax|facsimile|phone|telephone|mobile|cell|call)\b"
-    r"(?:\s+(?:[A-Z][A-Z0-9_-]*\s+){0,4}(?:number|no)\.?)?"
-    r"\s*(?:[:#-]\s*)?",
+    rf"\b(?P<role>{_PHONE_ROLE_TOKEN_PATTERN})\b"
+    rf"(?:\s+(?:{_PHONE_ROLE_DESCRIPTOR_PATTERN}\s+){{0,4}}(?:number|no)\.?)?"
+    r"\s*(?:[:#\-–—]\s*)?",
     re.I,
 )
-_CONTACT_GROUP_BREAK_PATTERN = re.compile(r"[.!?;|¦•·●▪‣∙◦○◆◇–—]")
+_CONTACT_GROUP_BOUNDARY = "\ue000"
+_CONTACT_GROUP_BREAK_PATTERN = re.compile(
+    rf"[.!?;|¦•·●▪‣∙◦○◆◇–—{_CONTACT_GROUP_BOUNDARY}]"
+)
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
 _CSS_DECLARATION_PATTERN = re.compile(
     r"(?:^|[;{])\s*([\w-]+)\s*:\s*([^;{}]+)",
@@ -1072,6 +1079,21 @@ def source_visible_text(element: Tag) -> str:
             parts.append(str(child))
         elif isinstance(child, Tag):
             parts.append(source_visible_text(child))
+    return " ".join(" ".join(part for part in parts if part).split())
+
+
+def source_contact_text(element: Any) -> str:
+    """Return visible text while retaining structural contact-group boundaries."""
+    if isinstance(element, Comment):
+        return ""
+    if isinstance(element, NavigableString):
+        return str(element)
+    if not isinstance(element, Tag) or not is_source_semantic_element(element):
+        return ""
+    if element.name == "br":
+        return _CONTACT_GROUP_BOUNDARY
+    parts = [_source_action_replacement_text(element)]
+    parts.extend(source_contact_text(child) for child in element.children)
     return " ".join(" ".join(part for part in parts if part).split())
 
 
@@ -1805,6 +1827,7 @@ class SourceEvidence:
             context_parts.setdefault(context_key, []).append(value)
             context_elements.setdefault(context_key, context or node)
         assertion_occurrences: list[tuple[str, str]] = []
+        phone_assertion_occurrences: list[tuple[str, str]] = []
         claim_scope_parent_tags = {
             "article",
             "details",
@@ -1886,6 +1909,29 @@ class SourceEvidence:
                     return prefix
             return raw_claim_component_text(element)
 
+        def contact_claim_component_text(element: Any) -> str:
+            if (
+                not isinstance(element, Tag)
+                or _assertion_heading_level(element) is not None
+            ):
+                return _normalize_text(source_contact_text(element))
+            boundary = first_claim_boundary(element)
+            if boundary is not None:
+                parts: list[str] = []
+                for descendant in element.descendants:
+                    if descendant is boundary:
+                        break
+                    if isinstance(descendant, Tag) and descendant.name == "br":
+                        parts.append(_CONTACT_GROUP_BOUNDARY)
+                    elif isinstance(descendant, NavigableString) and not isinstance(
+                        descendant, Comment
+                    ):
+                        parts.append(str(descendant))
+                prefix = _normalize_text(" ".join(parts))
+                if prefix:
+                    return prefix
+            return _normalize_text(source_contact_text(element))
+
         def belongs_to_preboundary_fragment(parent: Tag, element: Any) -> bool:
             boundary = first_claim_boundary(parent)
             if boundary is None or not claim_component_prefix(parent, boundary):
@@ -1937,6 +1983,8 @@ class SourceEvidence:
             context = context_elements[context_key]
             local_segment = _normalize_text(" ".join(local_parts))
             owner_segment = local_segment
+            contact_local_segment = contact_claim_component_text(context)
+            contact_owner_segment = contact_local_segment
             if is_claim_scope_context(context):
                 scope_context = context
                 parent = context.parent
@@ -2024,6 +2072,12 @@ class SourceEvidence:
                                     for sibling in siblings[first : last + 1]
                                 )
                             )
+                            contact_owner_segment = _normalize_text(
+                                " ".join(
+                                    contact_claim_component_text(sibling)
+                                    for sibling in siblings[first : last + 1]
+                                )
+                            )
             local_context_is_owned_by_child = (
                 isinstance(context, Tag)
                 and context.name in claim_scope_parent_tags
@@ -2041,8 +2095,14 @@ class SourceEvidence:
             )
             if local_segment and owner_segment and not local_context_is_owned_by_child:
                 assertion_occurrences.append((local_segment, owner_segment))
+                phone_assertion_occurrences.append(
+                    (contact_local_segment, contact_owner_segment)
+                )
         assertion_segments = tuple(
             dict.fromkeys(owner for _, owner in assertion_occurrences)
+        )
+        phone_assertion_segments = tuple(
+            dict.fromkeys(owner for _, owner in phone_assertion_occurrences)
         )
         attribute_parts: list[str] = []
         raw_action_urls: set[str] = set()
@@ -2057,7 +2117,7 @@ class SourceEvidence:
         h1_parts: list[str] = []
         heading_parts: list[str] = []
         email_values: list[str] = list(assertion_segments)
-        phone_values: list[str] = list(assertion_segments)
+        phone_values: list[str] = list(phone_assertion_segments)
         action_labels: set[str] = set()
 
         for element in soup.find_all("title", limit=MAX_ITEMS):

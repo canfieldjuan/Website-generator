@@ -1243,6 +1243,9 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for complete_label in (
             "Fax Line No. 217-555-0100",
             "Fax Customer Service Number: 217.555.0100",
+            "Fax Dept. Number: 217-555-0100",
+            "Fax — 217-555-0100",
+            "Call Center Fax Number: 217-555-0100",
         ):
             with (
                 self.subTest(complete_label=complete_label),
@@ -1259,6 +1262,24 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             base_phone,
         )
+
+        stacked_source = (
+            "<h1>Acme Cleaning</h1>"
+            "<p>Phone: 217-555-0199<br>217-555-0100 or "
+            "217-555-0101 (fax)</p>"
+        )
+        self.assertEqual(
+            validate_site_analysis(grouped_phone, stacked_source),
+            grouped_phone,
+        )
+        for fax_number in ("217-555-0100", "217-555-0101"):
+            fax_document = copy.deepcopy(base_phone)
+            fax_document["site"]["contact"]["phone"] = fax_number
+            with (
+                self.subTest(stacked_fax_number=fax_number),
+                self.assertRaisesRegex(SiteExtractionError, "source phone"),
+            ):
+                validate_site_analysis(fax_document, stacked_source)
 
         for visual_separator in ("|", "•", "—"):
             visually_grouped_source = (
