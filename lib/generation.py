@@ -1873,7 +1873,6 @@ def _validate_review_summary(
             raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
         allowed_link_text = {
             "read all reviews on google",
-            "read all reviews on google →",
         }
     else:
         strong_elements = tuple(score_element.find_all("strong", recursive=False))
@@ -1905,7 +1904,6 @@ def _validate_review_summary(
             raise GeneratedBodyError(f"Generated body {owner} has the wrong review count.")
         allowed_link_text = {
             "read all on google",
-            "read all on google →",
         }
     if _normalized_plain_review_text(link, owner) not in allowed_link_text:
         raise GeneratedBodyError(f"Generated body {owner} has invalid CTA text.")
@@ -2408,9 +2406,7 @@ def _validate_action_urls(
             if normalized_label:
                 raise GeneratedBodyError(
                     "Generated body contains a non-neutral action label that is not "
-                    f"an exact source-owned action label: {action_label!r}. "
-                    "Exact allowed labels: "
-                    f"{json.dumps(allowed_label_values, ensure_ascii=False)}."
+                    f"an exact source-owned action label: {action_label!r}."
                 )
 
 

@@ -418,7 +418,7 @@ The per-section rules:
      <div class="reviews-summary-row">
        <span class="reviews-summary-stars" style="--score: [PROSPECT.google_review_score];">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
        <span class="reviews-summary-text"><strong>[PROSPECT.google_review_score] out of 5</strong> &middot; Based on [PROSPECT.google_review_count] Google Reviews</span>
-       <a href="[google_reviews_url]" class="reviews-summary-cta" target="_blank" rel="noopener">Read All on Google &rarr;</a>
+       <a href="[google_reviews_url]" class="reviews-summary-cta" target="_blank" rel="noopener">Read All on Google</a>
      </div>
    </div>
    ```
@@ -441,7 +441,7 @@ The per-section rules:
        <div class="reviews-score">[PROSPECT.google_review_score]<span class="of-five">out of 5</span></div>
        <div class="reviews-count">Based on [PROSPECT.google_review_count] reviews on Google</div>
        <a href="[google_reviews_url]" class="reviews-cta" target="_blank" rel="noopener">
-         Read All Reviews on Google &rarr;
+         Read All Reviews on Google
        </a>
      </div>
    </div>

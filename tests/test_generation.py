@@ -1010,47 +1010,6 @@ class ProviderBoundaryTests(unittest.TestCase):
         )
         self.assertTrue(generator.call_args_list[1].kwargs["cache_system_prompt"])
 
-    def test_local_action_label_correction_receives_exact_allowed_label(self):
-        first = body_result(
-            '<body><a href="https://source.test/reviews">Read All on Google →</a></body>'
-        )
-        corrected = body_result(
-            '<body><a href="https://source.test/reviews">Read All on Google</a></body>'
-        )
-        contract = ActionUrlAdmissionContract(
-            allowed_urls=("https://source.test/reviews",),
-            allowed_labels=("Read All on Google",),
-            allowed_pairs=(
-                ("Read All on Google", "https://source.test/reviews"),
-            ),
-        )
-
-        def admit(candidate):
-            return validate_generated_body(
-                candidate,
-                expected_action_urls=contract,
-            )
-
-        with patch(
-            "lib.generation.generate_text",
-            side_effect=(first, corrected),
-        ) as generator:
-            final_result, admitted = generate_with_local_admission_retry(
-                config(),
-                system_prompt="system",
-                user_parts=(PromptPart("source contract"),),
-                temperature=0.4,
-                admit=admit,
-            )
-
-        self.assertIs(final_result, corrected)
-        self.assertEqual(admitted, corrected.content)
-        retry_parts = generator.call_args_list[1].kwargs["user_parts"]
-        self.assertIn(
-            'Exact allowed labels: [\\"Read All on Google\\"]',
-            retry_parts[-1].text,
-        )
-
     def test_second_local_admission_failure_is_terminal(self):
         attempts = (body_result("first"), body_result("second"))
         admission_attempt = 0
@@ -1329,7 +1288,7 @@ class BodyAssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(
             GeneratedBodyError,
             "non-neutral action label",
-        ) as action_label_error:
+        ):
             validate_generated_body(
                 body_result(
                     '<body><span id="cta-label">Request My Quote</span>'
@@ -1338,25 +1297,17 @@ class BodyAssemblyTests(unittest.TestCase):
                 ),
                 expected_action_urls=contract,
             )
-        self.assertIn(
-            'Exact allowed labels: ["Book"]',
-            str(action_label_error.exception),
-        )
 
         with self.assertRaisesRegex(
             GeneratedBodyError,
             "non-neutral action label",
-        ) as decorated_label_error:
+        ):
             validate_generated_body(
                 body_result(
                     '<body><a href="https://source.test/book">Book →</a></body>'
                 ),
                 expected_action_urls=contract,
             )
-        self.assertIn(
-            'Exact allowed labels: ["Book"]',
-            str(decorated_label_error.exception),
-        )
 
         with self.assertRaisesRegex(
             GeneratedBodyError,
@@ -2313,6 +2264,8 @@ class PromptContractTests(unittest.TestCase):
                 for value in forbidden:
                     self.assertNotIn(value, filtered)
                 self.assertNotIn("REVIEW_BRANCH_", filtered)
+                self.assertNotIn("Read All on Google &rarr;", filtered)
+                self.assertNotIn("Read All Reviews on Google &rarr;", filtered)
 
     def test_review_prompt_filter_fails_closed_when_markers_drift(self):
         prompt = Path("references/06-build-prompt.md").read_text(encoding="utf-8")
@@ -3187,6 +3140,17 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(extra_cta_text)),
             )
 
+        decorated_cta = admitted_body.replace(
+            "Read All Reviews on Google",
+            "Read All Reviews on Google →",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid CTA text"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(decorated_cta)),
+            )
+
         exact_ambient = admitted_body.replace(
             "</nav>",
             '<span class="trust-stars" style="--score: 4.4">★★★★★</span>'
@@ -3306,6 +3270,17 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(admitted_body)),
         )
         self.assertIn(admitted_body, html)
+
+        decorated_cta = admitted_body.replace(
+            "Read All on Google",
+            "Read All on Google →",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "invalid CTA text"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(decorated_cta)),
+            )
 
         extra_grid_text = admitted_body.replace(
             '<div class="reviews-card-grid">',
