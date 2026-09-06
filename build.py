@@ -158,16 +158,12 @@ BUILD_REQUIRED_CLASS_COUNTS = (
     ("dual-cta-hero", 1),
     ("coverage-band", 1),
     ("services-grid", 1),
-    ("service-card", 6),
-    ("service-card-name", 6),
-    ("service-card-desc", 6),
     ("benefits-grid", 1),
     ("benefit-card", 3),
     ("contact-form-wrap", 1),
     *REQUIRED_FOOTER_CLASS_COUNTS,
 )
 BUILD_REQUIRED_CHILD_CLASS_SEQUENCES = (
-    ("services-grid", ("service-card",) * 6),
     ("service-card", ("service-card-name", "service-card-desc")),
     ("benefits-grid", ("benefit-card",) * 3),
     *REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
@@ -338,6 +334,7 @@ def review_contract_instruction(contract):
 
 def required_build_class_counts(prospect):
     """Return the exact page skeleton valid for the sanitized prospect."""
+    service_count = len(prospect["services"])
     base_counts = (
         BUILD_REQUIRED_CLASS_COUNTS
         if prospect.get("phone")
@@ -346,7 +343,24 @@ def required_build_class_counts(prospect):
             for class_name, expected_count in BUILD_REQUIRED_CLASS_COUNTS
         )
     )
-    return (*base_counts, *_review_class_counts(expected_review_contract(prospect)))
+    service_counts = (
+        ("service-card", service_count),
+        ("service-card-name", service_count),
+        ("service-card-desc", service_count),
+    )
+    return (
+        *base_counts,
+        *service_counts,
+        *_review_class_counts(expected_review_contract(prospect)),
+    )
+
+
+def required_build_child_class_sequences(prospect):
+    """Return source-sized direct-child contracts for the build skeleton."""
+    return (
+        ("services-grid", ("service-card",) * len(prospect["services"])),
+        *BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
+    )
 
 
 def expected_build_form_action(prospect):
@@ -389,22 +403,23 @@ def expected_build_action_url_contract(prospect, review_contract):
     )
 
 
-BUILD_SERVICES_RESPONSE_SCAFFOLD = (
-    '<div class="page-wrap section-gap">\n'
-    '  <div class="sec-hd">\n'
-    '    <span class="sec-title"><span class="sec-dot"></span>Services</span>\n'
-    '  </div>\n'
-    '  <div class="services-grid">\n'
-    + "\n".join(
-        '    <div class="service-card">\n'
-        f'      <div class="service-card-name">[SERVICE_{index}_NAME]</div>\n'
-        f'      <p class="service-card-desc">[SERVICE_{index}_DESCRIPTION]</p>\n'
-        '    </div>'
-        for index in range(1, 7)
+def build_services_response_scaffold(service_count):
+    return (
+        '<div class="page-wrap section-gap">\n'
+        '  <div class="sec-hd">\n'
+        '    <span class="sec-title"><span class="sec-dot"></span>Services</span>\n'
+        '  </div>\n'
+        '  <div class="services-grid">\n'
+        + "\n".join(
+            '    <div class="service-card">\n'
+            f'      <div class="service-card-name">[SERVICE_{index}_NAME]</div>\n'
+            f'      <p class="service-card-desc">[SERVICE_{index}_DESCRIPTION]</p>\n'
+            '    </div>'
+            for index in range(1, service_count + 1)
+        )
+        + '\n  </div>\n'
+        '</div>'
     )
-    + '\n  </div>\n'
-    '</div>'
-)
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
 OPTIONAL_STRING_FIELDS = ("display_name", "owner_email", "address")
@@ -518,6 +533,22 @@ def prepare_prospect(prospect, build_date=None):
             "Prospect JSON required field(s) must be non-empty strings: "
             f"{', '.join(invalid)}"
         )
+    prospect["trade"] = prospect["trade"].strip()
+    services = prospect.get("services")
+    if (
+        not isinstance(services, list)
+        or not services
+        or any(not isinstance(service, str) or not service.strip() for service in services)
+    ):
+        raise ValueError(
+            "Prospect JSON services must be a non-empty list of non-empty strings."
+        )
+    normalized_services = [service.strip() for service in services]
+    if len({service.casefold() for service in normalized_services}) != len(
+        normalized_services
+    ):
+        raise ValueError("Prospect JSON services must not contain duplicates.")
+    prospect["services"] = normalized_services
     invalid_optional_strings = [
         key
         for key in OPTIONAL_STRING_FIELDS
@@ -834,6 +865,13 @@ def filter_unverified_claim_examples(prompt_text, prospect):
             flags=re.IGNORECASE,
         )
     return filtered
+
+
+def industry_generation_guidance(prompt_text):
+    """Return only universal source-authority rules for body generation."""
+    first_trade = re.search(r"(?m)^## TRADE: [^\n]+\s*$", prompt_text)
+    preamble = prompt_text[: first_trade.start()] if first_trade else prompt_text
+    return preamble.strip() + "\n"
 
 
 REVIEW_PROMPT_BRANCH_PATTERN = re.compile(
@@ -1317,6 +1355,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         system_prompt = f.read()
     with open(INDUSTRY_DEFAULTS_PATH, "r") as f:
         industry_defaults = f.read()
+    industry_defaults = industry_generation_guidance(industry_defaults)
     review_contract = expected_review_contract(prospect)
     system_prompt = filter_review_prompt_branches(system_prompt, review_contract.mode)
     system_prompt = filter_unverified_claim_examples(system_prompt, prospect)
@@ -1331,12 +1370,11 @@ def generate_build_html(prospect, generation_config=None, client=None):
     class_catalog = "\n".join(homepage_classes)
     interior_only_classes = extract_interior_only_class_names(base_template)
 
-    # Static block -- same bytes for every plumber/HVAC/electrician build.
-    # Cache marker on the end of this lets consecutive builds within the
-    # 5-minute ephemeral window pay ~0.1x for these tokens instead of full
-    # price. The static block deliberately comes BEFORE the variable
-    # prospect JSON: prompt caching is a prefix match, so any byte change
-    # before the marker invalidates the cache for that breakpoint.
+    # Static block -- stable across business types because customer and trade
+    # facts live in the variable prospect block. Its cache marker lets
+    # consecutive builds reuse these tokens.
+    # The block deliberately comes BEFORE the variable prospect JSON because
+    # prompt caching is a prefix match.
     #
     # THEMES and SECTION ORDERS are inlined so the LLM can actually look
     # up _computed_theme and _computed_section_order in the catalogs.
@@ -1420,6 +1458,10 @@ def generate_build_html(prospect, generation_config=None, client=None):
         review_contract,
     )
     required_class_counts = required_build_class_counts(prospect)
+    required_child_class_sequences = required_build_child_class_sequences(prospect)
+    services_response_scaffold = build_services_response_scaffold(
+        len(prospect["services"])
+    )
     if logo_url:
         logo_instruction = (
             f"Use this exact logo URL when rendering the nav: {json.dumps(logo_url)}."
@@ -1435,9 +1477,13 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{json.dumps(dict(required_class_counts), ensure_ascii=False)}\n"
         "MANDATORY SERVICES: At the position required by "
         "prospect._computed_section_order, reproduce the exact scaffold below. "
-        "Replace every square-bracket token with the selected prospect or "
-        "canonical-trade service content; do not emit the tokens themselves.\n"
-        f"{BUILD_SERVICES_RESPONSE_SCAFFOLD}\n"
+        "Use every prospect.services entry exactly once, in source order. Do not "
+        "add, omit, merge, or rename a service. Replace each square-bracket name "
+        "token with its corresponding exact prospect service; descriptions may "
+        "explain that service without adding another offering. Do not emit the "
+        "tokens themselves.\n"
+        f"MANDATORY SERVICE NAMES: {json.dumps(prospect['services'], ensure_ascii=False)}\n"
+        f"{services_response_scaffold}\n"
         "MANDATORY EXACT SUBSTITUTIONS: "
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
         f"{source_claim_boundary_instruction(prospect)}\n"
@@ -1492,8 +1538,9 @@ def generate_build_html(prospect, generation_config=None, client=None):
             exact_source_claims=exact_source_claim_contracts(prospect),
             expected_form_action=expected_build_form_action(prospect),
             expected_reviews=review_contract,
+            expected_services=tuple(prospect["services"]),
             required_class_counts=required_class_counts,
-            required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
+            required_child_class_sequences=required_child_class_sequences,
         )
 
     result, html = generate_with_local_admission_retry(

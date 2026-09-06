@@ -193,7 +193,9 @@ SERVICE_RADIUS_CLAIM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CITY_STATE_CLAIM_PATTERN = re.compile(
-    r"(?<!\w)(?P<city>[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3}),"
+    r"(?<!\w)(?:(?i:(?:(?:now|proudly)\s+)?serving|located\s+in|based\s+in)\s+)?"
+    r"(?P<city>(?!(?i:serving|located|based)\b)[A-Z][A-Za-z.'-]*"
+    r"(?:\s+(?!(?i:serving|located|based)\b)[A-Z][A-Za-z.'-]*){0,3}),"
     r"\s*(?P<state>[A-Z]{2})(?![A-Za-z])",
 )
 SERVICE_PLACE_CLAIM_PATTERN = re.compile(
@@ -290,6 +292,7 @@ _EXPECTED_LOCATION_UNSET = object()
 _EXPECTED_SERVICE_LOCATION_UNSET = object()
 _EXPECTED_IMAGES_UNSET = object()
 _EXPECTED_ACTION_URLS_UNSET = object()
+_EXPECTED_SERVICES_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -2564,6 +2567,33 @@ def _required_child_sequence_mismatches(
     return mismatches
 
 
+def _validate_service_card_names(body_root: Tag, expected_services: object) -> None:
+    services = _contract_text_values(expected_services, "Expected service")
+    cards = _elements_with_class(body_root, "service-card")
+    actual_names: list[str] = []
+    for card in cards:
+        names = [
+            child
+            for child in card.find_all(True, recursive=False)
+            if "service-card-name" in _exact_class_names(child)
+        ]
+        if len(names) != 1:
+            raise GeneratedBodyError(
+                "Generated body service card names do not have one direct owner per card."
+            )
+        value = names[0].get_text(" ", strip=True)
+        if not value:
+            raise GeneratedBodyError("Generated body service card names cannot be empty.")
+        actual_names.append(value)
+
+    normalized_expected = tuple(_normalize_claim_match_text(value) for value in services)
+    normalized_actual = tuple(_normalize_claim_match_text(value) for value in actual_names)
+    if normalized_actual != normalized_expected:
+        raise GeneratedBodyError(
+            "Generated body service card names do not match the supplied services."
+        )
+
+
 def _address_like_values(surface: str) -> tuple[str, ...]:
     normalized = unicodedata.normalize("NFKC", surface)
     values: list[str] = []
@@ -3335,6 +3365,7 @@ def validate_generated_body(
     exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
+    expected_services: object = _EXPECTED_SERVICES_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -3562,6 +3593,11 @@ def validate_generated_body(
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
+    location_claim_surfaces = (
+        dom_adjacent_visual_surface,
+        *parser.decoded_attribute_values,
+        *(unquote(value) for value in parser.decoded_attribute_values),
+    )
     if source_contacts is not _SOURCE_CONTACT_UNSET:
         _validate_source_contacts(
             body_root,
@@ -3578,7 +3614,7 @@ def validate_generated_body(
             exact_claim_surfaces,
         )
     if expected_location is not _EXPECTED_LOCATION_UNSET:
-        _validate_location_claims(exact_claim_surfaces, expected_location)
+        _validate_location_claims(location_claim_surfaces, expected_location)
     if expected_service_locations is not _EXPECTED_SERVICE_LOCATION_UNSET:
         _validate_service_location_claims(body_root, expected_service_locations)
     if expected_images is not _EXPECTED_IMAGES_UNSET:
@@ -3766,6 +3802,8 @@ def validate_generated_body(
         raise GeneratedBodyError(
             f"Generated body contains unresolved prompt placeholders: {leaked}."
         )
+    if expected_services is not _EXPECTED_SERVICES_UNSET:
+        _validate_service_card_names(body_root, expected_services)
     return body
 
 
@@ -3921,6 +3959,7 @@ def assemble_generated_html(
     exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
+    expected_services: object = _EXPECTED_SERVICES_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -3957,6 +3996,7 @@ def assemble_generated_html(
         exact_source_claims=exact_source_claims,
         expected_form_action=expected_form_action,
         expected_reviews=expected_reviews,
+        expected_services=expected_services,
         required_class_counts=required_class_counts,
         required_child_class_sequences=required_child_class_sequences,
     )

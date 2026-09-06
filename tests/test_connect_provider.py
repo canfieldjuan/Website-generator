@@ -80,6 +80,7 @@ PROSPECT = {
     "city": "Effingham",
     "state": "IL",
     "phone": "217-555-0100",
+    "services": ["Drain cleaning"],
 }
 
 
@@ -697,6 +698,30 @@ class GenerationSeamTests(unittest.TestCase):
                 source["business_name"] = invalid
                 with self.assertRaisesRegex(ValueError, "non-empty strings"):
                     build.prepare_prospect(source)
+
+    def test_services_must_be_a_nonempty_list_of_nonempty_strings(self):
+        for invalid in (
+            None,
+            [],
+            "Drain cleaning",
+            ["Drain cleaning", "   "],
+            ["Drain cleaning", "DRAIN CLEANING"],
+            [42],
+        ):
+            with self.subTest(invalid=invalid):
+                source = dict(PROSPECT)
+                if invalid is None:
+                    source.pop("services")
+                else:
+                    source["services"] = invalid
+                with self.assertRaisesRegex(ValueError, "services"):
+                    build.prepare_prospect(source)
+
+        source = {**PROSPECT, "services": [" Deep cleaning ", "Office cleaning"]}
+        self.assertEqual(
+            build.prepare_prospect(source)["services"],
+            ["Deep cleaning", "Office cleaning"],
+        )
 
     def test_optional_display_name_must_be_string_or_null(self):
         for invalid in (123, 0, False, [], {}):

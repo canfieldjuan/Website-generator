@@ -1,12 +1,10 @@
-# 07 -- Industry Defaults (Plumbing)
+# 07 -- Industry Presentation Guidance
 
-Knowledge base the from-scratch build pipeline (`build.py`) uses when the
-prospect JSON doesn't specify a value. Used by `06-build-prompt.md` to
-fill in industry-standard content for a local plumbing business that has
-no current online presence.
-
-This is NOT a content database -- it's a defaults book. Prospect-specified
-values always win. Use these only to fill gaps.
+Presentation guidance for the from-scratch build pipeline (`build.py`).
+Deterministic code-owned theme, palette, and hero selectors read the known-trade
+profiles. Body generation receives only the universal source-authority preamble
+below; trade-profile prose is not customer evidence. Offered services, hours,
+availability, credentials, and service area must come from the prospect.
 
 ## Template placeholders (governs ALL trade sections below)
 

@@ -79,6 +79,7 @@ COMPLETE_PAGE_BODY = (
     '<footer class="site-footer"><div class="footer-grid"></div>'
     '<div class="footer-bottom"><p>Copyright</p></div></footer></body>'
 )
+DEFAULT_BUILD_SERVICES = tuple(f"Service {index}" for index in range(1, 7))
 COMPLETE_SERVICES_GRID = (
     '<div class="services-grid">'
     + "".join(
@@ -90,6 +91,20 @@ COMPLETE_SERVICES_GRID = (
     )
     + "</div>"
 )
+
+
+def services_grid(services):
+    return (
+        '<div class="services-grid">'
+        + "".join(
+            '<div class="service-card">'
+            f'<div class="service-card-name">{service}</div>'
+            f'<p class="service-card-desc">Description {index}</p>'
+            '</div>'
+            for index, service in enumerate(services, start=1)
+        )
+        + "</div>"
+    )
 COMPLETE_BENEFITS_GRID = (
     '<div class="benefits-grid">'
     + '<div class="benefit-card"></div>' * 3
@@ -3042,6 +3057,28 @@ class BodyAssemblyTests(unittest.TestCase):
             six_element_body,
         )
 
+    def test_body_admission_requires_exact_source_owned_service_names(self):
+        expected = ("Deep Cleaning", "Office Cleaning")
+        body = f"<body>{services_grid(expected)}</body>"
+        self.assertEqual(
+            validate_generated_body(body_result(body), expected_services=expected),
+            body,
+        )
+
+        for services in (
+            ("Deep Cleaning", "Window Cleaning"),
+            ("Deep Cleaning",),
+            ("Deep Cleaning", "Deep Cleaning"),
+        ):
+            with self.subTest(services=services), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "service card names",
+            ):
+                validate_generated_body(
+                    body_result(f"<body>{services_grid(services)}</body>"),
+                    expected_services=expected,
+                )
+
     def test_body_admission_accepts_one_plain_body(self):
         self.assertEqual(validate_generated_body(body_result()), COMPLETE_BODY)
 
@@ -3907,6 +3944,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
 
         html = build.generate_build_html(prospect, config(), client)
@@ -3934,6 +3972,11 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn("[SERVICE_6_DESCRIPTION]", user_content)
         self.assertIn("SOURCE-GATED CLAIM ALLOWLIST (EXHAUSTIVE): []", user_content)
         self.assertIn("TENURE CLAIM CONTRACT (OPTIONAL OUTPUT)", user_content)
+        self.assertNotIn("Use it freely", request_prompt)
+        self.assertIn(
+            "When PROSPECT_JSON omits a customer fact, omit the fact",
+            request_prompt,
+        )
         self.assertNotIn("Not a Franchise", request_prompt)
         self.assertNotIn("Free Estimates", request_prompt)
         self.assertNotIn("BASE BODY TEMPLATE", user_content)
@@ -3945,6 +3988,64 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             )
         )
 
+    def test_uncatalogued_cleaning_brief_uses_only_supplied_services(self):
+        services = (
+            "Deep Cleaning",
+            "Spring cleaning",
+            "Residential cleaning",
+            "Commercial cleaning",
+            "Office cleaning",
+        )
+        body = COMPLETE_BUILD_BODY.replace(
+            COMPLETE_SERVICES_GRID,
+            services_grid(services),
+        ).replace("Test Business", "Effingham Office Maids")
+        body = body.replace("tel:2175550100", "tel:2172073097").replace(
+            "217-555-0100",
+            "217-207-3097",
+        ).replace(
+            '<div class="footer-grid"></div>',
+            '<div class="footer-grid"><div class="ft-address">'
+            '1901 S. 4th Street Suite #1</div></div>',
+        )
+        client = FakeLocalClient(local_chat_payload(body))
+        prospect = {
+            "business_name": "Effingham Office Maids",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-207-3097",
+            "address": "1901 S. 4th Street Suite #1",
+            "owner_email": "info@eom.com",
+            "services": list(services),
+        }
+
+        html = build.generate_build_html(prospect, config(), client)
+
+        self.assertIn("Effingham Office Maids", html)
+        request = next(call for call in client.calls if call[0] == "POST")
+        user_content = request[2]["json"]["messages"][1]["content"]
+        prompt = "\n".join(
+            message["content"] for message in request[2]["json"]["messages"]
+        )
+        self.assertIn('"trade": "cleaning service"', prompt)
+        self.assertIn('"service-card": 5', user_content)
+        self.assertEqual(user_content.count('<div class="service-card">'), 5)
+        self.assertNotIn("## TRADE: plumber", prompt)
+        self.assertNotIn("## TRADE: hvac", prompt)
+        self.assertNotIn("## TRADE: electrician", prompt)
+        self.assertNotIn("24/7 emergency service available", prompt)
+
+    def test_industry_generation_guidance_excludes_all_trade_profiles(self):
+        source = Path("references/07-industry-defaults.md").read_text(encoding="utf-8")
+
+        guidance = build.industry_generation_guidance(source)
+
+        self.assertIn("## Template placeholders", guidance)
+        self.assertNotIn("## TRADE:", guidance)
+        self.assertNotIn("Not a Franchise", guidance)
+        self.assertNotIn("24/7 emergency service available", guidance)
+
     def test_build_generator_validates_brand_colors_before_model_request(self):
         client = FakeLocalClient()
         prospect = {
@@ -3953,6 +4054,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "brand_colors": {
                 "accent": "#123456",
                 "secondary": "red",
@@ -3971,6 +4073,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "locally_owned": None,
             "service_promises": [],
         }
@@ -4030,6 +4133,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
 
         with self.assertRaisesRegex(GeneratedBodyError, r"\[YEAR\]"):
@@ -4046,6 +4150,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
 
         with self.assertRaisesRegex(GeneratedBodyError, r"\[SERVICE_1_NAME\]"):
@@ -4062,6 +4167,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
         missing_services = COMPLETE_BUILD_BODY.replace(COMPLETE_SERVICES_GRID, "")
 
@@ -4082,6 +4188,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
         service_cards = COMPLETE_SERVICES_GRID.removeprefix(
             '<div class="services-grid">'
@@ -4120,6 +4227,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "REPLACE",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
         build.sanitize_placeholders(prospect)
         self.assertIsNone(prospect["phone"])
@@ -4386,6 +4494,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "reviews": [],
             "google_review_score": None,
             "google_review_count": None,
@@ -4528,6 +4637,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "reviews": [],
             "google_review_score": 4.4,
             "google_review_count": 12,
@@ -4685,6 +4795,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "reviews": reviews,
             "google_review_score": 4.8,
             "google_review_count": 31,
@@ -4831,6 +4942,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
         adverse_bodies = (
             (
@@ -4999,6 +5111,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
         invalid_build = COMPLETE_BUILD_BODY.replace(
             '<form class="contact-form-wrap" action="#">',
@@ -5053,6 +5166,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "service_promises": [],
         }
 
@@ -5094,6 +5208,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "service_promises": [],
         }
         for field, supported_value, claim in field_claims:
@@ -5127,6 +5242,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "master_electrician_license": "IL-123",
         }
 
@@ -5201,6 +5317,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
 
         def with_address(value):
@@ -5293,6 +5410,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
 
         def with_claim(value):
@@ -5394,6 +5512,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "service_radius": (
                 "Effingham and surrounding communities within 25 miles"
             ),
@@ -5422,6 +5541,29 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(with_location(article_location))),
         )
         self.assertIn(article_location, html)
+
+        adjacent_verified_location = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<h2>Test Business</h2><p>Serving Effingham, IL.</p>'
+            '</section>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(adjacent_verified_location)),
+        )
+        self.assertIn("Serving Effingham, IL", html)
+
+        inline_verified_location = with_location(
+            "Serving <span>Effingham</span>, <span>IL</span>."
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(inline_verified_location)),
+        )
+        self.assertIn("<span>Effingham</span>, <span>IL</span>", html)
 
         for claim in (
             "We serve Effingham and surrounding communities.",
@@ -5505,6 +5647,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "logo_url": logo_url,
             "photos": [{"url": hero_url, "context": "hero"}],
         }
@@ -5607,6 +5750,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "ibew_local_number": "176",
         }
 
@@ -5670,6 +5814,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
             "formspree_endpoint": "https://formspree.io/f/verified",
         }
         wrong_endpoint_body = COMPLETE_BUILD_BODY.replace(
@@ -5761,6 +5906,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
         for destination in (
             "https://calendly.com/unrelated-account",
@@ -5787,6 +5933,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "city": "Effingham",
             "state": "IL",
             "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
         }
         invented_email = COMPLETE_BUILD_BODY.replace(
             "</nav>",
@@ -6204,6 +6351,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     "city": "Effingham",
                     "state": "IL",
                     "phone": "217-555-0100",
+                    "services": list(DEFAULT_BUILD_SERVICES),
                 },
                 config(),
                 FakeLocalClient(local_chat_payload(build_body)),

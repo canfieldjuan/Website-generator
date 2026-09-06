@@ -81,13 +81,13 @@ app.innerHTML = `
                 <input id="business-name" autocomplete="organization" required />
               </label>
               <label class="field">
-                <span>Trade <em>Required</em></span>
-                <select id="trade" required>
-                  <option value="">Choose a trade</option>
+                <span>Business type <em>Required</em></span>
+                <input id="trade" list="business-type-suggestions" required placeholder="Cleaning service" />
+                <datalist id="business-type-suggestions">
                   <option value="plumber">Plumbing</option>
                   <option value="hvac">HVAC</option>
                   <option value="electrician">Electrical</option>
-                </select>
+                </datalist>
               </label>
               <label class="field">
                 <span>Phone <em>Required</em></span>
@@ -118,7 +118,7 @@ app.innerHTML = `
             <legend>Services and contact</legend>
             <label class="field">
               <span>Services <small>One per line</small></span>
-              <textarea id="services" rows="5" placeholder="Drain cleaning&#10;Water heater repair&#10;Fixture installation"></textarea>
+              <textarea id="services" rows="5" required placeholder="Drain cleaning&#10;Water heater repair&#10;Fixture installation"></textarea>
             </label>
             <div class="field-grid field-grid--two">
               <label class="field">
@@ -330,7 +330,7 @@ function syncProviderFields(provider: "local" | "openrouter"): void {
 function collectFields(): ProspectFields {
   return {
     businessName: inputValue("business-name"),
-    trade: element<HTMLSelectElement>("trade").value as ProspectFields["trade"],
+    trade: inputValue("trade"),
     city: inputValue("city"),
     state: inputValue("state"),
     phone: inputValue("phone"),
@@ -343,7 +343,7 @@ function collectFields(): ProspectFields {
 
 function writeFields(fields: ProspectFields): void {
   element<HTMLInputElement>("business-name").value = fields.businessName;
-  element<HTMLSelectElement>("trade").value = fields.trade;
+  element<HTMLInputElement>("trade").value = fields.trade;
   element<HTMLInputElement>("city").value = fields.city;
   element<HTMLInputElement>("state").value = fields.state;
   element<HTMLInputElement>("phone").value = fields.phone;

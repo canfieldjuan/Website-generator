@@ -49,14 +49,14 @@ tokens and assembles them after validating your body.
 
 Content source rules:
 - Prospect-specified values from PROSPECT_JSON always win.
-- When PROSPECT_JSON omits a field, use the INDUSTRY_DEFAULTS file as the
-  legitimate fill-in source. This is NOT inventing content -- the defaults
-  file is the curated knowledge base for that trade. Use it freely.
+- INDUSTRY GUIDANCE supplies presentation rules, not missing customer facts.
+  When PROSPECT_JSON omits a customer fact, omit the fact from the page.
 - Never fabricate review counts, awards, years-in-business, certifications,
   or specific factual claims. Those must come from PROSPECT_JSON only.
-- Service descriptions, hero copy templates, trust signal phrasing,
-  service-area framing, and section content can all draw from
-  INDUSTRY_DEFAULTS when the prospect didn't supply them.
+- Service descriptions, trust signal phrasing, and section structure may draw
+  from universal INDUSTRY GUIDANCE. Offered services, hours, availability,
+  credentials, and service-area facts must come from PROSPECT_JSON; never fill
+  those customer facts from industry examples or trade stereotypes.
 
 Brand display rule:
 - Render `business_name` in TITLE CASE for all on-page display
@@ -80,10 +80,9 @@ Trade display rule:
       not a noun phrase
     - `electrician` -> `Electrician` (heading) / `electrician`
       (mid-sentence)
-- If a new trade key appears in `prospect.trade` without a
-  display mapping, prefer the title-case form of the key and
-  flag the gap in the build log so 07 and this rule can be
-  extended.
+- If a new trade key appears in `prospect.trade` without a display mapping, use
+  the title-case form of that exact source value. Do not substitute a known
+  trade or infer credentials.
 
 Output rules:
 - Output ONLY one raw `<body>...</body>` fragment. No markdown code fences,
@@ -277,15 +276,14 @@ The per-section rules:
    ```
    Where `phone_digits` is the prospect phone with all non-digit chars
    stripped (for the `tel:` link).
-5. Services grid (`.services-grid` / `.service-card`) -- EXACTLY 6
-   services (matches INDUSTRY_DEFAULTS rule: 6 fills the grid as 2
-   clean rows of 3; 7 or 8 leaves an orphan trailing cell). Prospect-
-   specified services win; if prospect supplied more than 6, pick the
-   6 with highest commercial value per INDUSTRY_DEFAULTS guidance. If
-   fewer than 6, augment from the canonical service catalog. Each
-   card: service name, one-line description.
+5. Services grid (`.services-grid` / `.service-card`) -- render exactly one
+   card for every entry in `prospect.services`, in source order. Do not add,
+   omit, merge, rename, or rank services. The final response boundary supplies
+   the exact source-sized scaffold and service-name list. Each card contains
+   the exact supplied service name plus one generic explanatory sentence that
+   does not introduce another offering.
 
-   Markup (replace every square-bracket token; render all 6 cards):
+   Per-card markup (the response boundary repeats it to the required count):
    ```html
    <div class="page-wrap section-gap">
      <div class="sec-hd">
@@ -295,26 +293,6 @@ The per-section rules:
        <div class="service-card">
          <div class="service-card-name">[SERVICE_1_NAME]</div>
          <p class="service-card-desc">[SERVICE_1_DESCRIPTION]</p>
-       </div>
-       <div class="service-card">
-         <div class="service-card-name">[SERVICE_2_NAME]</div>
-         <p class="service-card-desc">[SERVICE_2_DESCRIPTION]</p>
-       </div>
-       <div class="service-card">
-         <div class="service-card-name">[SERVICE_3_NAME]</div>
-         <p class="service-card-desc">[SERVICE_3_DESCRIPTION]</p>
-       </div>
-       <div class="service-card">
-         <div class="service-card-name">[SERVICE_4_NAME]</div>
-         <p class="service-card-desc">[SERVICE_4_DESCRIPTION]</p>
-       </div>
-       <div class="service-card">
-         <div class="service-card-name">[SERVICE_5_NAME]</div>
-         <p class="service-card-desc">[SERVICE_5_DESCRIPTION]</p>
-       </div>
-       <div class="service-card">
-         <div class="service-card-name">[SERVICE_6_NAME]</div>
-         <p class="service-card-desc">[SERVICE_6_DESCRIPTION]</p>
        </div>
      </div>
    </div>
@@ -341,11 +319,8 @@ The per-section rules:
    ```
 
    **Gating rule (extends the `[TRUST_TRAILER]` / `[SERVICE_PROMISE]`
-   fabrication guard from 07's intro into the benefits grid).** Pick
-   each of the 3 cards from the trade's `Competitive positioning vs
-   national chains` -> `Positive signals` section in 07. Each bullet
-   there is classified into one of four categories with explicit
-   gating:
+   fabrication guard from 07's intro into the benefits grid).** Every card must
+   be backed by prospect data or describe a visible function of this page:
 
    - **Verified trust signal** -- gated to a specific
      `[TRUST_TRAILER]` component (`family_owned`, `locally_owned`,
@@ -353,29 +328,24 @@ The per-section rules:
    - **Verified service promise** -- requires a matching entry in
      `prospect.service_promises`. Never inferred from `has_24_7`,
      prior tenure, or other adjacent fields.
-   - **Verified trade credential** -- gated to a trade-specific
-     prospect field (`prospect.epa_certified` for HVAC,
-     `prospect.master_electrician_license` for electrician).
-     Plumber has no equivalent.
-   - **Safe generic positioning** -- claims that are true by
-     definition for the skill's target audience (rural small-town
-     owner-operators, no franchise affiliation). Always renderable
-     without per-prospect verification.
+   - **Verified trade credential** -- gated to its explicit prospect field.
+   - **Source-derived fact** -- exact supplied service, city/service area,
+     phone, or other prospect value.
+   - **Page function** -- the visible service list, direct phone link when
+     present, or request form. Describe only what the rendered page provides.
 
-   **Selection order** -- apply per the trade-specific selection rule
-   block in 07 (each trade lists its own ordered selection rule).
-   The universal pattern is:
+   **Selection order:**
 
    1. Verified-trust cards first (whichever components qualify).
    2. Verified-trade-credential card (if applicable).
    3. Verified-service-promise cards from `prospect.service_promises`.
-   4. Pad with safe-generic-positioning cards if (1)+(2)+(3) < 3.
+   4. Fill remaining cards with source-derived facts or page functions.
 
-   **Never fabricate a verified card just to fill the 3rd slot.** If
-   the prospect data supports 0 verified cards, all 3 come from the
-   safe-generic-positioning list. If it supports 1 or 2, the
-   remainder come from safe-generic. The orphan-cell guard ("EXACTLY
-   3") is preserved without sacrificing the fabrication-guard.
+   **Never fabricate a business characteristic just to fill the 3rd slot.**
+   Without explicit prospect evidence, do not claim local ownership,
+   non-franchise status, direct technician access, same-crew service,
+   call-center avoidance, special responsiveness, or similar operational
+   traits. The exact three-card structure does not override source authority.
 
    **Consolidate overlapping claims.** When the verified-trust pass
    would yield two cards saying nearly the same thing (e.g.
@@ -675,12 +645,12 @@ Left column (brand) markup:
     Brand display rule from the SYSTEM PROMPT: title-case, strip
     legal suffixes ("Inc.", "LLC", "Co.")]</div>
   <div class="ft-tagline">[Short tagline, e.g. "[CITY]'s Trusted [TRADE]"]</div>
-  <span class="ft-phone-label">[label, e.g. "Call us 24/7" if has_24_7 else "Call us"]</span>
+  <span class="ft-phone-label">Call us</span>
   <a href="tel:[phone_digits]" class="ft-phone">[PROSPECT.phone]</a>
   <div class="ft-address">
     [address line 1]<br>
     [address line 2 (city/state/zip)]<br>
-    [hours line]<br>
+    [exact prospect.hours line, when supplied]<br>
     [emergency-availability line if has_24_7]
   </div>
 </div>
@@ -694,6 +664,7 @@ Rules:
   (rare for local-business prospects -- usually means data error).
 - Omit individual address lines that are null. If prospect.address is
   null entirely, drop the `.ft-address` div but keep the phone block.
+- Omit the hours line unless `prospect.hours` is a non-empty source value.
 - Do NOT render an `<a href="mailto:...">` email line in the footer
   unless prospect.owner_email is set AND is not a placeholder. The
   Python sanitizer already nullifies placeholder emails before the
