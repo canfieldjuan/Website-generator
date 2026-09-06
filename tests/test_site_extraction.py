@@ -2106,6 +2106,40 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             },
         )
 
+        unavailable_controls = (
+            '<fieldset disabled><label>Email<input name="email"></label></fieldset>',
+            '<label>Email<input name="email" disabled></label>',
+            '<div inert><label>Email<input name="email"></label></div>',
+        )
+        for source in unavailable_controls:
+            with (
+                self.subTest(source=source),
+                self.assertRaisesRegex(SiteExtractionError, "complete label"),
+            ):
+                validate_enrichment_result(
+                    form_fields,
+                    page_type="contact",
+                    source_html=source,
+                    source_url="https://acme.test/contact",
+                )
+
+        first_legend = (
+            '<fieldset disabled><legend><label>Email<input name="email">'
+            "</label></legend></fieldset>"
+        )
+        self.assertEqual(
+            validate_enrichment_result(
+                form_fields,
+                page_type="contact",
+                source_html=first_legend,
+                source_url="https://acme.test/contact",
+            ),
+            {
+                "form_fields": ["Email"],
+                "source_url": "https://acme.test/contact",
+            },
+        )
+
     def test_code_owned_image_inventory_remains_admissible(self):
         image_url = "https://cdn.acme.test/hero.jpg"
         document = {
@@ -3559,6 +3593,11 @@ class RedesignPromptAuthorityTests(unittest.TestCase):
         )
         self.assertNotIn("Every redesign includes a trust strip", prompt)
         self.assertIn("If none of the source-owned values above exists, omit", prompt)
+        self.assertNotIn("See all practice areas", prompt)
+        self.assertNotIn("Meet the full team", prompt)
+        self.assertNotIn("Send My Request", prompt)
+        self.assertIn("action destination contract", prompt)
+        self.assertIn("such as \"Send\" or \"Submit\"", prompt)
         self.assertNotIn('Hours + "Order Online" or "Reserve" button', interior_prompt)
         self.assertNotIn('"Get My Free Quote"', interior_prompt)
         self.assertIn("copy an admitted source action label", interior_prompt)

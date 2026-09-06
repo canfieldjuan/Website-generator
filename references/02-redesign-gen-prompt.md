@@ -389,15 +389,20 @@ extracted from a dedicated interior page (not the homepage hero). Render
 them on the homepage as preview grids that link to the full interior page:
 
 - `type: "services"` with `source_url` -> render up to 6 items in
-  `.services-grid` / `.service-card`. Add a "See all" link or button
-  pointing to `source_url`. The link label should be specific
-  (e.g. "See all practice areas"), not generic.
+  `.services-grid` / `.service-card`. Add a link or button pointing to
+  `source_url`. Copy an admitted source action label/pair when one exists;
+  otherwise use one exact capability-neutral label permitted by the action
+  destination contract, such as "Learn More".
 - `type: "team"` with `source_url` -> render up to 4 items in
   `.team-grid` / `.team-card`. Use `title` as the name, `tag` as the
   role, `image_url` as the headshot, and `meta`
-  as the short bio. Add a "Meet the full team" link to `source_url`.
+  as the short bio. Link to `source_url` only with an admitted source
+  action label/pair or an exact capability-neutral label permitted by the
+  action destination contract.
 - `type: "misc"` with `tag: "faq"` on items -> render up to 4 items as
-  an FAQ preview. Add a "See all FAQs" link to `source_url`.
+  an FAQ preview. Link to `source_url` only with an admitted source action
+  label/pair or an exact capability-neutral label permitted by the action
+  destination contract.
 - `type: "misc"` with `tag: "about"` on items -> render as a narrative
   block using paragraph styling, no grid. Link a "Learn more" button to
   `source_url` if helpful.
@@ -415,8 +420,10 @@ on the homepage in a contact section using `.contact-form-wrap`:
   `.form-input` / `.form-textarea` / `.form-select` from the base
   template based on the label (e.g. multi-line text for a "Message" or
   "Tell us..." field).
-- The submit button label must be specific and action-oriented (e.g.
-  "Send My Request"), never "Submit".
+- The submit button must copy an admitted source action label/pair when one
+  exists; otherwise use one exact capability-neutral label permitted by the
+  action destination contract, such as "Send" or "Submit". Do not invent a
+  request, booking, quote, or scheduling capability in the label.
 - Display `contact_form.contact_info` (phone, email, address, hours)
   next to the form. Use `tel:` and `mailto:` links.
 - Link the section heading or a small "Full contact page" link to

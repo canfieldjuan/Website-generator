@@ -1084,7 +1084,7 @@ def source_document_base_url(
 
 
 def is_source_action_available(element: Any) -> bool:
-    """Return whether source markup exposes one browser-available action."""
+    """Return whether source markup exposes one browser-available control."""
     if not is_source_semantic_element(element):
         return False
     candidates = (element, *getattr(element, "parents", ()))
@@ -1092,7 +1092,7 @@ def is_source_action_available(element: Any) -> bool:
         return False
 
     tag_name = str(getattr(element, "name", "") or "").casefold()
-    if tag_name not in {"button", "input"}:
+    if tag_name not in {"button", "input", "select", "textarea"}:
         return True
     if element.has_attr("disabled"):
         return False
@@ -1904,6 +1904,8 @@ class SourceEvidence:
 
         form_control_labels: list[str] = []
         for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):
+            if not is_source_action_available(control):
+                continue
             if (
                 control.name == "input"
                 and str(control.get("type") or "text").casefold()
