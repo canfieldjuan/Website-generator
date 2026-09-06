@@ -404,46 +404,20 @@ _TRAILING_SCOPE_QUALIFIER_TERMS = frozenset(
         "within",
     }
 )
-_RECIPIENT_TO_PREDECESSORS = frozenset(
+_ASSERTION_PRESERVING_TO_FOLLOWERS = frozenset(
+    {"ask", "book", "call", "contact", "learn", "request", "schedule"}
+)
+_ASSERTION_PRESERVING_PREFIXES = frozenset(
     {
-        "apply",
-        "applied",
-        "applies",
-        "applying",
-        "available",
-        "limited",
-        "offered",
-        "provided",
-        "reserved",
-        "restricted",
+        ("call", "for"),
+        ("call", "to", "request"),
+        ("call", "us", "for"),
+        ("not", "only"),
+        ("we", "are"),
+        ("we", "offer"),
+        ("we", "provide"),
     }
 )
-_RECIPIENT_BENEFIT_PREDICATES = frozenset(
-    {
-        "earn",
-        "earned",
-        "earns",
-        "earning",
-        "enjoy",
-        "enjoyed",
-        "enjoys",
-        "enjoying",
-        "get",
-        "gets",
-        "getting",
-        "got",
-        "qualify",
-        "qualified",
-        "qualifies",
-        "qualifying",
-        "receive",
-        "received",
-        "receives",
-        "receiving",
-    }
-)
-_PASSIVE_BENEFIT_PREDICATES = frozenset({"offered", "provided", "reserved"})
-_BE_AUXILIARIES = frozenset({"am", "are", "be", "been", "being", "is", "was", "were"})
 
 
 def _normalize_text(value: str) -> str:
@@ -503,14 +477,17 @@ def _words_contain_scope_qualifier(words: list[str]) -> bool:
             return True
         if word == "as" and index + 1 < len(words) and words[index + 1] == "part":
             return True
-        if word == "to" and (
-            index == 0 or words[index - 1] in _RECIPIENT_TO_PREDECESSORS
-        ):
-            preceding_scope = words[: max(index - 1, 0)]
+        if word == "to":
+            preceding_scope = words[:index]
             if any(
                 preceding_scope[position] == "not"
                 and preceding_scope[position + 1] in _RESTRICTION_TERMS
                 for position in range(len(preceding_scope) - 1)
+            ):
+                continue
+            if (
+                index + 1 < len(words)
+                and words[index + 1] in _ASSERTION_PRESERVING_TO_FOLLOWERS
             ):
                 continue
             return True
@@ -518,24 +495,9 @@ def _words_contain_scope_qualifier(words: list[str]) -> bool:
 
 
 def _preceding_clause_scopes_claim(words: list[str]) -> bool:
-    is_request_wrapper = (
-        len(words) >= 2
-        and words[-2:] == ["call", "for"]
-        or len(words) >= 3
-        and words[-3:] == ["call", "us", "for"]
-    )
-    if not is_request_wrapper and _words_contain_scope_qualifier(words):
-        return True
-    for index, word in enumerate(words):
-        if index > 0 and word in _RECIPIENT_BENEFIT_PREDICATES:
-            return True
-        if (
-            index > 1
-            and word in _PASSIVE_BENEFIT_PREDICATES
-            and words[index - 1] in _BE_AUXILIARIES
-        ):
-            return True
-    return False
+    if not words:
+        return False
+    return tuple(words) not in _ASSERTION_PRESERVING_PREFIXES
 
 
 def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
@@ -556,7 +518,13 @@ def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     return _words_contain_negation(following_words, postposed=True)
 
 
-def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
+def _occurrence_is_nonassertive(
+    text: str,
+    start: int,
+    length: int,
+    *,
+    strict_claim: bool = False,
+) -> bool:
     before = text[:start]
     after = text[start + length :]
     preceding_clause = re.split(r"[.!?]", before)[-1]
@@ -575,7 +543,9 @@ def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
     ]
     if _words_contain_restriction(preceding_words + following_words):
         return True
-    if _preceding_clause_scopes_claim(preceding_words):
+    if strict_claim and _preceding_clause_scopes_claim(preceding_words):
+        return True
+    if not strict_claim and _words_contain_scope_qualifier(preceding_words):
         return True
     return _words_contain_scope_qualifier(following_words)
 
@@ -777,6 +747,19 @@ def source_action_accessible_name(
             return " ".join(value.split())
     title = element.get("title")
     return " ".join(title.split()) if isinstance(title, str) else ""
+
+
+def is_labelled_action_element(element: Any) -> bool:
+    """Return whether one DOM element presents a browser action label."""
+    tag_name = str(getattr(element, "name", "") or "").casefold()
+    role = str(element.get("role") or "").casefold()
+    if tag_name in {"a", "area"}:
+        return element.has_attr("href")
+    if tag_name == "button" or role == "button":
+        return True
+    return tag_name == "input" and (
+        str(element.get("type") or "").casefold() in _ACTION_INPUT_TYPES
+    )
 
 
 def _marked_identity_text_parts(
@@ -1101,21 +1084,9 @@ class SourceEvidence:
                 identity_parts.extend(_attribute_values(meta.get("content")))
 
         for element in soup.find_all(True):
-            role = str(element.get("role") or "").casefold()
             action_label = ""
             element_image_urls: set[str] = set()
-            if (
-                element.name in {"a", "area"}
-                and element.has_attr("href")
-                or element.name == "button"
-                or role == "button"
-            ):
-                action_label = _normalize_text(
-                    source_action_accessible_name(element, soup)
-                )
-            if element.name == "input" and (
-                str(element.get("type") or "").casefold() in _ACTION_INPUT_TYPES
-            ):
+            if is_labelled_action_element(element):
                 action_label = _normalize_text(
                     source_action_accessible_name(element, soup)
                 )
@@ -1438,7 +1409,10 @@ class SourceEvidence:
                 if _occurrence_is_negated(source_text, index, len(normalized)):
                     continue
                 if asserted and _occurrence_is_nonassertive(
-                    source_text, index, len(normalized)
+                    source_text,
+                    index,
+                    len(normalized),
+                    strict_claim=True,
                 ):
                     continue
                 return

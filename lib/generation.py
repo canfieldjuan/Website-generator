@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from openai import DefaultHttpxClient, OpenAI
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
+from lib.site_extraction import is_labelled_action_element
 
 
 DEFAULT_LOCAL_MODEL = "qwen3-30b-a3b:latest"
@@ -2333,20 +2334,15 @@ def _validate_action_urls(
     action_entries: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
-        is_role_button = str(element.get("role") or "").casefold() == "button"
+        is_labelled_action = is_labelled_action_element(element)
+        declared_destinations = _action_element_declared_destinations(element)
         if (
-            tag_name not in {"a", "area", "form", "button", "input"}
-            and not is_role_button
+            tag_name != "form"
+            and not is_labelled_action
+            and not declared_destinations
         ):
             continue
-        is_labelled_action = (
-            tag_name in {"a", "area", "button"}
-            or is_role_button
-            or tag_name == "input"
-            and str(element.get("type") or "").casefold()
-            in {"button", "image", "reset", "submit"}
-        )
-        action_values.extend(_action_element_declared_destinations(element))
+        action_values.extend(declared_destinations)
         element_values = action_element_destinations(element, body_root)
         if is_labelled_action:
             action_entries.append((_generated_action_labels(element), element_values))

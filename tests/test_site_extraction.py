@@ -559,6 +559,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "Members are offered Free Estimates",
             "Maintenance-plan members are eligible for Free Estimates",
             "Free Estimates apply to maintenance-plan members",
+            "Maintenance-plan members redeem Free Estimates",
         ):
             source = f"<h1>Acme Cleaning</h1><p>{complete_claim}.</p>"
             with (
@@ -578,6 +579,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for unrestricted_source in (
             "We offer Free Estimates",
             "Call for Free Estimates",
+            "Call to request Free Estimates",
             "Free Estimates are easy to request",
         ):
             with self.subTest(unrestricted_source=unrestricted_source):
@@ -601,6 +603,29 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             document,
         )
+
+        role_button = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {"existing_ctas": ["Book Appointment"]},
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                role_button,
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    '<div role="button" tabindex="0">Book Appointment</div>'
+                ),
+            ),
+            role_button,
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "action label"):
+            validate_site_analysis(
+                role_button,
+                (
+                    "<h1>Acme Cleaning</h1>"
+                    '<div tabindex="0">Book Appointment</div>'
+                ),
+            )
 
     def test_existing_cta_accepts_button_inputs_but_not_data_inputs(self):
         document = {
