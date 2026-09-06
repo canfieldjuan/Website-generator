@@ -1220,6 +1220,17 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             base_phone,
         )
+        for office_modifier in ("Head", "Front", "Regional"):
+            with self.subTest(office_modifier=office_modifier):
+                self.assertEqual(
+                    validate_site_analysis(
+                        base_phone,
+                        "<h1>Acme Cleaning</h1><p>"
+                        "Fax inquiries go to billing dept. "
+                        f"{office_modifier} office: 217-555-0100</p>",
+                    ),
+                    base_phone,
+                )
         with self.assertRaisesRegex(SiteExtractionError, "source phone"):
             validate_site_analysis(
                 base_phone,

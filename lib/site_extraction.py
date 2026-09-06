@@ -484,7 +484,8 @@ _CONTACT_FIELD_ABBREVIATION_PATTERN = re.compile(
 )
 _CONTACT_FIELD_ABBREVIATIONS = frozenset({"dept", "no"})
 _INDEPENDENT_OFFICE_FIELD_PATTERN = re.compile(
-    r"^\s*(?:(?:main|primary)\s+)?office(?:\s+(?:line|number|phone))?\s*[:#\-–—]",
+    r"^\s*(?:[A-Z0-9][A-Z0-9_&'’./\-]*\s+)?"
+    r"office(?:\s+(?:line|number|phone))?\s*[:#\-–—]",
     re.I,
 )
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
