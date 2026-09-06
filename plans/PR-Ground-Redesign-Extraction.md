@@ -78,10 +78,12 @@ analysis may control presentation but may not authorize a visible business claim
 | `Home - Acme Plumbing`, exact identity, controlled `Welcome to ...`, and intrinsic `Acme-Plumbing` | Valid complete identities and only controlled wrapper variants must remain admissible. | All four positive boundaries admit their complete identity. | fixed/superseded | `lib/site_extraction.py:818-838,1136-1161`; `tests/test_site_extraction.py:945-971` |
 | Ambiguous and conflicting title identity | Independent conflicting or ambiguous identity surfaces must fail closed rather than self-corroborate. | Ambiguous title candidates and the conflicting single-title name are rejected; the explicit metadata identity remains admissible. | fixed/superseded | `lib/site_extraction.py:1150-1187`; `tests/test_site_extraction.py:887-914,992-1004` |
 | `PRRT_kwDOTDYaKM6foSbG`: recipient-qualified claims could be shortened | A published claim cannot drop the source clause that limits its recipient, eligibility, purchase, or timing scope. | `Free Estimates` from member/senior/purchase-qualified source text is rejected, each complete qualified claim is admitted, and unrestricted `Call for Free Estimates` remains admitted. | fixed/superseded | `lib/site_extraction.py:470-535`; `tests/test_site_extraction.py:542-595` |
-| `PRRT_kwDOTDYaKM6foY7Q`: a preceding recipient subject could survive the first-token scope check | Claim admission must retain a complete preceding recipient/eligibility relationship, not inspect only the first word before the extracted phrase. | `Free Estimates` from `Maintenance-plan members receive Free Estimates` is rejected; direct, passive, and eligibility predicate variants reject the shortened claim while their complete claims and unrestricted `We offer ...` / `Call for ...` variants pass. | fixed/superseded | `lib/site_extraction.py:417-442,516-528,549-570`; `tests/test_site_extraction.py:542-588` |
+| `PRRT_kwDOTDYaKM6foY7Q`: a preceding recipient subject could survive the first-token scope check | Claim admission must retain a complete preceding recipient/eligibility relationship, not inspect only the first word before the extracted phrase. | `Free Estimates` from `Maintenance-plan members receive Free Estimates` is rejected; direct, passive, and eligibility predicate variants reject the shortened claim while their complete claims and unrestricted `We offer ...` / `Call for ...` variants pass. | fixed/superseded | `lib/site_extraction.py:417-442,496-534,555-576`; `tests/test_site_extraction.py:542-590` |
+| `PRRT_kwDOTDYaKM6fodmA`: `are eligible for` bypassed recipient-scope admission | Preceding scope markers must be evaluated across the complete clause, with only controlled assertion-preserving request wrappers exempted. | `Free Estimates` from `Maintenance-plan members are eligible for Free Estimates` is rejected; the complete claim and the established `Call for Free Estimates` wrapper pass. | fixed/superseded | `lib/site_extraction.py:496-534,555-576`; `tests/test_site_extraction.py:542-590` |
 | `PRRT_kwDOTDYaKM6foSbJ`: `input[type=button]` labels bypassed action admission | Every visible button-like input label must use the same source-label authority; ordinary data inputs must remain outside that guard. | Unsupported button/reset labels are rejected, source-owned labels are admitted, and text inputs remain unaffected. | fixed/superseded | `lib/site_extraction.py:241-248,1062-1068`; `lib/generation.py:2318-2327`; `tests/test_site_extraction.py:599-623`; `tests/test_generation.py:1365-1395` |
 | `PRRT_kwDOTDYaKM6foY7S`: generated `aria-labelledby` targets ignored their own ARIA name | The generated action name must follow the same recursive ARIA precedence as source-side action naming before label authority is checked. | A referenced node whose `aria-label` is unsupported now rejects even when its descendant text is neutral; the inverse valid ARIA override remains admitted. | fixed/superseded | `lib/generation.py:2228-2292`; `tests/test_generation.py:1325-1351` |
 | `PRRT_kwDOTDYaKM6foSbL`: broad logo container text became identity | A broad brand container may contribute only bounded name surfaces, not its description or unrelated link text. | The WordPress-style `site-identity` header admits `Acme Plumbing`; `Quality work since 1990` and a sole `Call Us` link do not become identity. | fixed/superseded | `lib/site_extraction.py:731-769,1125-1129`; `tests/test_site_extraction.py:973-990` |
+| `PRRT_kwDOTDYaKM6fodmD`: a heading record absorbed content from a sibling wrapper with its own heading | Record and section consumers must share heading-boundary detection while retaining their explicit container policy. | A Drain Cleaning record cannot acquire a warranty from a sibling wrapper headed Water Heater Repair; a wrapper without a competing heading remains part of the record, and existing card/list/figure plus single-page boundaries still pass. | fixed/superseded | `lib/site_extraction.py:888-924,927-978`; `tests/test_site_extraction.py:2048-2087` plus existing boundary suite |
 | Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `c3741e9` retry rewrote the artifact, exited 0, and both required scans found zero matches. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-c3741e9-run2.log`; `/dev/shm/website-generator-pr47-scans-c3741e9.log` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 
@@ -271,7 +273,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-05)
 
-- Code revision under test: `4cc97326e697bdee7c797e14d60017d36f07e662`.
+- Code revision under test: `c7b2ea6ee2d5f0b8cee167b341aeddf872f6f1d6`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -284,15 +286,24 @@ business-specific claims.
   Estimates`) could still authorize the shortened benefit, and a referenced
   action-label node's own `aria-label` was ignored in favor of its descendant
   text. The same probes now reject both unsupported outputs.
+- The next exact-head review reproduced an eligibility preposition outside the
+  first-token check and a weaker duplicate heading-record loop. Complete-clause
+  scope scanning now preserves only the controlled request wrapper, and record
+  extraction now uses the shared heading-owned fragment routine with an explicit
+  record-container policy. The exact eligible-benefit and sibling-wrapper probes
+  now reject.
 - Focused both-side regressions: `python -m unittest -q
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_recipient_and_purchase_qualifiers
-  tests.test_generation.BodyAssemblyTests.test_body_action_destinations_are_source_owned`:
-  2 tests passed. The first preserves complete direct, passive, and eligibility
-  relationships plus unrestricted offer/call variants; the second rejects the
-  hidden unsupported ARIA override while admitting a valid override.
+  tests.test_site_extraction.EnrichmentGroundingTests.test_heading_record_stops_at_nested_heading_in_sibling_wrapper
+  tests.test_site_extraction.EnrichmentGroundingTests.test_section_heading_record_cannot_span_sibling_cards
+  tests.test_site_extraction.EnrichmentGroundingTests.test_section_heading_record_cannot_span_list_records
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_figure_records_do_not_span_cards
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_single_page_section_binds_navigation_and_scopes_content`:
+  6 tests passed. They cover the new rejection/pass pairs and the distinct
+  record-container versus single-page-section policies.
 - Affected modules: `python -m unittest -q tests.test_site_extraction
-  tests.test_generation`: 207 tests passed.
-- Full suite: `python -m unittest discover -s tests -q`: 349 tests passed with
+  tests.test_generation`: 208 tests passed.
+- Full suite: `python -m unittest discover -s tests -q`: 350 tests passed with
   34 skipped.
 - Scoped static checks passed:
   `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
@@ -304,24 +315,29 @@ business-specific claims.
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` used `local:qwen3-30b-a3b:latest` through Ollama, resident
-  100% on the GPU at invocation. It started at
-  `2026-09-05T20:56:56-05:00`, ended before the post-run capture at
-  `2026-09-05T20:58:31-05:00`, and exited 0. No email or deployment path ran.
-  Log: `/dev/shm/website-generator-pr47-fixture-4cc9732.log`.
+  The first clean invocation began at `2026-09-05T21:16:15-05:00` with no
+  resident model and exited 1 after both responses repeated the unsupported
+  `Not a Franchise` claim; admission did not rewrite the old artifact. One
+  controlled retry began at `2026-09-05T21:18:03-05:00` with the same configured
+  model resident 100% on the GPU and exited 0 before the post-run capture at
+  `2026-09-05T21:18:43-05:00`. No email or deployment path ran. Logs:
+  `/dev/shm/website-generator-pr47-fixture-c7b2ea6.log` and
+  `/dev/shm/website-generator-pr47-fixture-c7b2ea6-run2.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html` at
-  `2026-09-05 20:58:25.656914662 -0500`; size was 71976 bytes, inode 3320504,
+  `2026-09-05 21:18:39.438596796 -0500`; size was 71981 bytes, inode 3311281,
   and SHA-256 was
-  `27972c2516927caf34742b21f1ad8ba3dcc554c507a88980cb82f6b6fda9cb1d`.
+  `5528f4c2795c8bf27f18ef1b105354f515ead7c98930f7cdf3ed3855239900ed`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-4cc9732.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-4cc9732.log`.
-- Rendered spot-check: `wkhtmltoimage` produced a nonblank 1440x3890 styled
-  page showing Drees Plumbing identity, phone, hero, service list, and trust
-  content. Full render: `/dev/shm/website-generator-pr47-render-4cc9732.png`,
+  `/dev/shm/website-generator-pr47-placeholder-scan-c7b2ea6.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-c7b2ea6.log`.
+- Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
+  produced a nonblank 1440x3890 styled page showing Drees Plumbing identity,
+  phone, hero, service grid, trust content, and customer reviews. Full render:
+  `/dev/shm/website-generator-pr47-browser-render-c7b2ea6.png`,
   SHA-256
-  `451f81f771ec954b98e62de18d0644685232c595e6002a9e1f0fdd80f9dc14bf`.
+  `f2610c3985adb5bdb3ba30b2958caf0a656abd46faa0f77daa44ef099ef30dc4`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
   after this evidence block is committed; the handoff records that exact result
   rather than claiming a dirty-tree advisory run as final proof.
