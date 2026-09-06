@@ -646,6 +646,27 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
             validate_site_analysis(shortened, punctuated_scope)
 
+        complete_heading_claim = {
+            "site": {
+                "name": "Acme",
+                "tagline": "Free Estimates Membership required.",
+            }
+        }
+        for level in range(2, 7):
+            heading_owned_scope = (
+                f"<h1>Acme</h1><div><h{level}>Free Estimates</h{level}>"
+                "<p>Membership required.</p></div>"
+            )
+            with (
+                self.subTest(level=level),
+                self.assertRaisesRegex(SiteExtractionError, "assertion context"),
+            ):
+                validate_site_analysis(shortened, heading_owned_scope)
+            self.assertEqual(
+                validate_site_analysis(complete_heading_claim, heading_owned_scope),
+                complete_heading_claim,
+            )
+
     def test_contact_facts_allow_only_field_owned_presentation_labels(self):
         labeled = {
             "site": {
@@ -658,10 +679,44 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             }
         }
         source = (
-            "<h1>Acme</h1><p>Location: Effingham, IL</p>"
-            "<p>Address: 100 Main Street</p><p>Hours: Monday–Friday</p>"
+            "<h1>Acme</h1><p>Location: Effingham, IL</p><div>"
+            "<p>Address: 100 Main Street</p>"
+            "<p>Hours: Monday–Friday</p></div>"
         )
         self.assertEqual(validate_site_analysis(labeled, source), labeled)
+
+        corrected_address = copy.deepcopy(labeled)
+        corrected_address["site"].pop("location")
+        corrected_address["site"]["contact"].pop("hours")
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(
+                corrected_address,
+                "<h1>Acme</h1><div><p>Address: 100 Main Street</p>"
+                "<p>Former address; do not visit.</p></div>",
+            )
+
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(
+                corrected_address,
+                "<h1>Acme</h1><div><p>Address: 100 Main Street.</p>"
+                "<p>Former address; do not visit.</p></div>",
+            )
+
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(
+                corrected_address,
+                "<h1>Acme</h1>"
+                "<p>Address: 100 Main Street for billing only.</p>",
+            )
+
+        heading_labeled_address = (
+            "<h1>Acme</h1><div><h3>Address</h3>"
+            "<p>100 Main Street</p></div>"
+        )
+        self.assertEqual(
+            validate_site_analysis(corrected_address, heading_labeled_address),
+            corrected_address,
+        )
 
         former_address = copy.deepcopy(labeled)
         former_address["site"].pop("location")

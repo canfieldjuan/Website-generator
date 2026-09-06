@@ -545,6 +545,14 @@ _ASSERTION_PRESERVING_PREFIXES = frozenset(
         ("we", "provide"),
     }
 )
+_PRESENTATION_FIELD_LABELS = (
+    "location",
+    "address",
+    "street address",
+    "hours",
+    "business hours",
+    "office hours",
+)
 
 
 def _normalize_text(value: str) -> str:
@@ -693,6 +701,16 @@ def _occurrence_has_presentation_label(
         return False
     prefix = re.sub(r"\s*[:\-–—]\s*$", "", text[:start].strip())
     return prefix in labels
+
+
+def _starts_presentation_field(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return any(
+        normalized == label
+        or re.match(rf"^{re.escape(label)}\s*[:\-–—]\s*\S", normalized)
+        is not None
+        for label in _PRESENTATION_FIELD_LABELS
+    )
 
 
 def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
@@ -1305,6 +1323,7 @@ class SourceEvidence:
         _include_records: bool = True,
         _include_content_sections: bool = True,
         _include_section_targets: bool = True,
+        _group_heading_claims: bool = True,
     ) -> "SourceEvidence":
         if not isinstance(source_html, str) or not source_html.strip():
             raise SiteExtractionError("Source HTML must be non-empty text.")
@@ -1364,6 +1383,10 @@ class SourceEvidence:
             "th",
         }
         claim_scope_sibling_tags = {"p", "small"}
+        if _group_heading_claims:
+            claim_scope_sibling_tags.update(
+                {"h2", "h3", "h4", "h5", "h6"}
+            )
         for context_key, local_parts in context_parts.items():
             context = context_elements[context_key]
             local_segment = _normalize_text(" ".join(local_parts))
@@ -1385,14 +1408,23 @@ class SourceEvidence:
                     if context_index is not None:
                         first = context_index
                         last = context_index
-                        while (
-                            first > 0
-                            and siblings[first - 1].name in claim_scope_sibling_tags
-                        ):
-                            first -= 1
+                        if not _starts_presentation_field(local_segment):
+                            while (
+                                first > 0
+                                and siblings[first - 1].name
+                                in claim_scope_sibling_tags
+                            ):
+                                first -= 1
+                                if _starts_presentation_field(
+                                    siblings[first].get_text(" ", strip=True)
+                                ):
+                                    break
                         while (
                             last + 1 < len(siblings)
                             and siblings[last + 1].name in claim_scope_sibling_tags
+                            and not _starts_presentation_field(
+                                siblings[last + 1].get_text(" ", strip=True)
+                            )
                         ):
                             last += 1
                         if first != last:
@@ -1692,6 +1724,7 @@ class SourceEvidence:
                     _include_records=False,
                     _include_content_sections=False,
                     _include_section_targets=False,
+                    _group_heading_claims=False,
                 )
                 for fragment in _record_fragments(soup)
             )
@@ -1705,6 +1738,7 @@ class SourceEvidence:
                     source_url,
                     _include_content_sections=False,
                     _include_section_targets=False,
+                    _group_heading_claims=False,
                 )
                 for fragment in _content_section_fragments(soup)
             )
@@ -1719,6 +1753,7 @@ class SourceEvidence:
                         _heading_owned_fragment(element),
                         source_url,
                         _include_section_targets=False,
+                        _group_heading_claims=False,
                     ),
                 )
                 for element in soup.find_all(id=True, limit=MAX_ITEMS)
@@ -1782,7 +1817,6 @@ class SourceEvidence:
         *,
         asserted: bool = False,
         presentation_labels: tuple[str, ...] = (),
-        preserve_sibling_scope: bool = True,
     ) -> None:
         if value is None:
             return
@@ -1795,31 +1829,65 @@ class SourceEvidence:
             if asserted
             else tuple((segment, segment) for segment in self.text_segments)
         )
-        normalized_labels = tuple(_normalize_text(label) for label in presentation_labels)
+        normalized_labels = tuple(
+            _normalize_text(label) for label in presentation_labels
+        )
         for local_segment, owner_segment in source_occurrences:
-            source_text = owner_segment if preserve_sibling_scope else local_segment
-            for index in _phrase_occurrences(source_text, normalized):
+            source_text = owner_segment
+            search_text = local_segment if normalized_labels else source_text
+            local_offset = source_text.find(local_segment)
+            if normalized_labels and local_offset < 0:
+                continue
+            search_occurrences = tuple(_phrase_occurrences(search_text, normalized))
+            if search_occurrences:
                 found = True
+            owner_has_presentation_label = False
+            if normalized_labels and local_segment != owner_segment:
+                owner_prefix = source_text[:local_offset].strip()
+                owner_suffix = source_text[
+                    local_offset + len(local_segment) :
+                ].strip()
+                normalized_owner_prefix = re.sub(
+                    r"\s*[:\-–—]\s*$", "", owner_prefix
+                )
+                if (
+                    owner_suffix
+                    or normalized_owner_prefix not in normalized_labels
+                ):
+                    continue
+                owner_has_presentation_label = True
+            for search_index in search_occurrences:
+                index = (
+                    local_offset + search_index
+                    if normalized_labels
+                    else search_index
+                )
                 if _occurrence_is_negated(source_text, index, len(normalized)):
                     continue
                 if (
                     asserted
-                    and preserve_sibling_scope
+                    and not normalized_labels
                     and local_segment != owner_segment
                     and normalized != owner_segment
                 ):
                     continue
-                if asserted and _occurrence_is_nonassertive(
-                    source_text,
-                    index,
-                    len(normalized),
-                    strict_claim=True,
-                ) and not _occurrence_has_presentation_label(
-                    source_text,
-                    index,
-                    normalized_labels,
-                ):
-                    continue
+                if asserted:
+                    assertion_text = source_text
+                    assertion_index = index
+                    if _occurrence_has_presentation_label(
+                        local_segment,
+                        search_index,
+                        normalized_labels,
+                    ) or owner_has_presentation_label:
+                        assertion_text = source_text[index:]
+                        assertion_index = 0
+                    if _occurrence_is_nonassertive(
+                        assertion_text,
+                        assertion_index,
+                        len(normalized),
+                        strict_claim=True,
+                    ):
+                        continue
                 return
         if found:
             raise SiteExtractionError(
@@ -1986,7 +2054,6 @@ def _require_contact(evidence: SourceEvidence, path: str, contact: Any) -> None:
         contact.get("address"),
         asserted=True,
         presentation_labels=("address", "street address"),
-        preserve_sibling_scope=False,
     )
     for index, address in enumerate(contact.get("addresses") or []):
         evidence.require_text(
@@ -1994,14 +2061,12 @@ def _require_contact(evidence: SourceEvidence, path: str, contact: Any) -> None:
             address,
             asserted=True,
             presentation_labels=("address", "street address"),
-            preserve_sibling_scope=False,
         )
     evidence.require_text(
         f"{path}.hours",
         contact.get("hours"),
         asserted=True,
         presentation_labels=("hours", "business hours", "office hours"),
-        preserve_sibling_scope=False,
     )
 
 
@@ -2082,7 +2147,6 @@ def _require_site_facts(
         site.get("location"),
         asserted=True,
         presentation_labels=("location",),
-        preserve_sibling_scope=False,
     )
     _require_contact(evidence, "site.contact", site.get("contact"))
 

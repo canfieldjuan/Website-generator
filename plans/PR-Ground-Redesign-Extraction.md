@@ -114,6 +114,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fplaH`: `Membership required` escaped the first sibling implementation | Sibling ownership must be structural, not dependent on enumerating qualifier vocabulary. | The semantic marker helper was removed. Both `Members only` and `Membership required` are rejected when shortened, and their complete structural owner passes. | fixed/superseded | `lib/site_extraction.py:1355-1409,1778-1825`; `tests/test_site_extraction.py:606-628,642-647` |
 | `PRRT_kwDOTDYaKM6fplaI`: normalized claim deduplication lost occurrence ownership | Equal text in different DOM records must retain distinct owners so one scoped occurrence cannot suppress a separate unrestricted occurrence. | Assertion occurrences are no longer deduplicated; a scoped `Free Estimates` card plus a separate unrestricted card admits from the unrestricted occurrence. | fixed/superseded | `lib/site_extraction.py:1280-1283,1355-1409,1778-1825`; `tests/test_site_extraction.py:630-640` |
 | `PRRT_kwDOTDYaKM6fplaJ`: contact presentation labels were treated as arbitrary claim prefixes | Schema-known contact fields may omit only their exact field-owned presentation label; the exception must not weaken general claims. | `Location:`, `Address:`, and `Hours:` admit their values through field-local contracts; `Former address:` still rejects. | fixed/superseded | `lib/site_extraction.py:687-695,1778-1825,1979-2005,2074-2087`; `tests/test_site_extraction.py:649-673` |
+| `PRRT_kwDOTDYaKM6fprAP`: heading-led cards did not contribute one assertion owner | A page-level claim must preserve adjacent heading and paragraph assertions owned by the same bounded card, independent of heading level or qualifier vocabulary. | Heading-led cards now use one owner across `h2` through `h6`, paragraph, and small-text siblings; shortened claims reject and the complete owned assertion admits. Record/section evidence retains its existing field-local ownership so valid composite enrichment remains supported. | fixed/superseded | `lib/site_extraction.py:1323-1438,1719-1757,1813-1896`; `tests/test_site_extraction.py:606-668` |
+| `PRRT_kwDOTDYaKM6fprAQ`: labeled contact fields discarded adjacent correction owners | A schema-owned presentation label may be omitted, but an unlabeled sibling or trailing qualifier in the same owner may not be discarded. Independently labeled contact fields must remain separate facts. | Exact Location/Address/Hours labels partition field records. A same-element label or exact heading label can wrap its value; unlabeled sibling corrections and same-line trailing qualifiers reject, including across sentence punctuation. | fixed/superseded | `lib/site_extraction.py:548-555,695-713,1374-1438,1813-1896,2047-2070`; `tests/test_site_extraction.py:670-728` |
 
 ## Mechanism
 
@@ -396,6 +398,13 @@ business-specific claims.
   ordered assertion occurrences, and validation evaluates each occurrence
   independently. Schema-known contact presentation labels use a separate
   field-local wrapper contract, so they do not weaken general claim admission.
+- The subsequent exact-head review found the two remaining sides of that one
+  ownership model. Page-level claim owners now include heading-led cards across
+  every supported subheading level. Schema-known field labels form explicit
+  field boundaries, while unlabeled siblings stay attached; only an exact local
+  label or exact heading label may be omitted from the admitted field value.
+  Nested record and section evidence keeps field-local ownership because those
+  consumers already require populated fields to share one bounded source record.
 - Focused both-side regressions: `python -m unittest -q
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_recipient_and_purchase_qualifiers
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_complete_negated_claim_and_separate_positive_occurrence_are_admitted
