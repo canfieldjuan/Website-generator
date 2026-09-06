@@ -67,6 +67,19 @@ analysis may control presentation but may not authorize a visible business claim
 - `requirements-dev.txt`
 - `plans/PR-Ground-Redesign-Extraction.md`
 
+## Finding disposition ledger
+
+| Finding/thread | Affected invariant | Current reproduction | Disposition | Proof |
+| --- | --- | --- | --- | --- |
+| `PRRT_kwDOTDYaKM6foIrz`: lone wrapped title used literal membership | Complete source identity and a controlled wrapper must use one authority rule from collection through admission. | `og:site_name="Acme Plumbing"` plus `Welcome to Acme Plumbing` now admits the complete wrapped identity. | fixed/superseded | `lib/site_extraction.py:705-725,1031-1036`; `tests/test_site_extraction.py:49-75,919-927` |
+| Metadata `Acme Plumbing` plus H1 `Plumbing` | A source-owned identity cannot be shortened to an inner phrase. | The shortened H1 and extracted name are rejected. | fixed/superseded | `lib/site_extraction.py:1051-1075`; `tests/test_site_extraction.py:872-879` |
+| Metadata `Acme Plumbing` plus H1 `Best Acme Plumbing` | A source-owned identity cannot be expanded with unsupported wording. | The expanded H1 and extracted name are rejected. | fixed/superseded | `lib/site_extraction.py:1051-1075`; `tests/test_site_extraction.py:881-889` |
+| Metadata `Acme Plumbing` plus title `Plumbing \| Repairs` | Multi-component titles cannot promote a partial component; both components must exercise the non-generic branch. | Extracted name `Plumbing` is rejected. | fixed/superseded | `lib/site_extraction.py:1024-1049`; `tests/test_site_extraction.py:891-899` |
+| `Home - Acme Plumbing`, exact identity, controlled `Welcome to ...`, and intrinsic `Acme-Plumbing` | Valid complete identities and only controlled wrapper variants must remain admissible. | All four positive boundaries admit their complete identity. | fixed/superseded | `lib/site_extraction.py:705-725,1024-1049`; `tests/test_site_extraction.py:901-927` |
+| Ambiguous and conflicting title identity | Independent conflicting or ambiguous identity surfaces must fail closed rather than self-corroborate. | Ambiguous title candidates and the conflicting single-title name are rejected; the explicit metadata identity remains admissible. | fixed/superseded | `lib/site_extraction.py:1038-1075`; `tests/test_site_extraction.py:843-870,929-940` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `5395569` invocation rewrote the artifact, exited 0, and both required scans found zero matches. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-5395569.log`; `/dev/shm/website-generator-pr47-scans-5395569.log` |
+| Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
+
 ## Mechanism
 
 `lib/site_extraction.py` owns both structure admission and source grounding. A
