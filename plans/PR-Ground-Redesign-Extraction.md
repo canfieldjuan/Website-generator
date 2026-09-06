@@ -107,7 +107,7 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fpOBr`: neutral action tokens composed an unsupported review claim | Capability-neutral fallback labels must be bounded complete phrases; token membership cannot authorize a new semantic assertion. | `Read All Reviews` now rejects without source label/pair authority while exact neutral `Contact Us` and `Learn More` labels admit; the same review label admits when source-owned. | fixed/superseded | `lib/generation.py:404-432,2152-2215,2367-2382`; `tests/test_generation.py:1460-1492` |
 | `PRRT_kwDOTDYaKM6fpZkx`: unknown trailing claim predicates could be discarded | Asserted fields may omit only an explicit meaning-preserving leading wrapper; every unknown trailing clause remains part of the assertion regardless of its vocabulary. | `Free Estimates` from `Free Estimates require membership` rejects without adding `require` to a denylist; the complete qualified claim admits. Other trailing assertions now follow the same fail-closed rule. | fixed/superseded | `lib/site_extraction.py:557-592,1623-1648`; `tests/test_site_extraction.py:386-462,553-590` |
 | `PRRT_kwDOTDYaKM6fpZk0`: conflicting explicit identity metadata independently authorized both names | Identity authority must resolve one uniquely best-supported canonical identity across independent metadata, structured DOM, title, and H1 channels; a tied conflict authorizes neither candidate. | Conflicting `application-name` and `og:site_name` now select the name corroborated by title/H1 and reject the other; without corroboration both reject. | fixed/superseded | `lib/site_extraction.py:1010-1052,1260-1446,1580-1594`; `tests/test_site_extraction.py:1051-1078` |
-| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `cb3b173` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-cb3b173.log`; `/dev/shm/website-generator-pr47-browser-render-cb3b173.png` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `759d227` invocation rewrote the artifact, exited 0, and both required scans found zero matches; the rewritten bytes were rendered and inspected. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-759d227.log`; `/dev/shm/website-generator-pr47-browser-render-759d227.png` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 | `PRRT_kwDOTDYaKM6fpeiS`: class-based stylesheet suppression is not applied before evidence collection | Raw fetched HTML does not own browser-computed visibility; a correct computed-visibility policy must account for the CSS cascade, media state, viewport, and external stylesheets once at the fetch/render boundary. | The class-hidden claim is present in fetched HTML and is admitted; the equivalent inline-hidden claim rejects. A selector regex here would not establish computed visibility. | separate issue | `lib/site_extraction.py:805-815,1328-1335`; issue #48 |
 | `PRRT_kwDOTDYaKM6fpeiT`: an adjacent sibling disclaimer did not scope its claim | Claim ownership must preserve every adjacent paragraph-like assertion owned by the same bounded record without using an English predicate list. | Adjacent paragraph/small runs now form one structural owner occurrence; a shortened claim rejects, the complete owner passes, and a separately contained assertion remains independent. | fixed/superseded | `lib/site_extraction.py:1278-1409,1778-1825`; `tests/test_site_extraction.py:606-647` |
@@ -131,7 +131,7 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fqME-`: SVG `xlink:href` actions bypassed label admission | Source extraction and generated-output validation must classify the same link elements, destination attributes, labels, and label/destination pairs. | An unsupported label on `<svg><a xlink:href=...>` now rejects; the exact source-owned SVG label/destination pair admits in both source extraction and generated-output validation. | fixed/superseded | `lib/site_extraction.py:330,1015-1025,1577-1608`; `lib/generation.py:2105-2119,2350-2364`; `tests/test_site_extraction.py:2259-2293`; `tests/test_generation.py:1292-1318` |
 | `PRRT_kwDOTDYaKM6fqT3l`: unavailable action subtrees still granted source authority | One availability rule must govern every source action consumer without hiding inert text that remains rendered. | Actions below `inert`, disabled controls, and controls disabled by a fieldset now reject; an ordinary action and the disabled-fieldset first-legend exception pass. Inert non-action claim text remains visible evidence. | fixed/superseded | `lib/site_extraction.py:982-1012,1632-1665`; `pipeline.py:17-24,214-240`; `tests/test_site_extraction.py:1867-1957,2489-2507` |
 | `PRRT_kwDOTDYaKM6fqT3s`: wrapping native labels absorbed their controls' option text | A native label owns its own accessible text, not the text content of the form control it labels. | `<label>Project Type<select><option>Office</option></select></label>` admits `Project Type` and rejects the fabricated combined label `Project Type Office`; externally associated and ARIA labels retain their existing paths. | fixed/superseded | `lib/site_extraction.py:912-979,1787-1832`; `tests/test_site_extraction.py:1615-1679` |
-| `PRRT_kwDOTDYaKM6fqT3u`: a valid main/H1 FAQ record was discarded | A single H1-owned main record must be usable while independent nested record containers remain ownership boundaries. | `<main><h1>Do you offer financing?</h1><p>Yes.</p></main>` admits the complete FAQ record; two independent sections cannot donate the answer to that H1. | fixed/superseded | `lib/site_extraction.py:1107-1109,1225-1263,1316-1329`; `tests/test_site_extraction.py:2838-2873` |
+| `PRRT_kwDOTDYaKM6fqT3u`: a valid main/H1 FAQ record was discarded | A single H1-owned main record must be usable while independent nested or peer records remain ownership boundaries. | `<main><h1>Do you offer financing?</h1><p>Yes.</p></main>` admits the complete FAQ record. A main with independent sections rejects, and an H1 page shell cannot recombine a question from one peer H2 record with another peer's answer. | fixed/superseded | `lib/site_extraction.py:1107-1109,1225-1263,1316-1332`; `tests/test_site_extraction.py:2838-2886` |
 
 ## Mechanism
 
@@ -337,7 +337,7 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-06)
 
-- Code revision under test: `cb3b17302e15d3189b61d1873940867c21f3973c`.
+- Code revision under test: `759d2275cedb541dd9b060690fb3708624d7a942`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -462,8 +462,9 @@ business-specific claims.
   policies rather than new vocabulary cases. Source actions now have one explicit
   availability predicate shared by extraction and the downstream action contract;
   native label names use the shared accessible-name walk while excluding the
-  associated control subtree; and a lone H1 under `main` uses the shared bounded
-  heading fragment for records without absorbing independent nested records.
+  associated control subtree; and an H1 under `main` becomes a page-level record
+  only when it is the sole heading, so neither nested nor peer records can donate
+  fields across entries.
 - Focused action-availability, native-label, and H1-record boundary probes passed:
   `python -m unittest -q
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_form_fields_require_actual_labeled_controls
@@ -471,46 +472,46 @@ business-specific claims.
   tests.test_site_extraction.EnrichmentGroundingTests.test_h1_led_faq_record_is_bounded_to_its_main_content
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_generation_action_contract_excludes_inert_source_actions`:
   4 tests passed. Their negative sides cover option text donated into a wrapping
-  label, inert and disabled actions authorizing output, and independent FAQ
-  sections donating an answer. Their positive sides preserve the complete label,
+  label, inert and disabled actions authorizing output, and independent section or
+  peer-heading FAQ records donating an answer. Their positive sides preserve the complete label,
   ordinary and first-legend actions, inert rendered claim text, and one complete
   main/H1 FAQ record.
 - Current affected modules: `python -m unittest -q tests.test_site_extraction
   tests.test_generation`: 227 tests passed. These modules cover the action
   availability, label ownership, and H1 record boundaries alongside the existing
   image, identity, claim, and prompt contracts.
-- Full suite on code revision `cb3b17302e15d3189b61d1873940867c21f3973c`:
+- Full suite on code revision `759d2275cedb541dd9b060690fb3708624d7a942`:
   `python -m unittest discover -s tests -q`: 369 tests passed with 34 skipped.
 - Scoped static checks passed:
   `ruff check --ignore F401,F541 lib/site_extraction.py pipeline.py
   tests/test_site_extraction.py`; `python -m compileall -q
   lib/site_extraction.py pipeline.py tests/test_site_extraction.py`; and
   `git diff --check`.
-- The final code revision `cb3b17302e15d3189b61d1873940867c21f3973c`
+- The final code revision `759d2275cedb541dd9b060690fb3708624d7a942`
   used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began at `2026-09-06T03:30:48.614300553-05:00` with no model
-  resident and exited 0 before `2026-09-06T03:32:23.348367799-05:00`;
+  invocation began at `2026-09-06T03:44:08.312567275-05:00` with no model
+  resident and exited 0 before `2026-09-06T03:45:39.273815820-05:00`;
   the configured model was then resident 100% on the GPU. No email or deployment
   path ran. The first generated body was correctly rejected for unsupported `Not
   a Franchise` wording; the bounded correction passed full admission. Log:
-  `/dev/shm/website-generator-pr47-fixture-cb3b173.log`.
+  `/dev/shm/website-generator-pr47-fixture-759d227.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`; size was 72027 bytes, inode
-  3320504, mtime was `2026-09-06 03:32:10.924720388 -0500`, and SHA-256 was
+  3311280, mtime was `2026-09-06 03:45:36.006002951 -0500`, and SHA-256 was
   `2728fda49162dae9477be2acbad5f97e299382eddf3f2837424e51e686c23796`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-cb3b173.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-cb3b173.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-759d227.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-759d227.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3180 styled page showing Drees Plumbing identity,
   phone, navigation, `Request Service` CTA, hero, service grid, trust content,
   and customer reviews. The current
   artifact was served directly from this invocation's output. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-cb3b173.png`,
+  `/dev/shm/website-generator-pr47-browser-render-759d227.png`,
   SHA-256
   `12cdb4df66e4cdd750eed2ff64ff8364b1e472b6ea177be0ddbfddefc076e99a`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
