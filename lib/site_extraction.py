@@ -786,22 +786,11 @@ def _contact_occurrence_is_noncallable(
             return first_start - second_end
         return 0
 
-    numbers = tuple(_PHONE_PATTERN.finditer(text))
-    assigned_roles = tuple(
-        role
-        for role in roles
-        if min(
-            numbers,
-            key=lambda number: span_distance(
-                role.start(), role.end(), number.start(), number.end()
-            ),
-        ).start()
-        == start
-    )
-    if not assigned_roles:
-        return False
+    role_kinds = {role.group("role").casefold() for role in roles}
+    if len(role_kinds) == 1:
+        return next(iter(role_kinds)) in {"fax", "facsimile"}
     nearest = min(
-        assigned_roles,
+        roles,
         key=lambda role: span_distance(
             role.start(), role.end(), start, occurrence_end
         ),
@@ -1767,14 +1756,30 @@ class SourceEvidence:
                 and _assertion_heading_level(element) is None
             )
 
+        def first_claim_boundary(element: Any) -> Tag | None:
+            if not isinstance(element, Tag):
+                return None
+            return next(
+                (
+                    descendant
+                    for descendant in element.descendants
+                    if isinstance(descendant, Tag)
+                    and (
+                        _assertion_heading_level(descendant) is not None
+                        or descendant.name in _INDEPENDENT_RECORD_TAGS
+                    )
+                ),
+                None,
+            )
+
         def claim_component_heading_level(element: Any) -> int | None:
             direct_level = _assertion_heading_level(element)
             if direct_level is not None or not isinstance(element, Tag):
                 return direct_level
-            nested_heading = element.find(_ALL_HEADING_TAG_PATTERN)
-            if nested_heading is not None and claim_component_prefix(element, nested_heading):
+            boundary = first_claim_boundary(element)
+            if boundary is not None and claim_component_prefix(element, boundary):
                 return None
-            return _assertion_heading_level(nested_heading)
+            return _assertion_heading_level(boundary)
 
         def raw_claim_component_text(element: Any) -> str:
             if isinstance(element, Comment):
@@ -1785,10 +1790,10 @@ class SourceEvidence:
                 return _normalize_text(element.get_text(" ", strip=True))
             return ""
 
-        def claim_component_prefix(element: Tag, heading: Tag) -> str:
+        def claim_component_prefix(element: Tag, boundary: Tag) -> str:
             parts: list[str] = []
             for descendant in element.descendants:
-                if descendant is heading:
+                if descendant is boundary:
                     break
                 if isinstance(descendant, NavigableString) and not isinstance(
                     descendant, Comment
@@ -1799,25 +1804,25 @@ class SourceEvidence:
         def claim_component_text(element: Any) -> str:
             if not isinstance(element, Tag) or _assertion_heading_level(element) is not None:
                 return raw_claim_component_text(element)
-            nested_heading = element.find(_ALL_HEADING_TAG_PATTERN)
-            if nested_heading is not None:
-                prefix = claim_component_prefix(element, nested_heading)
+            boundary = first_claim_boundary(element)
+            if boundary is not None:
+                prefix = claim_component_prefix(element, boundary)
                 if prefix:
                     return prefix
             return raw_claim_component_text(element)
 
-        def belongs_to_preheading_fragment(parent: Tag, element: Any) -> bool:
-            heading = parent.find(_ALL_HEADING_TAG_PATTERN)
-            if heading is None or not claim_component_prefix(parent, heading):
+        def belongs_to_preboundary_fragment(parent: Tag, element: Any) -> bool:
+            boundary = first_claim_boundary(parent)
+            if boundary is None or not claim_component_prefix(parent, boundary):
                 return False
             if isinstance(element, Tag) and any(
-                descendant is heading for descendant in element.descendants
+                descendant is boundary for descendant in element.descendants
             ):
                 return False
             for descendant in parent.descendants:
                 if descendant is element:
                     return True
-                if descendant is heading:
+                if descendant is boundary:
                     return False
             return False
 
@@ -1830,10 +1835,13 @@ class SourceEvidence:
                 return bool(claim_component_text(element))
             if not isinstance(element, Tag):
                 return False
-            if element.name in _INDEPENDENT_RECORD_TAGS or element.find(
-                _INDEPENDENT_RECORD_TAGS
-            ) is not None:
+            if element.name in _INDEPENDENT_RECORD_TAGS:
                 return False
+            nested_record = element.find(_INDEPENDENT_RECORD_TAGS)
+            if nested_record is not None:
+                boundary = first_claim_boundary(element)
+                if boundary is None or not claim_component_prefix(element, boundary):
+                    return False
             if not claim_component_text(element):
                 return False
             component_heading_level = claim_component_heading_level(element)
@@ -1867,7 +1875,7 @@ class SourceEvidence:
                     if parent.name in claim_scope_parent_tags and len(siblings) > 1:
                         if (
                             parent.name in transparent_claim_wrapper_tags
-                            and belongs_to_preheading_fragment(parent, scope_context)
+                            and belongs_to_preboundary_fragment(parent, scope_context)
                         ):
                             scope_context = parent
                             parent = parent.parent

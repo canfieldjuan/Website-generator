@@ -752,6 +752,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "<main>Free Estimates<div>Members only.<h2>Details</h2></div></main>",
             "<main>Free Estimates<div><p>Members only.</p><h2>Details</h2></div></main>",
             "<main>Free Estimates<div><div>Members only.</div><h2>Details</h2></div></main>",
+            "<main>Free Estimates<div>Members only.<section><h2>Details</h2></section></div></main>",
+            "<main>Free Estimates<div><p>Members only.</p><section><h2>Details</h2></section></div></main>",
         ):
             shell_scope = '<meta property="og:site_name" content="Acme">' + shell
             with (
@@ -1182,6 +1184,36 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(mixed_roles, mixed_source),
             mixed_roles,
         )
+
+        for shared_fax in (
+            "Fax: 217-555-0100 or 217-555-0101",
+            "217-555-0100 or 217-555-0101 (fax)",
+        ):
+            for fax_number in ("217-555-0100", "217-555-0101"):
+                fax_document = copy.deepcopy(base_phone)
+                fax_document["site"]["contact"]["phone"] = fax_number
+                with (
+                    self.subTest(shared_fax=shared_fax, fax_number=fax_number),
+                    self.assertRaisesRegex(SiteExtractionError, "source phone"),
+                ):
+                    validate_site_analysis(
+                        fax_document,
+                        f"<h1>Acme Cleaning</h1><p>{shared_fax}</p>",
+                    )
+
+        for phone_number in ("217-555-0100", "217-555-0101"):
+            phone_document = copy.deepcopy(base_phone)
+            phone_document["site"]["contact"]["phone"] = phone_number
+            self.assertEqual(
+                validate_site_analysis(
+                    phone_document,
+                    (
+                        "<h1>Acme Cleaning</h1>"
+                        "<p>Phone: 217-555-0100 or 217-555-0101</p>"
+                    ),
+                ),
+                phone_document,
+            )
 
         replacement_source = (
             "<h1>Acme Cleaning</h1><p>Call "
