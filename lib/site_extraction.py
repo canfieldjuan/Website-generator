@@ -1041,6 +1041,21 @@ class SourceEvidence:
             )
 
         soup = BeautifulSoup(source_html, "html.parser")
+        preserved_image_urls: set[str] = set()
+        for inventory in soup.find_all(
+            "template",
+            attrs={"data-code-owned-image-inventory": "true"},
+            limit=MAX_ITEMS,
+        ):
+            for image in inventory.find_all("img", limit=MAX_ITEMS):
+                preserved_image_urls.update(_attribute_values(image.get("src")))
+        for style in soup.find_all("style", limit=MAX_ITEMS):
+            preserved_image_urls.update(
+                _CSS_URL_PATTERN.findall(style.get_text(" "))
+            )
+        for ignored_container in soup.find_all(tuple(_IGNORED_TEXT_TAGS)):
+            ignored_container.decompose()
+
         context_parts: dict[int, list[str]] = {}
         for node in soup.find_all(string=True):
             if isinstance(node, Comment):
@@ -1065,7 +1080,7 @@ class SourceEvidence:
         attribute_parts: list[str] = []
         raw_action_urls: set[str] = set()
         raw_action_pairs: set[tuple[str, str]] = set()
-        raw_image_urls: set[str] = set()
+        raw_image_urls: set[str] = set(preserved_image_urls)
         raw_image_pairs: set[tuple[str, str]] = set()
         raw_logo_urls: set[str] = set()
         identity_parts: list[str] = []
@@ -1259,9 +1274,6 @@ class SourceEvidence:
             normalized_label = _normalize_text(accessible_label)
             if normalized_label:
                 form_control_labels.append(normalized_label)
-
-        for style in soup.find_all("style"):
-            raw_image_urls.update(_CSS_URL_PATTERN.findall(style.get_text(" ")))
 
         def resolved(values: Iterable[str]) -> frozenset[str]:
             admitted: set[str] = set()

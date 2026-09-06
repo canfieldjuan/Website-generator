@@ -1383,6 +1383,80 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     "https://acme.test/",
                 )
 
+    def test_ignored_source_containers_cannot_authorize_visible_meaning(self):
+        hidden_claim = (
+            "<h1>Acme</h1>"
+            "<template><div>Free Estimates</div></template>"
+        )
+        claim = {"site": {"name": "Acme", "tagline": "Free Estimates"}}
+        with self.assertRaisesRegex(SiteExtractionError, "site.tagline"):
+            validate_site_analysis(claim, hidden_claim, "https://acme.test/")
+        self.assertEqual(
+            validate_site_analysis(
+                claim,
+                "<h1>Acme</h1><div>Free Estimates</div>",
+                "https://acme.test/",
+            ),
+            claim,
+        )
+
+        hidden_action = (
+            "<h1>Acme</h1>"
+            '<template><a href="/book">Book Appointment</a></template>'
+        )
+        action = {
+            "site": {"name": "Acme"},
+            "cta": {"label": "Book Appointment", "url": "/book"},
+        }
+        with self.assertRaisesRegex(SiteExtractionError, "cta"):
+            validate_site_analysis(action, hidden_action, "https://acme.test/")
+        self.assertEqual(
+            validate_site_analysis(
+                action,
+                '<h1>Acme</h1><a href="/book">Book Appointment</a>',
+                "https://acme.test/",
+            ),
+            action,
+        )
+
+        with self.assertRaisesRegex(SiteExtractionError, "complete label"):
+            validate_enrichment_result(
+                {"form_fields": ["Email"]},
+                page_type="contact",
+                source_html="<template><label>Email<input></label></template>",
+                source_url="https://acme.test/contact",
+            )
+        form_fields = {"form_fields": ["Email"]}
+        self.assertEqual(
+            validate_enrichment_result(
+                form_fields,
+                page_type="contact",
+                source_html="<label>Email<input></label>",
+                source_url="https://acme.test/contact",
+            ),
+            {
+                "form_fields": ["Email"],
+                "source_url": "https://acme.test/contact",
+            },
+        )
+
+    def test_code_owned_image_inventory_remains_admissible(self):
+        image_url = "https://cdn.acme.test/hero.jpg"
+        document = {
+            "site": {"name": "Acme"},
+            "images": [{"url": image_url, "alt": None, "context": "hero"}],
+        }
+        source = (
+            '<template data-code-owned-image-inventory="true">'
+            f'<img src="{image_url}">'
+            "</template><h1>Acme</h1>"
+        )
+
+        self.assertEqual(
+            validate_site_analysis(document, source, "https://acme.test/"),
+            document,
+        )
+
     def test_article_record_does_not_span_nested_content_cards(self):
         document = {
             "site": {"name": "Acme Cleaning"},
