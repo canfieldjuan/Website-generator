@@ -312,9 +312,9 @@ business-specific claims.
 
 ## Verification
 
-### Current revision evidence (2026-09-05)
+### Current revision evidence (2026-09-06)
 
-- Code revision under test: `6ee2c009838856254b94528b9a9d3dbaad17e5de`.
+- Code revision under test: `02456099c07ece8c3cd4c8d827274f7dad96a917`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
@@ -405,50 +405,48 @@ business-specific claims.
   label or exact heading label may be omitted from the admitted field value.
   Nested record and section evidence keeps field-local ownership because those
   consumers already require populated fields to share one bounded source record.
-- Focused both-side regressions: `python -m unittest -q
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_recipient_and_purchase_qualifiers
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_complete_negated_claim_and_separate_positive_occurrence_are_admitted
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_business_name_requires_assertive_identity_evidence`:
-  3 tests passed, covering rejected shortened requirements, admitted complete
-  claims, rejected uncorroborated identities, and the uniquely corroborated
-  identity. The first focused run exposed one old trailing-assertion positive
-  control; that case was moved to complete-claim coverage before the passing run.
+- Focused ownership boundary: `python -m unittest -q
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_adjacent_owned_disclaimers
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_contact_facts_allow_only_field_owned_presentation_labels`:
+  2 tests passed. The negative side covers shortened claims across `h2` through
+  `h6`, unlabeled contact corrections with and without sentence punctuation,
+  same-line trailing restrictions, and former-address labels. The positive side
+  covers complete heading-owned claims, independently labeled Address/Hours
+  peers, a standalone labeled field, and an exact heading label wrapping its
+  following field value.
 - Affected module: `python -m unittest -q tests.test_site_extraction`: 75 tests
   passed.
 - Full suite: `python -m unittest discover -s tests -q`: 368 tests passed with
   34 skipped.
 - Scoped static checks passed:
-  `ruff check --ignore F401,F541 lib/site_extraction.py lib/generation.py pipeline.py
-  tests/test_site_extraction.py tests/test_generation.py`;
-  `python -m compileall -q lib/site_extraction.py lib/generation.py pipeline.py
-  tests/test_site_extraction.py tests/test_generation.py`; and `git diff --check`.
-  Running without the established `F541` exclusion found five pre-existing
-  findings on unchanged print calls in `pipeline.py`; they were not folded into
-  this slice.
-- The final code revision `c897c9e4fafb75b0a4b77a3c256d49a83f4a7728`
+  `ruff check --ignore F401,F541 lib/site_extraction.py
+  tests/test_site_extraction.py`;
+  `python -m compileall -q lib/site_extraction.py
+  tests/test_site_extraction.py`; and `git diff --check`.
+- The final code revision `02456099c07ece8c3cd4c8d827274f7dad96a917`
   used
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` with `local:qwen3-30b-a3b:latest` through Ollama. The clean
-  invocation began after the `2026-09-06T01:01:42-05:00` capture with no model
-  resident and exited 0 before the `2026-09-06T01:03:00-05:00` post-run capture;
+  invocation began after the `2026-09-06T01:25:27-05:00` capture with no model
+  resident and exited 0 before the `2026-09-06T01:26:28-05:00` post-run capture;
   the configured model was then resident 100% on the GPU. No email or deployment
-  path ran. Log: `/dev/shm/website-generator-pr47-fixture-c897c9e.log`.
+  path ran. Log: `/dev/shm/website-generator-pr47-fixture-0245609.log`.
 - The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html`; size was 72027 bytes, inode
-  3311280, mtime was `2026-09-06 01:02:45.808786893 -0500`, and SHA-256 was
+  3325015, mtime was `2026-09-06 01:26:24.869957891 -0500`, and SHA-256 was
   `8991ac64600a198bcf5f14d6feae6fe33e0cbca5ee752d23da033dbaaaa2b309`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
   returned grep status 1 and zero matches. Logs:
-  `/dev/shm/website-generator-pr47-placeholder-scan-c897c9e.log` and
-  `/dev/shm/website-generator-pr47-forbidden-scan-c897c9e.log`.
+  `/dev/shm/website-generator-pr47-placeholder-scan-0245609.log` and
+  `/dev/shm/website-generator-pr47-forbidden-scan-0245609.log`.
 - Rendered spot-check: a loopback server returned HTTP 200 and headless Chrome
   produced a nonblank 1440x3180 styled page showing Drees Plumbing identity,
   phone, hero, service grid, trust content, and customer reviews. The current
   artifact has the same SHA-256 as the HTML used for that render. Full render:
-  `/dev/shm/website-generator-pr47-browser-render-c897c9e.png`,
+  `/dev/shm/website-generator-pr47-browser-render-0245609.png`,
   SHA-256
-  `9dd618e9a0b6dc29b59f8c7fc25c0ee1c14fce35f02ab9ea93e54f26ab1632c9`.
+  `06cb49e006365b4e31f2b71f072f8ce5dd2e0b48e47469d60adc3221e8761945`.
 - `bash scripts/local_pr_review.sh` is reconciled on the final clean descendant
   after this evidence block is committed; the handoff records that exact result
   rather than claiming a dirty-tree advisory run as final proof.
