@@ -406,6 +406,10 @@ _TRAILING_SCOPE_QUALIFIER_TERMS = frozenset(
 )
 _RECIPIENT_TO_PREDECESSORS = frozenset(
     {
+        "apply",
+        "applied",
+        "applies",
+        "applying",
         "available",
         "limited",
         "offered",
@@ -936,7 +940,7 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
 
     for element in soup.find_all(True):
         if element.name in _ATOMIC_RECORD_TAGS:
-            if element.name == "li" and element.find("li") is not None:
+            if element.find(element.name) is not None:
                 continue
             append(str(element))
             continue
@@ -990,6 +994,13 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
 
     for element in soup.find_all(["article", "section"], limit=MAX_ITEMS):
         if len(element.find_all(["article", "section"], limit=2)) > 1:
+            continue
+        append(str(element))
+
+    for element in soup.find_all("main", limit=MAX_ITEMS):
+        if element.find(["article", "section"]) is not None:
+            continue
+        if len(element.find_all("h1", limit=2)) != 1:
             continue
         append(str(element))
 

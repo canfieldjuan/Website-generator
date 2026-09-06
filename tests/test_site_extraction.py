@@ -558,6 +558,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "Members qualify for Free Estimates",
             "Members are offered Free Estimates",
             "Maintenance-plan members are eligible for Free Estimates",
+            "Free Estimates apply to maintenance-plan members",
         ):
             source = f"<h1>Acme Cleaning</h1><p>{complete_claim}.</p>"
             with (
@@ -1903,6 +1904,50 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 source_url="https://acme.test/services",
             )
 
+    def test_main_h1_owns_main_only_enrichment_content(self):
+        document = {
+            "type": "services",
+            "headline": "Plumbing Services",
+            "items": [
+                {
+                    "title": "Drain Cleaning",
+                    "url": None,
+                    "image_url": None,
+                    "tag": None,
+                    "meta": "Clears stubborn clogs.",
+                }
+            ],
+        }
+        source_url = "https://acme.test/services"
+        main_only = (
+            "<main><h1>Plumbing Services</h1><div>"
+            "<h2>Drain Cleaning</h2><p>Clears stubborn clogs.</p>"
+            "</div></main>"
+        )
+        self.assertEqual(
+            validate_enrichment_result(
+                document,
+                page_type="services",
+                source_html=main_only,
+                source_url=source_url,
+            ),
+            {**document, "source_url": source_url},
+        )
+
+        split_sections = (
+            "<main><h1>Plumbing Services</h1>"
+            "<section><h2>Drain Cleaning</h2><p>Basic service.</p></section>"
+            "<section><h2>Water Heater Repair</h2>"
+            "<p>Clears stubborn clogs.</p></section></main>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "share one source section"):
+            validate_enrichment_result(
+                document,
+                page_type="services",
+                source_html=split_sections,
+                source_url=source_url,
+            )
+
     def test_content_enrichment_rejects_mixed_fabricated_item(self):
         document = {
             "type": "team",
@@ -2016,6 +2061,51 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 source_html=html,
                 source_url="https://acme.test/questions",
             )
+
+    def test_nested_atomic_records_cannot_authorize_cross_record_items(self):
+        document = {
+            "type": "misc",
+            "headline": "FAQ",
+            "items": [
+                {
+                    "title": "Do you offer free estimates?",
+                    "url": None,
+                    "image_url": None,
+                    "tag": "faq",
+                    "meta": "Yes.",
+                }
+            ],
+        }
+        nested_details = (
+            "<h1>Frequently Asked Questions</h1>"
+            "<details><summary>Questions</summary>"
+            "<details><summary>Do you offer free estimates?</summary>"
+            "<p>No.</p></details>"
+            "<details><summary>Do you offer recurring service?</summary>"
+            "<p>Yes.</p></details></details>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_enrichment_result(
+                document,
+                page_type="faq",
+                source_html=nested_details,
+                source_url="https://acme.test/questions",
+            )
+
+        valid_details = (
+            "<h1>Frequently Asked Questions</h1>"
+            "<details><summary>Do you offer free estimates?</summary>"
+            "<p>Yes.</p></details>"
+        )
+        self.assertEqual(
+            validate_enrichment_result(
+                document,
+                page_type="faq",
+                source_html=valid_details,
+                source_url="https://acme.test/questions",
+            )["items"],
+            document["items"],
+        )
 
     def test_section_heading_record_cannot_span_sibling_cards(self):
         document = {

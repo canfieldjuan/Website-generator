@@ -2333,10 +2333,15 @@ def _validate_action_urls(
     action_entries: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
-        if tag_name not in {"a", "area", "form", "button", "input"}:
+        is_role_button = str(element.get("role") or "").casefold() == "button"
+        if (
+            tag_name not in {"a", "area", "form", "button", "input"}
+            and not is_role_button
+        ):
             continue
         is_labelled_action = (
             tag_name in {"a", "area", "button"}
+            or is_role_button
             or tag_name == "input"
             and str(element.get("type") or "").casefold()
             in {"button", "image", "reset", "submit"}
