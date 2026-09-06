@@ -539,6 +539,50 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         }
         self.assertEqual(validate_site_analysis(complete, source), complete)
 
+    def test_claim_text_preserves_recipient_and_purchase_qualifiers(self):
+        shortened = {
+            "site": {"name": "Acme Cleaning"},
+            "conversion_profile": {
+                "trust_signals": {"social_proof_lines": ["Free Estimates"]}
+            },
+        }
+        for complete_claim in (
+            "Free Estimates for maintenance-plan members",
+            "Free Estimates for seniors",
+            "Free Estimates with purchase",
+            "Free Estimates are available to members",
+            "Free Estimates as part of membership",
+            "For seniors, Free Estimates",
+        ):
+            source = f"<h1>Acme Cleaning</h1><p>{complete_claim}.</p>"
+            with (
+                self.subTest(complete_claim=complete_claim),
+                self.assertRaisesRegex(SiteExtractionError, "assertion context"),
+            ):
+                validate_site_analysis(shortened, source)
+
+            complete = {
+                "site": {"name": "Acme Cleaning"},
+                "conversion_profile": {
+                    "trust_signals": {"social_proof_lines": [complete_claim]}
+                },
+            }
+            self.assertEqual(validate_site_analysis(complete, source), complete)
+
+        for unrestricted_source in (
+            "We offer Free Estimates",
+            "Call for Free Estimates",
+            "Free Estimates are easy to request",
+        ):
+            with self.subTest(unrestricted_source=unrestricted_source):
+                self.assertEqual(
+                    validate_site_analysis(
+                        shortened,
+                        f"<h1>Acme Cleaning</h1><p>{unrestricted_source}.</p>",
+                    ),
+                    shortened,
+                )
+
     def test_existing_cta_requires_an_exact_source_action_label(self):
         document = {
             "site": {"name": "Acme Cleaning"},
@@ -552,20 +596,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             document,
         )
 
-    def test_existing_cta_accepts_submit_input_but_not_other_input_types(self):
+    def test_existing_cta_accepts_button_inputs_but_not_data_inputs(self):
         document = {
             "site": {"name": "Acme Cleaning"},
             "conversion_profile": {"existing_ctas": ["Free Estimates"]},
         }
-        self.assertEqual(
-            validate_site_analysis(
-                document,
-                '<h1>Acme Cleaning</h1><input type="submit" value="Free Estimates">',
-            ),
-            document,
-        )
+        for input_type in ("button", "image", "reset", "submit"):
+            source = (
+                "<h1>Acme Cleaning</h1>"
+                f'<input type="{input_type}" value="Free Estimates">'
+            )
+            with self.subTest(input_type=input_type):
+                self.assertEqual(validate_site_analysis(document, source), document)
 
-        for input_type in ("button", "image", "reset", "text"):
+        for input_type in ("hidden", "text"):
             with (
                 self.subTest(input_type=input_type),
                 self.assertRaisesRegex(SiteExtractionError, "action label"),
@@ -925,6 +969,25 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(wrapped_identity, corroborated_wrapper_title),
             wrapped_identity,
         )
+
+        wordpress_identity_source = (
+            "<title>Acme Plumbing</title>"
+            '<header class="site-identity">'
+            "<h1>Acme Plumbing</h1><p>Quality work since 1990</p>"
+            "</header>"
+        )
+        self.assertEqual(
+            validate_site_analysis(verified_identity, wordpress_identity_source),
+            verified_identity,
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Call Us"}},
+                wordpress_identity_source.replace(
+                    "<h1>Acme Plumbing</h1>",
+                    '<a href="/contact">Call Us</a><h1>Acme Plumbing</h1>',
+                ),
+            )
 
         conflicting_single_title_source = (
             '<meta property="og:site_name" content="Acme Plumbing">'

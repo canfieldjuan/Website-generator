@@ -1362,6 +1362,37 @@ class BodyAssemblyTests(unittest.TestCase):
             neutral_body,
         )
 
+    def test_body_button_inputs_enforce_label_authority(self):
+        allowed = ActionUrlAdmissionContract(
+            allowed_labels=("Book Appointment",),
+        )
+        for input_type in ("button", "reset"):
+            body = f'<body><input type="{input_type}" value="Book Appointment"></body>'
+            with self.subTest(input_type=input_type):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=allowed,
+                    ),
+                    body,
+                )
+                with self.assertRaisesRegex(
+                    GeneratedBodyError, "non-neutral action label"
+                ):
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=ActionUrlAdmissionContract(),
+                    )
+
+        data_input = '<body><input type="text" value="Book Appointment"></body>'
+        self.assertEqual(
+            validate_generated_body(
+                body_result(data_input),
+                expected_action_urls=ActionUrlAdmissionContract(),
+            ),
+            data_input,
+        )
+
     def test_build_action_contract_binds_canonical_form_labels(self):
         form_action = "https://source.test/form"
         contract = build.expected_build_action_url_contract(

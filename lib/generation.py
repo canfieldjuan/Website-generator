@@ -2318,7 +2318,8 @@ def _validate_action_urls(
         is_labelled_action = (
             tag_name in {"a", "area", "button"}
             or tag_name == "input"
-            and str(element.get("type") or "").casefold() in {"submit", "image"}
+            and str(element.get("type") or "").casefold()
+            in {"button", "image", "reset", "submit"}
         )
         action_values.extend(_action_element_declared_destinations(element))
         element_values = action_element_destinations(element, body_root)

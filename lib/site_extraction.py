@@ -238,6 +238,14 @@ _TEXT_ATTRIBUTES = {
 }
 _ACTION_URL_ATTRIBUTES = {"href"}
 _IMAGE_ATTRIBUTES = {"src", "data-src", "data-lazy-src", "data-original"}
+_ACTION_INPUT_TYPES = frozenset(
+    {
+        "button",
+        "image",
+        "reset",
+        "submit",
+    }
+)
 _NON_DATA_INPUT_TYPES = {
     "button",
     "hidden",
@@ -269,6 +277,14 @@ _LOGO_CONTAINER_MARKERS = frozenset(
         "site-brand",
         "site-identity",
         "site-logo",
+    }
+)
+_IDENTITY_TEXT_MARKERS = frozenset(
+    {
+        "brand-name",
+        "logo-text",
+        "site-name",
+        "site-title",
     }
 )
 _ASSERTION_CONTEXT_TAGS = {
@@ -371,6 +387,33 @@ _CONDITIONAL_TERMS = frozenset(
         "when",
     }
 )
+_TRAILING_SCOPE_QUALIFIER_TERMS = frozenset(
+    {
+        "after",
+        "at",
+        "before",
+        "by",
+        "during",
+        "for",
+        "from",
+        "on",
+        "through",
+        "until",
+        "upon",
+        "with",
+        "within",
+    }
+)
+_RECIPIENT_TO_PREDECESSORS = frozenset(
+    {
+        "available",
+        "limited",
+        "offered",
+        "provided",
+        "reserved",
+        "restricted",
+    }
+)
 
 
 def _normalize_text(value: str) -> str:
@@ -424,6 +467,26 @@ def _words_contain_restriction(words: list[str]) -> bool:
     )
 
 
+def _words_contain_scope_qualifier(words: list[str]) -> bool:
+    for index, word in enumerate(words):
+        if word in _TRAILING_SCOPE_QUALIFIER_TERMS:
+            return True
+        if word == "as" and index + 1 < len(words) and words[index + 1] == "part":
+            return True
+        if word == "to" and (
+            index == 0 or words[index - 1] in _RECIPIENT_TO_PREDECESSORS
+        ):
+            preceding_scope = words[: max(index - 1, 0)]
+            if any(
+                preceding_scope[position] == "not"
+                and preceding_scope[position + 1] in _RESTRICTION_TERMS
+                for position in range(len(preceding_scope) - 1)
+            ):
+                continue
+            return True
+    return False
+
+
 def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     preceding_sentence = _SENTENCE_BREAK_PATTERN.split(text[:start])[-1]
     preceding_clause = _CONTRAST_BREAK_PATTERN.split(preceding_sentence)[-1]
@@ -451,14 +514,19 @@ def _occurrence_is_nonassertive(text: str, start: int, length: int) -> bool:
     following_boundary = following_match.group(0) if following_match else ""
     if following_boundary == "?":
         return True
-    surrounding_words = [
+    preceding_words = [
         word.replace("’", "'")
-        for word in (
-            _WORD_PATTERN.findall(preceding_clause)
-            + _WORD_PATTERN.findall(following_clause)
-        )
+        for word in _WORD_PATTERN.findall(preceding_clause)
     ]
-    return _words_contain_restriction(surrounding_words)
+    following_words = [
+        word.replace("’", "'")
+        for word in _WORD_PATTERN.findall(following_clause)
+    ]
+    if _words_contain_restriction(preceding_words + following_words):
+        return True
+    if preceding_words and _words_contain_scope_qualifier(preceding_words[:1]):
+        return True
+    return _words_contain_scope_qualifier(following_words)
 
 
 def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
@@ -556,7 +624,7 @@ def _srcset_urls(value: str) -> set[str]:
     }
 
 
-def _element_has_logo_marker(element: Any) -> bool:
+def _element_has_marker(element: Any, markers: frozenset[str]) -> bool:
     for attribute in (
         element.get("id"),
         element.get("class"),
@@ -565,9 +633,17 @@ def _element_has_logo_marker(element: Any) -> bool:
     ):
         for value in _attribute_values(attribute):
             marker = value.strip().casefold()
-            if any(token in _LOGO_CONTAINER_MARKERS for token in marker.split()):
+            if any(token in markers for token in marker.split()):
                 return True
     return False
+
+
+def _element_has_logo_marker(element: Any) -> bool:
+    return _element_has_marker(element, _LOGO_CONTAINER_MARKERS)
+
+
+def _element_has_identity_text_marker(element: Any) -> bool:
+    return _element_has_marker(element, _IDENTITY_TEXT_MARKERS)
 
 
 def _is_source_logo(image: Any) -> bool:
@@ -650,6 +726,43 @@ def source_action_accessible_name(
             return " ".join(value.split())
     title = element.get("title")
     return " ".join(title.split()) if isinstance(title, str) else ""
+
+
+def _marked_identity_text_parts(
+    element: Tag,
+    root: BeautifulSoup | Tag,
+) -> tuple[str, ...]:
+    """Return bounded name text from a broader brand/logo container."""
+    parts: list[str] = []
+
+    def append(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        candidate = " ".join(value.split())
+        if candidate and candidate not in parts:
+            parts.append(candidate)
+
+    if _element_has_identity_text_marker(element):
+        append(element.get_text(" ", strip=True))
+
+    if element.find(True) is None:
+        append(element.get_text(" ", strip=True))
+
+    marked_descendants = [
+        candidate
+        for candidate in element.find_all(True, limit=MAX_ITEMS)
+        if _element_has_identity_text_marker(candidate)
+    ]
+    if len(marked_descendants) == 1:
+        append(marked_descendants[0].get_text(" ", strip=True))
+
+    h1_candidates = element.find_all("h1", limit=2)
+    if len(h1_candidates) == 1:
+        append(h1_candidates[0].get_text(" ", strip=True))
+
+    if element.name == "a":
+        append(source_action_accessible_name(element, root))
+    return tuple(parts)
 
 
 _HEADING_TAG_PATTERN = re.compile(r"h([2-6])", re.I)
@@ -947,9 +1060,8 @@ class SourceEvidence:
                 action_label = _normalize_text(
                     source_action_accessible_name(element, soup)
                 )
-            if (
-                element.name == "input"
-                and str(element.get("type") or "").casefold() == "submit"
+            if element.name == "input" and (
+                str(element.get("type") or "").casefold() in _ACTION_INPUT_TYPES
             ):
                 action_label = _normalize_text(
                     source_action_accessible_name(element, soup)
@@ -1014,7 +1126,7 @@ class SourceEvidence:
                 identity_parts.extend(_attribute_values(element.get("alt")))
                 identity_parts.extend(_attribute_values(element.get("title")))
             if element.name != "img" and _element_has_logo_marker(element):
-                identity_parts.append(element.get_text(" ", strip=True))
+                identity_parts.extend(_marked_identity_text_parts(element, soup))
 
         explicit_identity_seeds = tuple(
             segment for part in identity_parts if (segment := _normalize_text(part))
