@@ -1244,6 +1244,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "Fax Line No. 217-555-0100",
             "Fax Customer Service Number: 217.555.0100",
             "Fax Dept. Number: 217-555-0100",
+            "Fax Dept. Line: 217-555-0100",
+            "Fax Regional Office Desk: 217-555-0100",
             "Fax — 217-555-0100",
             "Call Center Fax Number: 217-555-0100",
         ):
@@ -1259,6 +1261,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(
                 base_phone,
                 "<h1>Acme Cleaning</h1><p>Phone Line No. 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>Phone Dept. Line: 217-555-0100</p>",
             ),
             base_phone,
         )

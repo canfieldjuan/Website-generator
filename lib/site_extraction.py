@@ -468,16 +468,12 @@ _PHONE_EXTENSION_SUFFIX_PATTERN = re.compile(
     r"\s*(?:x|ext\.?)\s*\d+\s*$",
     re.I,
 )
-_PHONE_ROLE_TOKEN_PATTERN = r"fax|facsimile|phone|telephone|mobile|cell|call"
-_PHONE_ROLE_DESCRIPTOR_PATTERN = (
-    rf"(?!(?:{_PHONE_ROLE_TOKEN_PATTERN})\b)[A-Z][A-Z0-9_-]*\.?"
-)
 _PHONE_ROLE_PATTERN = re.compile(
-    rf"\b(?P<role>{_PHONE_ROLE_TOKEN_PATTERN})\b"
-    rf"(?:\s+(?:{_PHONE_ROLE_DESCRIPTOR_PATTERN}\s+){{0,4}}(?:number|no)\.?)?"
-    r"\s*(?:[:#\-–—]\s*)?",
+    r"\b(?P<role>fax|facsimile|phone|telephone|mobile|cell|call)\b",
     re.I,
 )
+_CONTACT_FIELD_GAP_MAX_LENGTH = 120
+_CONTACT_FIELD_GAP_PATTERN = re.compile(r"[\sA-Z0-9_&'’(),./:#\-–—]*", re.I)
 _CONTACT_GROUP_BOUNDARY = "\ue000"
 _CONTACT_GROUP_BREAK_PATTERN = re.compile(
     rf"[.!?;|¦•·●▪‣∙◦○◆◇–—{_CONTACT_GROUP_BOUNDARY}]"
@@ -781,8 +777,31 @@ def _contact_occurrence_is_noncallable(
     occurrence_end = start + length
     all_roles = tuple(_PHONE_ROLE_PATTERN.finditer(text))
     all_numbers = tuple(_PHONE_PATTERN.finditer(text))
+    protected_role_spans: list[tuple[int, int]] = []
+    for role_index, role in enumerate(all_roles):
+        protected_end = role.end()
+        following_number = next(
+            (number for number in all_numbers if number.start() >= role.end()),
+            None,
+        )
+        following_role = (
+            all_roles[role_index + 1]
+            if role_index + 1 < len(all_roles)
+            else None
+        )
+        if following_number is not None and (
+            following_role is None
+            or following_number.start() < following_role.start()
+        ):
+            field_gap = text[role.end() : following_number.start()]
+            if (
+                len(field_gap) <= _CONTACT_FIELD_GAP_MAX_LENGTH
+                and _CONTACT_FIELD_GAP_PATTERN.fullmatch(field_gap) is not None
+            ):
+                protected_end = following_number.start()
+        protected_role_spans.append((role.start(), protected_end))
     protected_spans = tuple(
-        (match.start(), match.end()) for match in (*all_roles, *all_numbers)
+        (*protected_role_spans, *((match.start(), match.end()) for match in all_numbers))
     )
     clause_breaks = tuple(
         match.start()
