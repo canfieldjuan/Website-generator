@@ -18,6 +18,7 @@ from lib.site_extraction import (
     SiteExtractionError,
     same_site_origin,
     source_action_accessible_name,
+    is_source_semantic_element,
     validate_enrichment_result,
     validate_site_analysis,
 )
@@ -209,6 +210,8 @@ def _redesign_action_url_contract(
         for element in source_root.find_all(
             ["a", "area", "form", "button", "input"]
         ):
+            if not is_source_semantic_element(element):
+                continue
             destinations = action_element_destinations(element, source_root)
             if element.name in {"a", "area"}:
                 for destination in destinations:

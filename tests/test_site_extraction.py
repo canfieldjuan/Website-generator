@@ -1267,6 +1267,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             '<img id="email-label" alt="Email"><input aria-labelledby="email-label">',
             '<span id="email-label" aria-label="Email">Wrong</span>'
             '<input aria-labelledby="email-label">',
+            '<label for="email"><img alt="Email"></label><input id="email">',
         ):
             with self.subTest(source=source):
                 self.assertEqual(
@@ -1382,6 +1383,35 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                     "<h1>Acme</h1>",
                     "https://acme.test/",
                 )
+
+    def test_image_attributes_are_bound_to_image_resources(self):
+        document = {
+            "site": {"name": "Acme"},
+            "images": [{"url": "/tour.mp4", "alt": None, "context": "hero"}],
+        }
+        for source in (
+            '<h1>Acme</h1><video src="/tour.mp4"></video>',
+            '<h1>Acme</h1><video><source src="/tour.mp4"></video>',
+        ):
+            with (
+                self.subTest(source=source),
+                self.assertRaisesRegex(SiteExtractionError, "source image URL"),
+            ):
+                validate_site_analysis(document, source, "https://acme.test/")
+
+        picture = {
+            "site": {"name": "Acme"},
+            "images": [{"url": "/hero.webp", "alt": None, "context": "hero"}],
+        }
+        self.assertEqual(
+            validate_site_analysis(
+                picture,
+                '<h1>Acme</h1><picture><source srcset="/hero.webp">'
+                '<img src="/hero.jpg"></picture>',
+                "https://acme.test/",
+            ),
+            picture,
+        )
 
     def test_ignored_source_containers_cannot_authorize_visible_meaning(self):
         hidden_claim = (
@@ -1939,6 +1969,22 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
         )
 
+    def test_generation_action_contract_excludes_inert_source_actions(self):
+        contract = pipeline._redesign_action_url_contract(
+            {"site": {"name": "Acme Cleaning"}},
+            pipeline._redesign_contact_contract({}),
+            source_content=(
+                '<template><a href="/hidden">Book Appointment</a>'
+                '<form action="/hidden-form"><button>Send</button></form></template>'
+                '<noscript><a href="/fallback">Fallback</a></noscript>'
+            ),
+        )
+
+        self.assertEqual(contract.allowed_urls, ())
+        self.assertEqual(contract.allowed_form_urls, ())
+        self.assertEqual(contract.allowed_labels, ("Acme Cleaning",))
+        self.assertEqual(contract.allowed_pairs, ())
+
     def test_inert_formaction_attributes_do_not_create_source_authority(self):
         contract = pipeline._redesign_action_url_contract(
             {"site": {"name": "Acme Cleaning"}},
@@ -2294,6 +2340,20 @@ class EnrichmentGroundingTests(unittest.TestCase):
                 document,
                 page_type="faq",
                 source_html=nested_details,
+                source_url="https://acme.test/questions",
+            )
+
+        mixed_record_types = (
+            "<h1>Frequently Asked Questions</h1><details>"
+            "<article><h2>Do you offer free estimates?</h2><p>No.</p></article>"
+            "<article><h2>Do you offer recurring service?</h2><p>Yes.</p></article>"
+            "</details>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "one source container"):
+            validate_enrichment_result(
+                document,
+                page_type="faq",
+                source_html=mixed_record_types,
                 source_url="https://acme.test/questions",
             )
 

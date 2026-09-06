@@ -20,7 +20,11 @@ from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from openai import DefaultHttpxClient, OpenAI
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
-from lib.site_extraction import is_labelled_action_element
+from lib.site_extraction import (
+    is_labelled_action_element,
+    source_action_accessible_name,
+    source_visible_text,
+)
 
 
 DEFAULT_LOCAL_MODEL = "qwen3-30b-a3b:latest"
@@ -2232,68 +2236,17 @@ def _is_neutral_action_label(value: str) -> bool:
 
 
 def _generated_action_labels(element: Tag) -> tuple[str, ...]:
+    root = element.find_parent("body")
     labels: list[str] = []
 
     def append(value: object) -> None:
-        if isinstance(value, str) and value.strip() and value.strip() not in labels:
-            labels.append(value.strip())
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate and candidate not in labels:
+                labels.append(candidate)
 
-    def replacement_text(node: Tag) -> str:
-        tag_name = node.name.casefold()
-        if tag_name in {"img", "area"}:
-            value = node.get("alt")
-        elif tag_name == "input" and str(node.get("type") or "").casefold() == "image":
-            value = node.get("alt") or node.get("value")
-        else:
-            value = ""
-        return value if isinstance(value, str) else ""
-
-    def text_with_replacements(node: Tag) -> str:
-        parts: list[str] = [replacement_text(node)]
-        for child in node.descendants:
-            if isinstance(child, Comment):
-                continue
-            if isinstance(child, NavigableString):
-                parts.append(str(child))
-            elif isinstance(child, Tag):
-                parts.append(replacement_text(child))
-        return " ".join(" ".join(part for part in parts if part).split())
-
-    root = element.find_parent("body")
-
-    def accessible_name(node: Tag, active_references: frozenset[str]) -> str:
-        labelled_by = node.get("aria-labelledby")
-        if isinstance(labelled_by, str) and labelled_by.strip():
-            if root is None:
-                return ""
-            labelled_parts: list[str] = []
-            for target_id in labelled_by.split():
-                if target_id in active_references:
-                    return ""
-                targets = root.find_all(id=target_id, limit=2)
-                if len(targets) != 1:
-                    return ""
-                target_name = accessible_name(
-                    targets[0],
-                    active_references | {target_id},
-                )
-                if not target_name:
-                    return ""
-                labelled_parts.append(target_name)
-            return " ".join(" ".join(labelled_parts).split())
-
-        aria_label = node.get("aria-label")
-        if isinstance(aria_label, str) and aria_label.strip():
-            return " ".join(aria_label.split())
-        return text_with_replacements(node)
-
-    labelled_by = element.get("aria-labelledby")
-    if isinstance(labelled_by, str) and labelled_by.strip():
-        append(accessible_name(element, frozenset()))
-    append(element.get("aria-label"))
-    if element.name.casefold() == "input":
-        append(element.get("value"))
-    append(text_with_replacements(element))
+    append(source_action_accessible_name(element, root or element))
+    append(source_visible_text(element))
     append(element.get("title"))
     return tuple(labels)
 

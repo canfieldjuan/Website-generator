@@ -697,11 +697,28 @@ def _source_action_replacement_text(element: Tag) -> str:
     return value if isinstance(value, str) else ""
 
 
+def source_visible_text(element: Tag) -> str:
+    """Return rendered descendant text with image replacement text, ignoring ARIA."""
+    if not is_source_semantic_element(element):
+        return ""
+    parts: list[str] = [_source_action_replacement_text(element)]
+    for child in element.children:
+        if isinstance(child, Comment):
+            continue
+        if isinstance(child, NavigableString):
+            parts.append(str(child))
+        elif isinstance(child, Tag):
+            parts.append(source_visible_text(child))
+    return " ".join(" ".join(part for part in parts if part).split())
+
+
 def _source_accessible_text(
     element: Tag,
     root: BeautifulSoup | Tag,
     active_references: frozenset[str],
 ) -> str:
+    if not is_source_semantic_element(element):
+        return ""
     labelled_by = element.get("aria-labelledby")
     if isinstance(labelled_by, str) and labelled_by.strip():
         references = labelled_by.split()
@@ -739,12 +756,30 @@ def _source_accessible_text(
     return " ".join(" ".join(part for part in parts if part).split())
 
 
+def source_accessible_name(
+    element: Tag,
+    root: BeautifulSoup | Tag,
+) -> str:
+    """Return one recursive browser-facing name for a source element."""
+    return _source_accessible_text(element, root, frozenset())
+
+
+def is_source_semantic_element(element: Any) -> bool:
+    """Return whether an element is outside browser-inert source containers."""
+    if getattr(element, "name", None) in _IGNORED_TEXT_TAGS:
+        return False
+    return not any(
+        getattr(ancestor, "name", None) in _IGNORED_TEXT_TAGS
+        for ancestor in getattr(element, "parents", ())
+    )
+
+
 def source_action_accessible_name(
     element: Tag,
     root: BeautifulSoup | Tag,
 ) -> str:
     """Return one complete source-owned accessible name for an action."""
-    accessible_name = _source_accessible_text(element, root, frozenset())
+    accessible_name = source_accessible_name(element, root)
     if accessible_name:
         return accessible_name
     labelled_by = element.get("aria-labelledby")
@@ -842,6 +877,7 @@ _ATOMIC_RECORD_TAGS = {
     "th",
     "tr",
 }
+_INDEPENDENT_RECORD_TAGS = {"article", "details", "figure", "section"}
 _RECORD_CONTAINER_TAGS = {
     "article",
     "details",
@@ -932,7 +968,10 @@ def _record_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
 
     for element in soup.find_all(True):
         if element.name in _ATOMIC_RECORD_TAGS:
-            if element.find(element.name) is not None:
+            if (
+                element.find(element.name) is not None
+                or element.find(_INDEPENDENT_RECORD_TAGS) is not None
+            ):
                 continue
             append(str(element))
             continue
@@ -1110,6 +1149,9 @@ class SourceEvidence:
         for element in soup.find_all(True):
             action_label = ""
             element_image_urls: set[str] = set()
+            is_image_resource = element.name == "img" or (
+                element.name == "source" and element.find_parent("picture") is not None
+            )
             if is_labelled_action_element(element):
                 action_label = _normalize_text(
                     source_action_accessible_name(element, soup)
@@ -1145,10 +1187,10 @@ class SourceEvidence:
                                 email_values.append(contextual_destination)
                             else:
                                 phone_values.append(contextual_destination)
-                    if name in _IMAGE_ATTRIBUTES:
+                    if is_image_resource and name in _IMAGE_ATTRIBUTES:
                         raw_image_urls.add(value)
                         element_image_urls.add(value)
-                    if name == "srcset":
+                    if is_image_resource and name == "srcset":
                         srcset_urls = _srcset_urls(value)
                         raw_image_urls.update(srcset_urls)
                         element_image_urls.update(srcset_urls)
@@ -1255,7 +1297,7 @@ class SourceEvidence:
                     identity = id(label)
                     if identity not in seen_labels:
                         seen_labels.add(identity)
-                        labels.append(label.get_text(" ", strip=True))
+                        labels.append(source_accessible_name(label, soup))
 
                 wrapping_label = control.find_parent("label")
                 if wrapping_label is not None:

@@ -1448,6 +1448,33 @@ class BodyAssemblyTests(unittest.TestCase):
                         expected_action_urls=ActionUrlAdmissionContract(),
                     )
 
+        descendant_aria = (
+            '<body><a href="/contact">'
+            '<img alt="Contact Us" aria-label="Book Appointment"></a></body>'
+        )
+        contact_contract = ActionUrlAdmissionContract(
+            allowed_urls=("/contact",),
+            allowed_labels=("Contact Us",),
+            allowed_pairs=(("Contact Us", "/contact"),),
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            validate_generated_body(
+                body_result(descendant_aria),
+                expected_action_urls=contact_contract,
+            )
+
+        aria_override = (
+            '<body><a href="/contact">'
+            '<img alt="Contact Us" aria-label="Contact Us"></a></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(aria_override),
+                expected_action_urls=contact_contract,
+            ),
+            aria_override,
+        )
+
     def test_build_action_contract_binds_canonical_form_labels(self):
         form_action = "https://source.test/form"
         contract = build.expected_build_action_url_contract(
