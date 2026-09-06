@@ -605,25 +605,72 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
 
     def test_claim_text_preserves_adjacent_owned_disclaimers(self):
         shortened = {"site": {"name": "Acme", "tagline": "Free Estimates"}}
-        scoped_source = (
-            "<h1>Acme</h1><div><p>Free Estimates</p>"
-            "<p>Maintenance-plan members only.</p><p>Call us today.</p></div>"
-        )
-        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
-            validate_site_analysis(shortened, scoped_source)
+        for qualifier in (
+            "Maintenance-plan members only.",
+            "Membership required.",
+        ):
+            scoped_source = (
+                "<h1>Acme</h1><div><p>Free Estimates</p>"
+                f"<p>{qualifier}</p></div>"
+            )
+            with (
+                self.subTest(qualifier=qualifier),
+                self.assertRaisesRegex(SiteExtractionError, "assertion context"),
+            ):
+                validate_site_analysis(shortened, scoped_source)
 
-        complete = {
-            "site": {
-                "name": "Acme",
-                "tagline": "Free Estimates Maintenance-plan members only.",
+            complete = {
+                "site": {
+                    "name": "Acme",
+                    "tagline": f"Free Estimates {qualifier}",
+                }
             }
-        }
-        self.assertEqual(validate_site_analysis(complete, scoped_source), complete)
+            self.assertEqual(validate_site_analysis(complete, scoped_source), complete)
 
         unscoped_source = (
-            "<h1>Acme</h1><div><p>Free Estimates</p><p>Call us today.</p></div>"
+            "<h1>Acme</h1><div><p>Free Estimates</p></div>"
+            "<div><p>Call us today.</p></div>"
         )
         self.assertEqual(validate_site_analysis(shortened, unscoped_source), shortened)
+
+        repeated_source = (
+            "<h1>Acme</h1><div><p>Free Estimates</p><p>Members only.</p></div>"
+            "<div><p>Free Estimates</p></div>"
+        )
+        self.assertEqual(validate_site_analysis(shortened, repeated_source), shortened)
+
+        punctuated_scope = (
+            "<h1>Acme</h1><div><p>Free Estimates.</p>"
+            "<p>Membership required.</p></div>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(shortened, punctuated_scope)
+
+    def test_contact_facts_allow_only_field_owned_presentation_labels(self):
+        labeled = {
+            "site": {
+                "name": "Acme",
+                "location": "Effingham, IL",
+                "contact": {
+                    "address": "100 Main Street",
+                    "hours": "Monday–Friday",
+                },
+            }
+        }
+        source = (
+            "<h1>Acme</h1><p>Location: Effingham, IL</p>"
+            "<p>Address: 100 Main Street</p><p>Hours: Monday–Friday</p>"
+        )
+        self.assertEqual(validate_site_analysis(labeled, source), labeled)
+
+        former_address = copy.deepcopy(labeled)
+        former_address["site"].pop("location")
+        former_address["site"]["contact"].pop("hours")
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(
+                former_address,
+                "<h1>Acme</h1><p>Former address: 100 Main Street</p>",
+            )
 
     def test_prompt_declared_classifications_are_schema_enforced(self):
         base = {"site": {"name": "Acme"}}

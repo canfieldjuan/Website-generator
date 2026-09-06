@@ -621,16 +621,6 @@ def _words_contain_scope_qualifier(words: list[str]) -> bool:
     return False
 
 
-def _text_carries_claim_scope(value: str) -> bool:
-    words = [word.replace("’", "'") for word in _WORD_PATTERN.findall(value)]
-    return (
-        _words_contain_negation(words)
-        or _words_contain_negation(words, postposed=True)
-        or _words_contain_restriction(words)
-        or _words_contain_scope_qualifier(words)
-    )
-
-
 def _preceding_clause_scopes_claim(words: list[str]) -> bool:
     if not words:
         return False
@@ -692,6 +682,17 @@ def _occurrence_is_nonassertive(
     if not strict_claim and _words_contain_scope_qualifier(preceding_words):
         return True
     return _words_contain_scope_qualifier(following_words)
+
+
+def _occurrence_has_presentation_label(
+    text: str,
+    start: int,
+    labels: tuple[str, ...],
+) -> bool:
+    if not labels:
+        return False
+    prefix = re.sub(r"\s*[:\-–—]\s*$", "", text[:start].strip())
+    return prefix in labels
 
 
 def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
@@ -1278,7 +1279,7 @@ def _content_section_fragments(soup: BeautifulSoup) -> tuple[str, ...]:
 class SourceEvidence:
     text_segments: tuple[str, ...]
     assertion_segments: tuple[str, ...]
-    assertion_scope_segments: tuple[tuple[str, str], ...]
+    assertion_occurrences: tuple[tuple[str, str], ...]
     identity_segments: tuple[str, ...]
     identity_exact_segments: tuple[str, ...]
     heading_segments: tuple[str, ...]
@@ -1351,12 +1352,7 @@ class SourceEvidence:
             context_key = id(context or node)
             context_parts.setdefault(context_key, []).append(value)
             context_elements.setdefault(context_key, context or node)
-        assertion_segments_list = [
-            segment
-            for parts in context_parts.values()
-            if (segment := _normalize_text(" ".join(parts)))
-        ]
-        assertion_scope_segments: list[tuple[str, str]] = []
+        assertion_occurrences: list[tuple[str, str]] = []
         claim_scope_parent_tags = {
             "article",
             "details",
@@ -1367,45 +1363,50 @@ class SourceEvidence:
             "td",
             "th",
         }
+        claim_scope_sibling_tags = {"p", "small"}
         for context_key, local_parts in context_parts.items():
             context = context_elements[context_key]
-            if not isinstance(context, Tag):
-                continue
-            parent = context.parent
-            if not isinstance(parent, Tag) or parent.name not in claim_scope_parent_tags:
-                continue
-            siblings = [child for child in parent.children if isinstance(child, Tag)]
-            context_index = next(
-                (index for index, sibling in enumerate(siblings) if sibling is context),
-                None,
-            )
-            if context_index is None:
-                continue
-            adjacent_indexes = range(
-                max(0, context_index - 1),
-                min(len(siblings), context_index + 2),
-            )
-            scope_indexes = {
-                index
-                for index in adjacent_indexes
-                if index != context_index
-                and _text_carries_claim_scope(
-                    siblings[index].get_text(" ", strip=True)
-                )
-            }
-            if not scope_indexes:
-                continue
             local_segment = _normalize_text(" ".join(local_parts))
-            owner_segment = _normalize_text(
-                " ".join(
-                    siblings[index].get_text(" ", strip=True)
-                    for index in sorted(scope_indexes | {context_index})
-                )
-            )
-            if local_segment and owner_segment and local_segment != owner_segment:
-                assertion_scope_segments.append((local_segment, owner_segment))
-                assertion_segments_list.append(owner_segment)
-        assertion_segments = tuple(dict.fromkeys(assertion_segments_list))
+            owner_segment = local_segment
+            if isinstance(context, Tag) and context.name in claim_scope_sibling_tags:
+                parent = context.parent
+                if isinstance(parent, Tag) and parent.name in claim_scope_parent_tags:
+                    siblings = [
+                        child for child in parent.children if isinstance(child, Tag)
+                    ]
+                    context_index = next(
+                        (
+                            index
+                            for index, sibling in enumerate(siblings)
+                            if sibling is context
+                        ),
+                        None,
+                    )
+                    if context_index is not None:
+                        first = context_index
+                        last = context_index
+                        while (
+                            first > 0
+                            and siblings[first - 1].name in claim_scope_sibling_tags
+                        ):
+                            first -= 1
+                        while (
+                            last + 1 < len(siblings)
+                            and siblings[last + 1].name in claim_scope_sibling_tags
+                        ):
+                            last += 1
+                        if first != last:
+                            owner_segment = _normalize_text(
+                                " ".join(
+                                    sibling.get_text(" ", strip=True)
+                                    for sibling in siblings[first : last + 1]
+                                )
+                            )
+            if local_segment and owner_segment:
+                assertion_occurrences.append((local_segment, owner_segment))
+        assertion_segments = tuple(
+            dict.fromkeys(owner for _, owner in assertion_occurrences)
+        )
         attribute_parts: list[str] = []
         raw_action_urls: set[str] = set()
         raw_action_pairs: set[tuple[str, str]] = set()
@@ -1730,7 +1731,7 @@ class SourceEvidence:
         return cls(
             text_segments=tuple(dict.fromkeys(assertion_segments + attribute_segments)),
             assertion_segments=assertion_segments,
-            assertion_scope_segments=tuple(dict.fromkeys(assertion_scope_segments)),
+            assertion_occurrences=tuple(assertion_occurrences),
             identity_segments=tuple(
                 dict.fromkeys(
                     segment
@@ -1774,34 +1775,49 @@ class SourceEvidence:
             section_targets=section_targets,
         )
 
-    def require_text(self, path: str, value: Any, *, asserted: bool = False) -> None:
+    def require_text(
+        self,
+        path: str,
+        value: Any,
+        *,
+        asserted: bool = False,
+        presentation_labels: tuple[str, ...] = (),
+        preserve_sibling_scope: bool = True,
+    ) -> None:
         if value is None:
             return
         normalized = _normalize_text(value)
         if not normalized:
             raise SiteExtractionError(f"{path} is not grounded in source text.")
         found = False
-        source_segments = self.assertion_segments if asserted else self.text_segments
-        for source_text in source_segments:
+        source_occurrences = (
+            self.assertion_occurrences
+            if asserted
+            else tuple((segment, segment) for segment in self.text_segments)
+        )
+        normalized_labels = tuple(_normalize_text(label) for label in presentation_labels)
+        for local_segment, owner_segment in source_occurrences:
+            source_text = owner_segment if preserve_sibling_scope else local_segment
             for index in _phrase_occurrences(source_text, normalized):
                 found = True
                 if _occurrence_is_negated(source_text, index, len(normalized)):
+                    continue
+                if (
+                    asserted
+                    and preserve_sibling_scope
+                    and local_segment != owner_segment
+                    and normalized != owner_segment
+                ):
                     continue
                 if asserted and _occurrence_is_nonassertive(
                     source_text,
                     index,
                     len(normalized),
                     strict_claim=True,
-                ):
-                    continue
-                if asserted and any(
-                    source_text in {local_segment, owner_segment}
-                    and normalized != owner_segment
-                    and any(
-                        True
-                        for _ in _phrase_occurrences(local_segment, normalized)
-                    )
-                    for local_segment, owner_segment in self.assertion_scope_segments
+                ) and not _occurrence_has_presentation_label(
+                    source_text,
+                    index,
+                    normalized_labels,
                 ):
                     continue
                 return
@@ -1965,10 +1981,28 @@ def _require_contact(evidence: SourceEvidence, path: str, contact: Any) -> None:
         return
     evidence.require_phone(f"{path}.phone", contact.get("phone"))
     evidence.require_email(f"{path}.email", contact.get("email"))
-    evidence.require_text(f"{path}.address", contact.get("address"), asserted=True)
+    evidence.require_text(
+        f"{path}.address",
+        contact.get("address"),
+        asserted=True,
+        presentation_labels=("address", "street address"),
+        preserve_sibling_scope=False,
+    )
     for index, address in enumerate(contact.get("addresses") or []):
-        evidence.require_text(f"{path}.addresses[{index}]", address, asserted=True)
-    evidence.require_text(f"{path}.hours", contact.get("hours"), asserted=True)
+        evidence.require_text(
+            f"{path}.addresses[{index}]",
+            address,
+            asserted=True,
+            presentation_labels=("address", "street address"),
+            preserve_sibling_scope=False,
+        )
+    evidence.require_text(
+        f"{path}.hours",
+        contact.get("hours"),
+        asserted=True,
+        presentation_labels=("hours", "business hours", "office hours"),
+        preserve_sibling_scope=False,
+    )
 
 
 def _require_content_items(
@@ -2043,7 +2077,13 @@ def _require_site_facts(
     site = document["site"]
     evidence.require_identity("site.name", site["name"])
     evidence.require_text("site.tagline", site.get("tagline"), asserted=True)
-    evidence.require_text("site.location", site.get("location"), asserted=True)
+    evidence.require_text(
+        "site.location",
+        site.get("location"),
+        asserted=True,
+        presentation_labels=("location",),
+        preserve_sibling_scope=False,
+    )
     _require_contact(evidence, "site.contact", site.get("contact"))
 
     brand = document.get("brand") or {}
