@@ -294,6 +294,28 @@ _EXPECTED_IMAGES_UNSET = object()
 _EXPECTED_ACTION_URLS_UNSET = object()
 _EXPECTED_SERVICES_UNSET = object()
 _EXPECTED_VISIBLE_COPY_UNSET = object()
+DIRECT_USER_FACING_TEXT_ATTRIBUTES = (
+    "alt",
+    "title",
+    "placeholder",
+    "label",
+    "aria-label",
+    "aria-description",
+    "aria-valuetext",
+    "aria-roledescription",
+    "aria-placeholder",
+    "aria-braillelabel",
+    "aria-brailleroledescription",
+    "aria-keyshortcuts",
+    "aria-colindextext",
+    "aria-rowindextext",
+)
+INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES = (
+    "aria-labelledby",
+    "aria-describedby",
+    "aria-details",
+    "aria-errormessage",
+)
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -1895,6 +1917,20 @@ def _canonical_email_value(value: str) -> str | None:
     return canonical_email_address(unquote(value))
 
 
+def _direct_user_facing_text_values(element: Tag) -> tuple[str, ...]:
+    """Return native and ARIA strings directly presented by one element."""
+    values = [
+        value
+        for attribute in DIRECT_USER_FACING_TEXT_ATTRIBUTES
+        if isinstance((value := element.get(attribute)), str) and value
+    ]
+    if element.name.casefold() == "input":
+        value = element.get("value")
+        if isinstance(value, str) and value:
+            values.append(value)
+    return tuple(values)
+
+
 def _build_accessibility_text_resolver(
     body_root: Tag,
     *,
@@ -2075,6 +2111,7 @@ def _claim_exposure_texts(
         ):
             return
         accessible_parts.append(accessible_text(node, frozenset()))
+        accessible_parts.extend(_direct_user_facing_text_values(node))
         for child in node.children:
             visit_accessible(child)
 
@@ -3475,28 +3512,13 @@ def _validate_visible_copy(
             if fragment:
                 exposed_fragments.append(fragment)
 
-    exposed_attributes = (
-        "alt",
-        "aria-label",
-        "aria-description",
-        "placeholder",
-        "title",
-    )
     for element in (body_root, *body_root.find_all(True)):
         if not is_visually_exposed(element):
             continue
-        for attribute in exposed_attributes:
-            value = element.get(attribute)
-            if isinstance(value, str):
-                fragment = _normalize_source_owned_text(value)
-                if fragment:
-                    exposed_fragments.append(fragment)
-        if element.name.casefold() == "input":
-            value = element.get("value")
-            if isinstance(value, str):
-                fragment = _normalize_source_owned_text(value)
-                if fragment:
-                    exposed_fragments.append(fragment)
+        for value in _direct_user_facing_text_values(element):
+            fragment = _normalize_source_owned_text(value)
+            if fragment:
+                exposed_fragments.append(fragment)
 
     _, resolve_references, _, _ = _build_accessibility_text_resolver(
         body_root,
@@ -3505,12 +3527,7 @@ def _validate_visible_copy(
     for element in (body_root, *body_root.find_all(True)):
         if not is_visually_exposed(element):
             continue
-        for attribute in (
-            "aria-labelledby",
-            "aria-describedby",
-            "aria-details",
-            "aria-errormessage",
-        ):
+        for attribute in INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES:
             value = element.get(attribute)
             if not isinstance(value, str) or not value.strip():
                 continue

@@ -4297,6 +4297,115 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
         self.assertIn('type="hidden"', html)
 
+    def test_build_generator_rejects_unsupported_native_control_label(self):
+        unsupported = COMPLETE_BUILD_BODY.replace(
+            '<p class="form-trust">',
+            '<select><option label="We also offer window cleaning"></option>'
+            '</select><p class="form-trust">',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unsupported)),
+            )
+
+    def test_build_generator_allows_source_owned_native_control_label(self):
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<p class="form-trust">',
+            '<select><option label="Services"></option></select>'
+            '<p class="form-trust">',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+
+        self.assertIn('label="Services"', html)
+
+    def test_build_generator_rejects_all_unsupported_text_aria_properties(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        text_attributes = (
+            "aria-label",
+            "aria-description",
+            "aria-valuetext",
+            "aria-roledescription",
+            "aria-placeholder",
+            "aria-braillelabel",
+            "aria-brailleroledescription",
+            "aria-keyshortcuts",
+            "aria-colindextext",
+            "aria-rowindextext",
+        )
+
+        for attribute in text_attributes:
+            unsupported = COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero" '
+                f'{attribute}="We also offer window cleaning"></section>',
+            )
+            with self.subTest(attribute=attribute), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(unsupported)),
+                )
+
+    def test_build_generator_allows_source_owned_text_aria_property(self):
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero" '
+            'aria-valuetext="Services"></section>',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+
+        self.assertIn('aria-valuetext="Services"', html)
+
     def test_arbitrary_business_hero_fallback_is_business_neutral(self):
         prompt = build.build_hero_prompt(
             {

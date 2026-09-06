@@ -632,7 +632,7 @@ def visible_copy_contract_instruction(contract):
     }
     return (
         "VISIBLE COPY CONTRACT (EXHAUSTIVE): Every rendered text node and every "
-        "alt, title, placeholder, aria-label, or aria-description value must be "
+        "native user-facing text attribute or text-valued ARIA property must be "
         "one complete, exact entry from this catalog: "
         f"{json.dumps(contract.allowed_fragments, ensure_ascii=False)}. "
         "Do not write free-form sales copy and do not split or combine catalog "
