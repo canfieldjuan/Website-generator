@@ -71,13 +71,16 @@ analysis may control presentation but may not authorize a visible business claim
 
 | Finding/thread | Affected invariant | Current reproduction | Disposition | Proof |
 | --- | --- | --- | --- | --- |
-| `PRRT_kwDOTDYaKM6foIrz`: lone wrapped title used literal membership | Complete source identity and a controlled wrapper must use one authority rule from collection through admission. | `og:site_name="Acme Plumbing"` plus `Welcome to Acme Plumbing` now admits the complete wrapped identity. | fixed/superseded | `lib/site_extraction.py:705-725,1031-1036`; `tests/test_site_extraction.py:49-75,919-927` |
-| Metadata `Acme Plumbing` plus H1 `Plumbing` | A source-owned identity cannot be shortened to an inner phrase. | The shortened H1 and extracted name are rejected. | fixed/superseded | `lib/site_extraction.py:1051-1075`; `tests/test_site_extraction.py:872-879` |
-| Metadata `Acme Plumbing` plus H1 `Best Acme Plumbing` | A source-owned identity cannot be expanded with unsupported wording. | The expanded H1 and extracted name are rejected. | fixed/superseded | `lib/site_extraction.py:1051-1075`; `tests/test_site_extraction.py:881-889` |
-| Metadata `Acme Plumbing` plus title `Plumbing \| Repairs` | Multi-component titles cannot promote a partial component; both components must exercise the non-generic branch. | Extracted name `Plumbing` is rejected. | fixed/superseded | `lib/site_extraction.py:1024-1049`; `tests/test_site_extraction.py:891-899` |
-| `Home - Acme Plumbing`, exact identity, controlled `Welcome to ...`, and intrinsic `Acme-Plumbing` | Valid complete identities and only controlled wrapper variants must remain admissible. | All four positive boundaries admit their complete identity. | fixed/superseded | `lib/site_extraction.py:705-725,1024-1049`; `tests/test_site_extraction.py:901-927` |
-| Ambiguous and conflicting title identity | Independent conflicting or ambiguous identity surfaces must fail closed rather than self-corroborate. | Ambiguous title candidates and the conflicting single-title name are rejected; the explicit metadata identity remains admissible. | fixed/superseded | `lib/site_extraction.py:1038-1075`; `tests/test_site_extraction.py:843-870,929-940` |
-| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `5395569` invocation rewrote the artifact, exited 0, and both required scans found zero matches. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-5395569.log`; `/dev/shm/website-generator-pr47-scans-5395569.log` |
+| `PRRT_kwDOTDYaKM6foIrz`: lone wrapped title used literal membership | Complete source identity and a controlled wrapper must use one authority rule from collection through admission. | `og:site_name="Acme Plumbing"` plus `Welcome to Acme Plumbing` now admits the complete wrapped identity. | fixed/superseded | `lib/site_extraction.py:818-838,1143-1148`; `tests/test_site_extraction.py:49-75,963-971` |
+| Metadata `Acme Plumbing` plus H1 `Plumbing` | A source-owned identity cannot be shortened to an inner phrase. | The shortened H1 and extracted name are rejected. | fixed/superseded | `lib/site_extraction.py:1163-1187`; `tests/test_site_extraction.py:916-923` |
+| Metadata `Acme Plumbing` plus H1 `Best Acme Plumbing` | A source-owned identity cannot be expanded with unsupported wording. | The expanded H1 and extracted name are rejected. | fixed/superseded | `lib/site_extraction.py:1163-1187`; `tests/test_site_extraction.py:925-933` |
+| Metadata `Acme Plumbing` plus title `Plumbing \| Repairs` | Multi-component titles cannot promote a partial component; both components must exercise the non-generic branch. | Extracted name `Plumbing` is rejected. | fixed/superseded | `lib/site_extraction.py:1136-1161`; `tests/test_site_extraction.py:935-943` |
+| `Home - Acme Plumbing`, exact identity, controlled `Welcome to ...`, and intrinsic `Acme-Plumbing` | Valid complete identities and only controlled wrapper variants must remain admissible. | All four positive boundaries admit their complete identity. | fixed/superseded | `lib/site_extraction.py:818-838,1136-1161`; `tests/test_site_extraction.py:945-971` |
+| Ambiguous and conflicting title identity | Independent conflicting or ambiguous identity surfaces must fail closed rather than self-corroborate. | Ambiguous title candidates and the conflicting single-title name are rejected; the explicit metadata identity remains admissible. | fixed/superseded | `lib/site_extraction.py:1150-1187`; `tests/test_site_extraction.py:887-914,992-1004` |
+| `PRRT_kwDOTDYaKM6foSbG`: recipient-qualified claims could be shortened | A published claim cannot drop the source clause that limits its recipient, eligibility, purchase, or timing scope. | `Free Estimates` from member/senior/purchase-qualified source text is rejected, each complete qualified claim is admitted, and unrestricted `Call for Free Estimates` remains admitted. | fixed/superseded | `lib/site_extraction.py:470-535`; `tests/test_site_extraction.py:542-595` |
+| `PRRT_kwDOTDYaKM6foSbJ`: `input[type=button]` labels bypassed action admission | Every visible button-like input label must use the same source-label authority; ordinary data inputs must remain outside that guard. | Unsupported button/reset labels are rejected, source-owned labels are admitted, and text inputs remain unaffected. | fixed/superseded | `lib/site_extraction.py:241-248,1062-1068`; `lib/generation.py:2318-2327`; `tests/test_site_extraction.py:599-623`; `tests/test_generation.py:1365-1395` |
+| `PRRT_kwDOTDYaKM6foSbL`: broad logo container text became identity | A broad brand container may contribute only bounded name surfaces, not its description or unrelated link text. | The WordPress-style `site-identity` header admits `Acme Plumbing`; `Quality work since 1990` and a sole `Call Us` link do not become identity. | fixed/superseded | `lib/site_extraction.py:731-769,1125-1129`; `tests/test_site_extraction.py:973-990` |
+| Carried-forward plumber fixture and zero-match claims | Acceptance evidence must prove a fresh artifact from the tested code revision, not reuse historical output. | The clean `c3741e9` retry rewrote the artifact, exited 0, and both required scans found zero matches. | fixed/superseded | Verification block below; `/dev/shm/website-generator-pr47-fixture-c3741e9-run2.log`; `/dev/shm/website-generator-pr47-scans-c3741e9.log` |
 | Issue #46 historical URL-redesign stall | A one-token probe or one successful fixture cannot prove the historical runtime stall resolved. | The required full fixture completed, so the stall did not reproduce in this run; no current code defect was established. | separate issue | Issue #46; verification block below |
 
 ## Mechanism
@@ -266,62 +269,66 @@ business-specific claims.
 
 ### Current revision evidence (2026-09-05)
 
-- Code revision under test: `5395569d656ebb060113a0afa1b810507685308e`.
+- Code revision under test: `c3741e9257eb87a427fbc9ee69a46d45dfbdb8ed`.
   The worktree was clean when the production-shaped fixture started. The plan
   update that records these results is documentation-only and therefore a
   descendant of this tested code revision.
-- Focused authority regressions: `python -m unittest -q
-  tests.test_site_extraction.SiteAnalysisGroundingTests.test_analyze_site_propagates_identity_authority
+- The exact three current-review reproductions first admitted a shortened
+  recipient-qualified claim, ignored an unsupported `input[type=button]` label,
+  and rejected the correct identity from a WordPress-style `site-identity`
+  header. The same probes now reject, reject, and admit respectively.
+- Focused both-side regressions: `python -m unittest -q
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_claim_text_preserves_recipient_and_purchase_qualifiers
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_existing_cta_accepts_button_inputs_but_not_data_inputs
   tests.test_site_extraction.SiteAnalysisGroundingTests.test_business_name_requires_assertive_identity_evidence
-  tests.test_generation.PromptContractTests.test_build_prompt_exposes_only_the_admitted_review_branch
-  tests.test_generation.BodyAssemblyTests.test_build_action_contract_binds_canonical_form_labels
-  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_aggregate_review_claims_to_source
-  tests.test_generation.AtomicWriteAndCliTests.test_build_generator_binds_review_cards_to_source_entries
-  tests.test_generation.BodyAssemblyTests.test_body_action_destinations_are_source_owned`:
-  7 tests passed. This covers identity propagation, shortened/expanded identity
-  rejection, true multi-component title rejection, controlled wrappers,
-  intrinsic hyphens, prompt/admission agreement, and both review modes.
-- Full suite: `python -m unittest discover -s tests -q`: 347 tests passed with
-  34 skipped. Log: `/dev/shm/website-generator-pr47-full-suite-5395569.log`.
+  tests.test_site_extraction.SiteAnalysisGroundingTests.test_analyze_site_propagates_identity_authority
+  tests.test_generation.BodyAssemblyTests.test_body_button_inputs_enforce_label_authority`:
+  5 tests passed.
+- Affected modules: `python -m unittest -q tests.test_site_extraction
+  tests.test_generation`: 207 tests passed. Log:
+  `/dev/shm/website-generator-pr47-affected-post-review.log`.
+- Full suite: `python -m unittest discover -s tests -q`: 349 tests passed with
+  34 skipped. Log: `/dev/shm/website-generator-pr47-full-suite-post-review.log`.
 - Scoped static checks passed:
   `ruff check --ignore F401 lib/site_extraction.py lib/generation.py
   tests/test_site_extraction.py tests/test_generation.py`;
-  `ruff check --select F821 pipeline.py build.py`;
   `python -m compileall -q pipeline.py build.py lib tests`; and
-  `git diff --check`. Cache output was redirected to `/dev/shm` because the
-  repository filesystem had no general-purpose free space.
-- Required production-shaped fixture:
+  `git diff --check`. The broad formatter check remains historical repository
+  formatting noise and was not applied as an unrelated whole-file rewrite.
+- The first required fixture invocation used the exact command below on the
+  clean code revision with no model resident. It returned normally but correctly
+  rejected the model's unsupported `Not a Franchise` claim on both the initial
+  and one correction attempt; it exited 1 without rewriting the old artifact.
+  Log: `/dev/shm/website-generator-pr47-fixture-c3741e9.log`.
+- Controlled retry of
   `PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 python build.py
   examples/prospect-plumber-template.json --skip-image-gen --skip-email-draft
   --skip-deploy` used `local:qwen3-30b-a3b:latest` through Ollama, resident
   100% on the GPU at invocation. It started at
-  `2026-09-05T20:09:44-05:00`, ended at
-  `2026-09-05T20:10:17-05:00`, and exited 0. No email or deployment path ran.
-  Log: `/dev/shm/website-generator-pr47-fixture-5395569.log`.
-- The invocation rewrote
+  `2026-09-05T20:37:42-05:00`, ended at
+  `2026-09-05T20:38:19-05:00`, and exited 0. No email or deployment path ran.
+  Log: `/dev/shm/website-generator-pr47-fixture-c3741e9-run2.log`.
+- The successful invocation rewrote
   `outputs/builds/drees-plumbing-inc/index.html` at
-  `2026-09-05 20:10:17.260891849 -0500`; its SHA-256 is
-  `1952ff46a9511981d40a5e7637a5e96a1cf325c62555ee6b89c265eb7a6f305e`.
-  The pre-run artifact had a different modification time, inode, size, and
-  SHA-256, so it cannot be mistaken for the fresh output.
+  `2026-09-05 20:38:19.722342792 -0500`; size was 71981 bytes, inode 3309618,
+  and SHA-256 was
+  `5528f4c2795c8bf27f18ef1b105354f515ead7c98930f7cdf3ed3855239900ed`.
 - Exact required placeholder and case-insensitive forbidden-claim scans both
-  returned grep status 1 (zero matches); the scan harness converted that
-  expected no-match state to exit 0. Log:
-  `/dev/shm/website-generator-pr47-scans-5395569.log`.
+  returned zero matches. Log:
+  `/dev/shm/website-generator-pr47-scans-c3741e9.log`.
 - Rendered spot-check: a loopback-only HTTP server returned HTTP 200 and
-  `wkhtmltoimage` produced a nonblank, styled page showing the Drees Plumbing
-  identity, verified phone, trust strip, hero, coverage band, services, and
-  trust content. Full render:
-  `/dev/shm/website-generator-pr47-render-full-5395569.png`, SHA-256
-  `01322b35caf5e9a3aa5c2c5beaa837447792f5b3ad7475cb564f8d6e8e4aa1b5`.
-  Chromium could not start under the host AppArmor namespace policy; no
-  `--no-sandbox` bypass was used.
+  `wkhtmltoimage` produced a nonblank 1440x3890 styled page showing Drees
+  Plumbing identity, phone, trust strip, hero, coverage, services, and trust
+  content. Full render:
+  `/dev/shm/website-generator-pr47-render-full-c3741e9.png`, SHA-256
+  `dc57eba1a979ab5e6033fbd5e4510e45392a4bafe3a84e948d9139a678baf53a`.
 - `bash scripts/local_pr_review.sh`: passed against merge base
   `826f0c8919615d4ed2849ebed8fb511bc6bc994b`. Log:
-  `/dev/shm/website-generator-pr47-local-review-5395569.log`.
-- Issue #46 was not reproduced by the final fixture: the full request returned
-  and the build completed. The issue remains separate and open because one
-  successful run does not resolve its historical stall.
+  `/dev/shm/website-generator-pr47-local-review-c3741e9.log`.
+- Issue #46 was not reproduced: both full requests returned, with the first
+  failing admission and the controlled retry completing. The issue remains
+  separate and open because a successful run does not resolve its historical
+  stall.
 - Final-head GitHub checks and the latest review are reconciled from the live PR
   after this evidence block is committed, because another plan-only evidence
   commit would itself create a new head. The final handoff must identify the
