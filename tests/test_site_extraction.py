@@ -1125,6 +1125,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         for postfix_fax in (
             "217-555-0100 is our fax",
             "217-555-0100 (fax)",
+            "217-555-0100 (Regional Dept. Fax)",
+            "217-555-0100 Regional Dept. Fax",
             "Fax No. 217-555-0100",
             "Fax No. 217.555.0100",
         ):
@@ -1165,6 +1167,40 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
             base_phone,
         )
+        for postfix_phone in (
+            "217-555-0100 (Regional Dept. Phone)",
+            "217-555-0100 Regional Dept. Phone",
+        ):
+            with self.subTest(postfix_phone=postfix_phone):
+                self.assertEqual(
+                    validate_site_analysis(
+                        base_phone,
+                        f"<h1>Acme Cleaning</h1><p>{postfix_phone}</p>",
+                    ),
+                    base_phone,
+                )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>"
+                "Fax inquiries are handled online. "
+                "Main office: 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>"
+                "Fax service is down. Main office: 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>fax dept. line: 217-555-0100</p>",
+            )
         self.assertEqual(
             validate_site_analysis(
                 base_phone,

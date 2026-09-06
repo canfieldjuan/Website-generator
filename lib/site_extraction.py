@@ -477,6 +477,11 @@ _CONTACT_GROUP_BOUNDARY = "\ue000"
 _CONTACT_GROUP_BREAK_PATTERN = re.compile(
     rf"[.!?;|¦•·●▪‣∙◦○◆◇–—{_CONTACT_GROUP_BOUNDARY}]"
 )
+_CONTACT_FIELD_ABBREVIATION_PATTERN = re.compile(
+    r"(?<![A-Z0-9])(?P<token>[A-Z0-9]{1,4})$",
+    re.I,
+)
+_CONTACT_FIELD_WORD_PATTERN = re.compile(r"[A-Z0-9]+", re.I)
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
 _CSS_DECLARATION_PATTERN = re.compile(
     r"(?:^|[;{])\s*([\w-]+)\s*:\s*([^;{}]+)",
@@ -591,6 +596,12 @@ def _normalize_text(value: str) -> str:
     return " ".join(normalized.split()).casefold()
 
 
+def _normalize_contact_text(value: str) -> str:
+    decoded = html.unescape(value)
+    normalized = unicodedata.normalize("NFKC", decoded)
+    return " ".join(normalized.split())
+
+
 def _phone_variants(value: str) -> set[str]:
     values = (value, _PHONE_EXTENSION_SUFFIX_PATTERN.sub("", value))
     variants: set[str] = set()
@@ -676,7 +687,8 @@ def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     preceding_sentence = _SENTENCE_BREAK_PATTERN.split(text[:start])[-1]
     preceding_clause = _CONTRAST_BREAK_PATTERN.split(preceding_sentence)[-1]
     preceding_words = [
-        word.replace("’", "'") for word in _WORD_PATTERN.findall(preceding_clause)
+        word.replace("’", "'").casefold()
+        for word in _WORD_PATTERN.findall(preceding_clause)
     ]
     if _words_contain_negation(preceding_words):
         return True
@@ -685,7 +697,8 @@ def _occurrence_is_negated(text: str, start: int, length: int) -> bool:
     following_sentence = _SENTENCE_BREAK_PATTERN.split(following_text)[0]
     following_clause = _CONTRAST_BREAK_PATTERN.split(following_sentence)[0]
     following_words = [
-        word.replace("’", "'") for word in _WORD_PATTERN.findall(following_clause)
+        word.replace("’", "'").casefold()
+        for word in _WORD_PATTERN.findall(following_clause)
     ]
     return _words_contain_negation(following_words, postposed=True)
 
@@ -706,11 +719,11 @@ def _occurrence_is_nonassertive(
     if following_boundary == "?":
         return True
     preceding_words = [
-        word.replace("’", "'")
+        word.replace("’", "'").casefold()
         for word in _WORD_PATTERN.findall(preceding_clause)
     ]
     following_words = [
-        word.replace("’", "'")
+        word.replace("’", "'").casefold()
         for word in _WORD_PATTERN.findall(following_clause)
     ]
     if _words_contain_restriction(preceding_words + following_words):
@@ -767,6 +780,43 @@ def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
     return _occurrence_is_negated(without_affirmative_idiom, start, length)
 
 
+def _contact_field_gap_is_structural(
+    gap: str,
+    *,
+    role_before_number: bool,
+) -> bool:
+    """Return whether ``gap`` is one field label, not a completed group."""
+    if _CONTACT_FIELD_GAP_PATTERN.fullmatch(gap) is None:
+        return False
+    for boundary in _CONTACT_GROUP_BREAK_PATTERN.finditer(gap):
+        marker = boundary.group(0)
+        if marker == ".":
+            abbreviation = _CONTACT_FIELD_ABBREVIATION_PATTERN.search(
+                gap[: boundary.start()]
+            )
+            if abbreviation is not None:
+                token = abbreviation.group("token")
+                preceding_words = _CONTACT_FIELD_WORD_PATTERN.findall(
+                    gap[: boundary.start()]
+                )
+                if (
+                    token != token.casefold()
+                    or len(preceding_words) == 1
+                    or (not role_before_number and gap.lstrip().startswith("("))
+                ):
+                    continue
+        if marker in {"–", "—"}:
+            outside = (
+                gap[boundary.end() :]
+                if role_before_number
+                else gap[: boundary.start()]
+            )
+            if not outside.strip():
+                continue
+        return False
+    return True
+
+
 def _contact_occurrence_is_noncallable(
     text: str,
     start: int,
@@ -779,6 +829,21 @@ def _contact_occurrence_is_noncallable(
     protected_role_spans: list[tuple[int, int]] = []
     for role_index, role in enumerate(all_roles):
         protected_end = role.end()
+        preceding_number = next(
+            (number for number in reversed(all_numbers) if number.end() <= role.start()),
+            None,
+        )
+        preceding_role = all_roles[role_index - 1] if role_index else None
+        if preceding_number is not None and (
+            preceding_role is None
+            or preceding_number.start() >= preceding_role.end()
+        ):
+            field_gap = text[preceding_number.end() : role.start()]
+            if _contact_field_gap_is_structural(
+                field_gap,
+                role_before_number=False,
+            ):
+                protected_role_spans.append((preceding_number.end(), role.end()))
         following_number = next(
             (number for number in all_numbers if number.start() >= role.end()),
             None,
@@ -793,7 +858,10 @@ def _contact_occurrence_is_noncallable(
             or following_number.start() < following_role.start()
         ):
             field_gap = text[role.end() : following_number.start()]
-            if _CONTACT_FIELD_GAP_PATTERN.fullmatch(field_gap) is not None:
+            if _contact_field_gap_is_structural(
+                field_gap,
+                role_before_number=True,
+            ):
                 protected_end = following_number.start()
         protected_role_spans.append((role.start(), protected_end))
     protected_spans = tuple(
@@ -906,7 +974,7 @@ def _contact_destination(value: str) -> tuple[str, str] | None:
 
 def _contact_destination_context(context: Any, action: Any, destination: str) -> str:
     if context is None:
-        return _normalize_text(destination)
+        return _normalize_contact_text(destination)
     parts: list[str] = []
     for node in context.descendants:
         if node is action:
@@ -931,7 +999,7 @@ def _contact_destination_context(context: Any, action: Any, destination: str) ->
             parent = node.parent
             if parent is None or parent.name not in _IGNORED_TEXT_TAGS:
                 parts.append(str(node))
-    return _normalize_text(" ".join(parts))
+    return _normalize_contact_text(" ".join(parts))
 
 
 def same_site_origin(first_url: Any, second_url: Any) -> bool:
@@ -1929,7 +1997,7 @@ class SourceEvidence:
                 not isinstance(element, Tag)
                 or _assertion_heading_level(element) is not None
             ):
-                return _normalize_text(source_contact_text(element))
+                return _normalize_contact_text(source_contact_text(element))
             boundary = first_claim_boundary(element)
             if boundary is not None:
                 parts: list[str] = []
@@ -1942,10 +2010,10 @@ class SourceEvidence:
                         descendant, Comment
                     ):
                         parts.append(str(descendant))
-                prefix = _normalize_text(" ".join(parts))
+                prefix = _normalize_contact_text(" ".join(parts))
                 if prefix:
                     return prefix
-            return _normalize_text(source_contact_text(element))
+            return _normalize_contact_text(source_contact_text(element))
 
         def belongs_to_preboundary_fragment(parent: Tag, element: Any) -> bool:
             boundary = first_claim_boundary(parent)
@@ -2087,7 +2155,7 @@ class SourceEvidence:
                                     for sibling in siblings[first : last + 1]
                                 )
                             )
-                            contact_owner_segment = _normalize_text(
+                            contact_owner_segment = _normalize_contact_text(
                                 " ".join(
                                     contact_claim_component_text(sibling)
                                     for sibling in siblings[first : last + 1]
@@ -2397,7 +2465,7 @@ class SourceEvidence:
                 emails.add(match.group(0).casefold())
         phones: set[str] = set()
         for raw_segment in phone_values:
-            segment = _normalize_text(raw_segment)
+            segment = _normalize_contact_text(raw_segment)
             for match in _PHONE_PATTERN.finditer(segment):
                 if _contact_occurrence_is_negated(
                     segment, match.start(), len(match.group(0))
