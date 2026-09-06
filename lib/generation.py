@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import os
 import re
 import tempfile
+import time
 import unicodedata
 from dataclasses import dataclass, replace
 from html import escape
@@ -29,6 +31,8 @@ DEFAULT_LOCAL_CONTEXT_TOKENS = 40960
 LOCAL_CONTEXT_SAFETY_TOKENS = 64
 DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
+DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS = 300.0
+MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS = 900.0
 LOCAL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
 # Non-HTML generation keeps the historical ceiling. HTML callers apply the
 # tighter body-only ceiling before trusted code assembles the final document.
@@ -322,6 +326,9 @@ class GenerationConfig:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     trust_env: bool = True
+    local_no_progress_timeout_seconds: float = (
+        DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS
+    )
 
 
 @dataclass(frozen=True)
@@ -674,6 +681,7 @@ def resolve_generation_config(
     )
 
     if provider_name == "local":
+        no_progress_timeout_seconds = _bounded_local_no_progress_timeout_env()
         local_model = (
             model
             or os.environ.get("LOCAL_GENERATION_MODEL")
@@ -693,6 +701,7 @@ def resolve_generation_config(
             ),
             timeout_seconds=timeout_seconds,
             max_output_tokens=max_output_tokens,
+            local_no_progress_timeout_seconds=no_progress_timeout_seconds,
         )
 
     openrouter_model = model or os.environ.get("OPENROUTER_GENERATION_MODEL")
@@ -782,6 +791,126 @@ def _raise_for_local_response_status(response: Any) -> None:
             f"Local generation endpoint returned redirect status {status_code}."
         )
     response.raise_for_status()
+
+
+def _bounded_local_no_progress_timeout_env() -> float:
+    value = _positive_float_env(
+        "LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS",
+        DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS,
+    )
+    if not math.isfinite(value) or value > MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS:
+        raise GenerationConfigurationError(
+            "LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS must be at most "
+            f"{MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS:g}."
+        )
+    return value
+
+
+def _local_request_timeout(
+    config: GenerationConfig,
+    deadline: float,
+) -> tuple[float, float]:
+    no_progress = config.local_no_progress_timeout_seconds
+    if (
+        isinstance(no_progress, bool)
+        or not isinstance(no_progress, (int, float))
+        or not math.isfinite(no_progress)
+        or no_progress <= 0
+        or no_progress > MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS
+    ):
+        raise GenerationConfigurationError(
+            "Local generation no-progress timeout must be a positive number at most "
+            f"{MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS:g}."
+        )
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise GenerationProviderUnavailable(
+            "Local generation exceeded its configured request deadline."
+        )
+    read_timeout = min(float(no_progress), remaining)
+    return min(LOCAL_PREFLIGHT_TIMEOUT_SECONDS, read_timeout), read_timeout
+
+
+def _local_no_progress_error(
+    stage: str,
+    timeout_seconds: float,
+) -> GenerationProviderUnavailable:
+    return GenerationProviderUnavailable(
+        f"Ollama made no {stage} progress within "
+        f"{timeout_seconds:g} seconds. Another local model "
+        "request may be using the runtime; retry when Ollama is free."
+    )
+
+
+def _read_local_chat_stream(response: Any, *, deadline: float) -> dict[str, Any]:
+    content_parts: list[str] = []
+    content_bytes = 0
+    terminal: dict[str, Any] | None = None
+
+    for raw_line in response.iter_lines():
+        if time.monotonic() >= deadline:
+            raise GenerationProviderUnavailable(
+                "Local generation exceeded its configured request deadline."
+            )
+        if not raw_line:
+            continue
+        try:
+            frame = json.loads(raw_line)
+        except (TypeError, ValueError) as exc:
+            raise GenerationResponseError(
+                "Local generation provider returned invalid streaming JSON."
+            ) from exc
+        if not isinstance(frame, dict):
+            raise GenerationResponseError(
+                "Local generation provider returned a non-object stream frame."
+            )
+        if frame.get("error") is not None:
+            raise GenerationProviderUnavailable(
+                "Ollama reported an error during streamed local generation."
+            )
+        if terminal is not None:
+            raise GenerationResponseError(
+                "Ollama returned data after its terminal stream frame."
+            )
+        message = frame.get("message")
+        if not isinstance(message, dict):
+            raise GenerationResponseError(
+                "Local generation provider returned a stream frame without a message."
+            )
+        content = message.get("content")
+        if not isinstance(content, str):
+            raise GenerationResponseError(
+                "Local generation provider returned a message without text content."
+            )
+        if message.get("thinking") not in (None, ""):
+            raise GenerationResponseError(
+                "Local generation provider returned reasoning despite thinking being disabled."
+            )
+        if message.get("tool_calls") not in (None, []):
+            raise GenerationResponseError(
+                "Local generation provider returned tool calls when none were requested."
+            )
+        content_parts.append(content)
+        content_bytes += len(content.encode("utf-8"))
+        if content_bytes > MAX_HTML_BYTES:
+            raise GenerationResponseError(
+                "Local generation provider returned an oversized streamed response."
+            )
+        done = frame.get("done")
+        if done is True:
+            terminal = frame
+        elif done is not False:
+            raise GenerationResponseError(
+                "Ollama returned a stream frame without completion state."
+            )
+
+    if terminal is None:
+        raise GenerationResponseError(
+            "Ollama returned an incomplete streaming response."
+        )
+    payload = dict(terminal)
+    payload["message"] = {"content": "".join(content_parts)}
+    return payload
 
 
 def preflight_generation_provider(
@@ -1012,6 +1141,10 @@ def _generate_local_text(
     client: Any | None,
 ) -> GenerationResult:
     selected_client = client or create_local_generation_client(config)
+    deadline = time.monotonic() + config.timeout_seconds
+    # Validate direct GenerationConfig callers before transport errors are
+    # translated into recoverable provider unavailability.
+    _local_request_timeout(config, deadline)
     _health_url, _models_url, _show_url, endpoint = _local_ollama_urls(
         config.base_url
     )
@@ -1022,7 +1155,7 @@ def _generate_local_text(
     request_body = {
         "model": config.model,
         "messages": messages,
-        "stream": False,
+        "stream": True,
         "think": False,
         "options": {
             "temperature": temperature,
@@ -1053,12 +1186,16 @@ def _generate_local_text(
         },
     }
     try:
-        probe_response = selected_client.post(
-            endpoint,
-            json=token_probe,
-            timeout=config.timeout_seconds,
-            allow_redirects=False,
-        )
+        probe_timeout = _local_request_timeout(config, deadline)
+        try:
+            probe_response = selected_client.post(
+                endpoint,
+                json=token_probe,
+                timeout=probe_timeout,
+                allow_redirects=False,
+            )
+        except requests.Timeout as exc:
+            raise _local_no_progress_error("prompt-probe", probe_timeout[1]) from exc
         _raise_for_local_response_status(probe_response)
         probe_payload = probe_response.json()
         if not isinstance(probe_payload, dict) or probe_payload.get("done") is not True:
@@ -1075,25 +1212,29 @@ def _generate_local_text(
                 "The complete local generation prompt does not fit alongside "
                 "the required output reserve. Reduce the prospect data."
             )
-        response = selected_client.post(
-            endpoint,
-            json=request_body,
-            timeout=config.timeout_seconds,
-            allow_redirects=False,
-        )
+        generation_timeout = _local_request_timeout(config, deadline)
+        try:
+            response = selected_client.post(
+                endpoint,
+                json=request_body,
+                stream=True,
+                timeout=generation_timeout,
+                allow_redirects=False,
+            )
+        except requests.Timeout as exc:
+            raise _local_no_progress_error("generation", generation_timeout[1]) from exc
         _raise_for_local_response_status(response)
+        try:
+            payload = _read_local_chat_stream(response, deadline=deadline)
+        except requests.RequestException as exc:
+            raise _local_no_progress_error("generation", generation_timeout[1]) from exc
     except GenerationResponseError:
+        raise
+    except GenerationProviderUnavailable:
         raise
     except Exception as exc:
         raise GenerationProviderUnavailable(
             f"local generation failed for model {config.model!r}: {exc}"
-        ) from exc
-
-    try:
-        payload = response.json()
-    except (TypeError, ValueError) as exc:
-        raise GenerationResponseError(
-            "Local generation provider returned invalid JSON."
         ) from exc
     if not isinstance(payload, dict):
         raise GenerationResponseError(
@@ -1102,7 +1243,7 @@ def _generate_local_text(
 
     if payload.get("done") is not True:
         raise GenerationResponseError(
-            "Ollama returned an incomplete non-streaming response."
+            "Ollama returned an incomplete streaming response."
         )
     finish_reason = payload.get("done_reason")
     if not isinstance(finish_reason, str) or not finish_reason:

@@ -99,8 +99,11 @@ LOCAL_GENERATION_BASE_URL=http://127.0.0.1:11434
 LOCAL_GENERATION_MODEL=qwen3-30b-a3b:latest
 # Optional bearer key for a deliberately configured local Ollama proxy.
 LOCAL_GENERATION_API_KEY=...
-# Local generation defaults to a two-hour request deadline. Override only when needed.
+# Local generation keeps a two-hour total deadline, but fails after five minutes
+# without an Ollama response/progress frame. The no-progress override accepts at
+# most 900 seconds so a shared-runtime queue cannot recreate a silent multi-hour wait.
 GENERATION_TIMEOUT_SECONDS=7200
+LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS=300
 # The template-sized default is 65,536 output tokens. Lower only for smaller prompts.
 GENERATION_MAX_OUTPUT_TOKENS=65536
 
@@ -345,7 +348,10 @@ OpenRouter prompt caching (`cache_control: ephemeral`) is enabled only for the
 cloud build request. Local generation identifies Ollama through `/api/version`,
 confirms the selected alias through `/api/tags`, verifies its context capacity
 through `/api/show`, then uses Ollama's exact prompt accounting from a one-token
-native `/api/chat` probe before sending the generation request. The request is
+native `/api/chat` probe before sending the generation request. The full response
+uses Ollama's NDJSON stream so active generation supplies progress; queueing or a
+stalled runtime fails after the bounded no-progress timeout instead of consuming
+the full request deadline. The request is
 admitted only when the complete prompt leaves the configured output reserve in
 the 40,960-token context. Each request disables thinking; reasoning or tool
 output still fails closed. The application neither starts Ollama nor downloads

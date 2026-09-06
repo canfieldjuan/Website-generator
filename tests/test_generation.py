@@ -1,11 +1,14 @@
-import os
 import importlib
+import json
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import requests
 
 import build
 import pipeline
@@ -17,9 +20,11 @@ from lib.generation import (
     DEFAULT_LOCAL_BASE_URL,
     DEFAULT_LOCAL_CONTEXT_TOKENS,
     DEFAULT_LOCAL_MODEL,
+    DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS,
     DEFAULT_LOCAL_TIMEOUT_SECONDS,
     DEFAULT_MAX_OUTPUT_TOKENS,
     LOCAL_CONTEXT_SAFETY_TOKENS,
+    MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS,
     MAX_SHORT_TEXT_OUTPUT_TOKENS,
     MAX_GENERATED_BODY_BYTES,
     MAX_GENERATED_BODY_TOKENS,
@@ -192,11 +197,15 @@ class FakeLocalResponse:
         payload=None,
         *,
         json_error=None,
+        stream_lines=None,
+        stream_error=None,
         status_error=None,
         status_code=200,
     ):
         self.payload = payload
         self.json_error = json_error
+        self.stream_lines = stream_lines
+        self.stream_error = stream_error
         self.status_error = status_error
         self.status_code = status_code
         self.json_calls = 0
@@ -210,6 +219,17 @@ class FakeLocalResponse:
         if self.json_error:
             raise self.json_error
         return self.payload
+
+    def iter_lines(self):
+        if self.stream_error:
+            raise self.stream_error
+        if self.stream_lines is not None:
+            yield from self.stream_lines
+            return
+        if self.json_error:
+            yield b"not-json"
+            return
+        yield json.dumps(self.payload).encode("utf-8")
 
 
 class FakeLocalClient:
@@ -226,6 +246,10 @@ class FakeLocalClient:
         show_status_error=None,
         chat_status_error=None,
         chat_json_error=None,
+        prompt_post_error=None,
+        chat_post_error=None,
+        chat_stream_lines=None,
+        chat_stream_error=None,
         health_status_code=200,
         models_status_code=200,
         show_status_code=200,
@@ -263,6 +287,8 @@ class FakeLocalClient:
             if chat_payload is _UNSET
             else chat_payload,
             json_error=chat_json_error,
+            stream_lines=chat_stream_lines,
+            stream_error=chat_stream_error,
             status_error=chat_status_error,
             status_code=chat_status_code,
         )
@@ -281,6 +307,8 @@ class FakeLocalClient:
             status_code=chat_status_code,
         )
         self.chat_calls = 0
+        self.prompt_post_error = prompt_post_error
+        self.chat_post_error = chat_post_error
 
     def get(self, url, **kwargs):
         self.calls.append(("GET", url, kwargs))
@@ -296,8 +324,12 @@ class FakeLocalClient:
             return self.show_response
         if not url.endswith("/api/chat"):
             raise AssertionError(f"unexpected local POST URL: {url}")
-        response = self.prompt_response if self.chat_calls % 2 == 0 else self.chat_response
+        is_prompt = self.chat_calls % 2 == 0
+        response = self.prompt_response if is_prompt else self.chat_response
+        post_error = self.prompt_post_error if is_prompt else self.chat_post_error
         self.chat_calls += 1
+        if post_error:
+            raise post_error
         return response
 
 
@@ -356,6 +388,10 @@ class GenerationConfigTests(unittest.TestCase):
         self.assertEqual(selected.model, DEFAULT_LOCAL_MODEL)
         self.assertEqual(selected.base_url, DEFAULT_LOCAL_BASE_URL)
         self.assertEqual(selected.timeout_seconds, DEFAULT_LOCAL_TIMEOUT_SECONDS)
+        self.assertEqual(
+            selected.local_no_progress_timeout_seconds,
+            DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS,
+        )
         self.assertEqual(selected.max_output_tokens, DEFAULT_MAX_OUTPUT_TOKENS)
 
     def test_openrouter_keeps_remote_timeout_default(self):
@@ -381,6 +417,30 @@ class GenerationConfigTests(unittest.TestCase):
                 GenerationConfigurationError, "greater than zero"
             ):
                 resolve_generation_config()
+
+    def test_local_no_progress_timeout_accepts_bounded_override(self):
+        for value, expected in (
+            ("45.5", 45.5),
+            (str(MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS), 900.0),
+        ):
+            with self.subTest(value=value), patch.dict(
+                os.environ,
+                {"LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS": value},
+                clear=True,
+            ):
+                selected = resolve_generation_config()
+
+            self.assertEqual(selected.local_no_progress_timeout_seconds, expected)
+
+    def test_local_no_progress_timeout_rejects_invalid_boundaries(self):
+        for value in ("", "0", "nan", "inf", "901"):
+            with self.subTest(value=value), patch.dict(
+                os.environ,
+                {"LOCAL_GENERATION_NO_PROGRESS_TIMEOUT_SECONDS": value},
+                clear=True,
+            ):
+                with self.assertRaises(GenerationConfigurationError):
+                    resolve_generation_config()
 
     def test_local_explicit_model_wins_over_environment(self):
         with patch.dict(os.environ, {"LOCAL_GENERATION_MODEL": "local/from-env"}, clear=True):
@@ -718,12 +778,233 @@ class ProviderBoundaryTests(unittest.TestCase):
                 "num_ctx": DEFAULT_LOCAL_CONTEXT_TOKENS,
             },
         )
-        self.assertIs(call["json"]["stream"], False)
-        self.assertEqual(call["timeout"], config().timeout_seconds)
+        self.assertIs(call["json"]["stream"], True)
+        self.assertIs(call["stream"], True)
+        self.assertEqual(
+            probe_call["timeout"],
+            (10.0, DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS),
+        )
+        self.assertEqual(
+            call["timeout"],
+            (10.0, DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS),
+        )
         self.assertIs(call["allow_redirects"], False)
         self.assertNotIn("cache_control", str(call["json"]))
         self.assertEqual(generated.finish_reason, "stop")
         self.assertEqual(generated.usage["completion_tokens"], 8)
+
+    def test_local_request_assembles_streamed_content_and_terminal_usage(self):
+        client = FakeLocalClient(
+            chat_stream_lines=(
+                json.dumps(
+                    {
+                        "message": {"content": "<body>"},
+                        "done": False,
+                    }
+                ).encode(),
+                json.dumps(
+                    {
+                        "message": {"content": "Ready</body>"},
+                        "done": True,
+                        "done_reason": "stop",
+                        "prompt_eval_count": 12,
+                        "eval_count": 8,
+                    }
+                ).encode(),
+            )
+        )
+
+        generated = generate_text(
+            config(),
+            system_prompt="system",
+            user_parts=(PromptPart("input"),),
+            temperature=0.4,
+            client=client,
+        )
+
+        self.assertEqual(generated.content, "<body>Ready</body>")
+        self.assertEqual(generated.finish_reason, "stop")
+        self.assertEqual(generated.usage["prompt_tokens"], 12)
+        self.assertEqual(generated.usage["completion_tokens"], 8)
+
+    def test_local_stream_content_enforces_exact_byte_limit(self):
+        exact_content = "é" * (MAX_HTML_BYTES // 2)
+        accepted = FakeLocalClient(
+            chat_payload=local_chat_payload(content=exact_content)
+        )
+        generated = generate_text(
+            config(),
+            system_prompt="system",
+            user_parts=(PromptPart("input"),),
+            temperature=0.4,
+            client=accepted,
+        )
+        self.assertEqual(len(generated.content.encode("utf-8")), MAX_HTML_BYTES)
+
+        rejected = FakeLocalClient(
+            chat_payload=local_chat_payload(content=f"{exact_content}a")
+        )
+        with self.assertRaisesRegex(GenerationResponseError, "oversized streamed"):
+            generate_text(
+                config(),
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=rejected,
+            )
+
+    def test_local_request_rejects_invalid_or_incomplete_streams(self):
+        invalid_streams = {
+            "invalid JSON": (b"not-json",),
+            "non-object": (b"[]",),
+            "missing message": (b'{"done": false}',),
+            "missing done": (b'{"message":{"content":"partial"}}',),
+            "incomplete": (b'{"message":{"content":"partial"},"done":false}',),
+            "error frame": (b'{"error":"runner failed"}',),
+            "data after terminal": (
+                b'{"message":{"content":"done"},"done":true,"done_reason":"stop","prompt_eval_count":1,"eval_count":1}',
+                b'{"message":{"content":"extra"},"done":false}',
+            ),
+        }
+        for label, lines in invalid_streams.items():
+            with self.subTest(label=label):
+                client = FakeLocalClient(chat_stream_lines=lines)
+                with self.assertRaises(
+                    (GenerationProviderUnavailable, GenerationResponseError)
+                ):
+                    generate_text(
+                        config(),
+                        system_prompt="system",
+                        user_parts=(PromptPart("input"),),
+                        temperature=0.4,
+                        client=client,
+                    )
+
+    def test_local_request_rejects_reasoning_or_tools_in_any_stream_frame(self):
+        invalid_messages = (
+            {"content": "", "thinking": "hidden work"},
+            {"content": "", "tool_calls": [{"id": "call-1"}]},
+        )
+        for message in invalid_messages:
+            with self.subTest(message=message):
+                client = FakeLocalClient(
+                    chat_stream_lines=(
+                        json.dumps({"message": message, "done": False}).encode(),
+                    )
+                )
+                with self.assertRaises(GenerationResponseError):
+                    generate_text(
+                        config(),
+                        system_prompt="system",
+                        user_parts=(PromptPart("input"),),
+                        temperature=0.4,
+                        client=client,
+                    )
+
+    def test_local_request_bounds_probe_and_generation_queue_waits(self):
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            timeout_seconds=120,
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+            local_no_progress_timeout_seconds=7,
+        )
+        probe_timeout = FakeLocalClient(prompt_post_error=requests.ReadTimeout("busy"))
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "no prompt-probe progress within 7 seconds",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=probe_timeout,
+            )
+        self.assertEqual(probe_timeout.calls[0][2]["timeout"], (7.0, 7.0))
+
+        generation_timeout = FakeLocalClient(
+            chat_post_error=requests.ReadTimeout("busy")
+        )
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "no generation progress within 7 seconds",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=generation_timeout,
+            )
+        self.assertEqual(generation_timeout.calls[1][2]["timeout"], (7.0, 7.0))
+        self.assertEqual(len(generation_timeout.calls), 2)
+
+        stream_timeout = FakeLocalClient(
+            chat_stream_error=requests.ReadTimeout("stalled between frames")
+        )
+        with self.assertRaisesRegex(
+            GenerationProviderUnavailable,
+            "no generation progress within 7 seconds",
+        ):
+            generate_text(
+                selected,
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=stream_timeout,
+            )
+        self.assertEqual(stream_timeout.calls[1][2]["timeout"], (7.0, 7.0))
+        self.assertEqual(len(stream_timeout.calls), 2)
+
+    def test_local_request_reports_shorter_overall_deadline_bound(self):
+        selected = GenerationConfig(
+            provider="local",
+            model=DEFAULT_LOCAL_MODEL,
+            base_url=DEFAULT_LOCAL_BASE_URL,
+            api_key="test-key",
+            timeout_seconds=3,
+            max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+            local_no_progress_timeout_seconds=7,
+        )
+        client = FakeLocalClient(prompt_post_error=requests.ReadTimeout("busy"))
+
+        with patch("lib.generation.time.monotonic", return_value=100.0):
+            with self.assertRaisesRegex(
+                GenerationProviderUnavailable,
+                "no prompt-probe progress within 3 seconds",
+            ):
+                generate_text(
+                    selected,
+                    system_prompt="system",
+                    user_parts=(PromptPart("input"),),
+                    temperature=0.4,
+                    client=client,
+                )
+
+        self.assertEqual(client.calls[0][2]["timeout"], (3.0, 3.0))
+
+    def test_direct_local_config_rejects_invalid_no_progress_timeout(self):
+        for value in (0, False, float("nan"), 901):
+            with self.subTest(value=value):
+                selected = GenerationConfig(
+                    provider="local",
+                    model=DEFAULT_LOCAL_MODEL,
+                    base_url=DEFAULT_LOCAL_BASE_URL,
+                    api_key="test-key",
+                    max_output_tokens=MAX_GENERATED_BODY_TOKENS,
+                    local_no_progress_timeout_seconds=value,
+                )
+                with self.assertRaises(GenerationConfigurationError):
+                    generate_text(
+                        selected,
+                        system_prompt="system",
+                        user_parts=(PromptPart("input"),),
+                        temperature=0.4,
+                        client=FakeLocalClient(),
+                    )
 
     def test_local_prompt_budget_accepts_boundary_and_rejects_boundary_plus_one(self):
         selected = GenerationConfig(
@@ -829,7 +1110,7 @@ class ProviderBoundaryTests(unittest.TestCase):
             }
         )
 
-        with self.assertRaisesRegex(GenerationResponseError, "incomplete"):
+        with self.assertRaisesRegex(GenerationResponseError, "stream frame"):
             generate_text(
                 config(),
                 system_prompt="system",
