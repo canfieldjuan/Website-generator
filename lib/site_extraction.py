@@ -470,9 +470,11 @@ _PHONE_EXTENSION_SUFFIX_PATTERN = re.compile(
 )
 _PHONE_ROLE_PATTERN = re.compile(
     r"\b(?P<role>fax|facsimile|phone|telephone|mobile|cell|call)\b"
-    r"(?:\s+(?:number|no)\.?)?\s*(?:[:#-]\s*)?",
+    r"(?:\s+(?:[A-Z][A-Z0-9_-]*\s+){0,4}(?:number|no)\.?)?"
+    r"\s*(?:[:#-]\s*)?",
     re.I,
 )
+_CONTACT_GROUP_BREAK_PATTERN = re.compile(r"[.!?;|¦•·●▪‣∙◦○◆◇–—]")
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
 _CSS_DECLARATION_PATTERN = re.compile(
     r"(?:^|[;{])\s*([\w-]+)\s*:\s*([^;{}]+)",
@@ -777,7 +779,7 @@ def _contact_occurrence_is_noncallable(
     )
     clause_breaks = tuple(
         match.start()
-        for match in _SENTENCE_BREAK_PATTERN.finditer(text)
+        for match in _CONTACT_GROUP_BREAK_PATTERN.finditer(text)
         if not any(
             protected_start <= match.start() < protected_end
             for protected_start, protected_end in protected_spans

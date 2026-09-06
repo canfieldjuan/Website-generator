@@ -1240,6 +1240,48 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "source phone"):
             validate_site_analysis(reverse_grouped_fax, reverse_grouped_source)
 
+        for complete_label in (
+            "Fax Line No. 217-555-0100",
+            "Fax Customer Service Number: 217.555.0100",
+        ):
+            with (
+                self.subTest(complete_label=complete_label),
+                self.assertRaisesRegex(SiteExtractionError, "source phone"),
+            ):
+                validate_site_analysis(
+                    base_phone,
+                    f"<h1>Acme Cleaning</h1><p>{complete_label}</p>",
+                )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>Phone Line No. 217-555-0100</p>",
+            ),
+            base_phone,
+        )
+
+        for visual_separator in ("|", "•", "—"):
+            visually_grouped_source = (
+                "<h1>Acme Cleaning</h1><p>"
+                f"Phone: 217-555-0199 {visual_separator} "
+                "217-555-0100 or 217-555-0101 (fax)</p>"
+            )
+            self.assertEqual(
+                validate_site_analysis(grouped_phone, visually_grouped_source),
+                grouped_phone,
+            )
+            for fax_number in ("217-555-0100", "217-555-0101"):
+                fax_document = copy.deepcopy(base_phone)
+                fax_document["site"]["contact"]["phone"] = fax_number
+                with (
+                    self.subTest(
+                        visual_separator=visual_separator,
+                        visually_grouped_fax_number=fax_number,
+                    ),
+                    self.assertRaisesRegex(SiteExtractionError, "source phone"),
+                ):
+                    validate_site_analysis(fax_document, visually_grouped_source)
+
         for separator in (".", ";"):
             prefix_then_postfix_fax = (
                 "<h1>Acme Cleaning</h1><p>"
