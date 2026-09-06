@@ -38,6 +38,7 @@ from lib.generation import (
     GenerationResult,
     PromptPart,
     ReviewAdmissionContract,
+    ServiceLocationAdmissionContract,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -1195,6 +1196,7 @@ class BodyAssemblyTests(unittest.TestCase):
         contract = ActionUrlAdmissionContract(
             allowed_urls=(
                 "https://source.test/book",
+                "sms:2175550100?body=Hello",
             ),
             allowed_form_urls=(
                 "https://source.test/book",
@@ -1202,8 +1204,11 @@ class BodyAssemblyTests(unittest.TestCase):
             ),
             phones=("217-555-0100",),
             emails=("office@source.test",),
-            allowed_labels=("Book",),
-            allowed_pairs=(("Book", "https://source.test/book"),),
+            allowed_labels=("Book", "Text"),
+            allowed_pairs=(
+                ("Book", "https://source.test/book"),
+                ("Text", "sms:2175550100?body=Hello"),
+            ),
         )
         valid_body = (
             '<body><a href="#contact">Contact</a>'
@@ -1239,13 +1244,28 @@ class BodyAssemblyTests(unittest.TestCase):
                 expected_action_urls=ActionUrlAdmissionContract(),
             )
 
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "must declare one admitted action endpoint",
+        ):
+            validate_generated_body(
+                body_result(
+                    '<body><form><button type="submit">Submit</button></form></body>'
+                ),
+                expected_action_urls=ActionUrlAdmissionContract(),
+            )
+
         invalid_destinations = (
             '<a href="https://calendly.com/wrong">Book</a>',
             '<area href="//unrelated.test/path">',
             '<a xlink:href="https://unrelated.test/path">Open</a>',
             '<form action="https://unrelated.test/form"></form>',
-            '<button formaction="https://unrelated.test/form">Send</button>',
+            (
+                '<form action="https://source.test/form">'
+                '<button formaction="https://unrelated.test/form">Send</button></form>'
+            ),
             '<a href="tel:2175550199">Call</a>',
+            '<a href="sms:2175550100">Text</a>',
             '<a href="mailto:wrong@source.test">Email</a>',
         )
         for invalid in invalid_destinations:
@@ -1388,9 +1408,10 @@ class BodyAssemblyTests(unittest.TestCase):
                 "</a></body>"
             ),
             (
-                '<body><input type="image" alt="Book Appointment" '
+                '<body><form action="https://source.test/book">'
+                '<input type="image" alt="Book Appointment" '
                 'src="https://source.test/button.png" '
-                'formaction="https://source.test/book"></body>'
+                'formaction="https://source.test/book"></form></body>'
             ),
             (
                 '<body><a aria-labelledby="booking-label" '
@@ -1419,6 +1440,56 @@ class BodyAssemblyTests(unittest.TestCase):
                 expected_action_urls=contract,
             ),
             neutral_body,
+        )
+
+    def test_service_location_claims_require_one_complete_source_assertion(self):
+        restricted = ServiceLocationAdmissionContract(
+            services=("Drain Cleaning",),
+            locations=("Effingham, IL",),
+        )
+        for body in (
+            '<body><h1>Drain Cleaning in Effingham, IL</h1></body>',
+            (
+                '<body><section><span>Drain Cleaning</span> '
+                '<span>in Effingham, IL</span></section></body>'
+            ),
+        ):
+            with (
+                self.subTest(body=body),
+                self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "without one complete source-owned assertion",
+                ),
+            ):
+                validate_generated_body(
+                    body_result(body),
+                    expected_service_locations=restricted,
+                )
+
+        independent_facts = (
+            '<body><h2>Drain Cleaning</h2><p>Effingham, IL</p></body>'
+        )
+        self.assertEqual(
+            validate_generated_body(
+                body_result(independent_facts),
+                expected_service_locations=restricted,
+            ),
+            independent_facts,
+        )
+
+        source_owned_claim = "Drain Cleaning throughout Effingham, IL"
+        admitted = ServiceLocationAdmissionContract(
+            services=("Drain Cleaning",),
+            locations=("Effingham, IL",),
+            allowed_claims=(source_owned_claim,),
+        )
+        body = f"<body><h1>{source_owned_claim}</h1></body>"
+        self.assertEqual(
+            validate_generated_body(
+                body_result(body),
+                expected_service_locations=admitted,
+            ),
+            body,
         )
 
     def test_body_button_inputs_enforce_label_authority(self):
@@ -2649,6 +2720,22 @@ class PromptContractTests(unittest.TestCase):
                 prompt = prompt_path.read_text(encoding="utf-8")
                 self.assertNotIn("onerror", prompt.casefold())
                 self.assertIn("trusted code", prompt.casefold())
+
+    def test_redesign_prompt_does_not_compose_service_and_location_facts(self):
+        prompt = Path("references/02-redesign-gen-prompt.md").read_text(
+            encoding="utf-8"
+        )
+
+        normalized_prompt = " ".join(prompt.split())
+        self.assertIn(
+            "Never combine a service found in one field with a location found in another field",
+            normalized_prompt,
+        )
+        self.assertIn("one complete source-owned service-and-location assertion", prompt)
+        self.assertNotIn(
+            "Build the headline from the most specific grounded service",
+            prompt,
+        )
 
     def test_deployment_comments_are_code_owned_and_absent_from_prompts(self):
         for prompt_path, markers in (
@@ -3897,12 +3984,12 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "</nav>",
             '<a href="sms:2175550100">Text us</a></nav>',
         )
-        html = build.generate_build_html(
-            prospect,
-            config(),
-            FakeLocalClient(local_chat_payload(matching_optional_action)),
-        )
-        self.assertIn("sms:2175550100", html)
+        with self.assertRaisesRegex(GeneratedBodyError, "source-owned destinations"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(matching_optional_action)),
+            )
 
     def test_generators_reject_classes_outside_provided_catalog(self):
         prospect = {
@@ -4908,7 +4995,10 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         site_json = {"site": {"name": "Current Business"}}
         with patch(
             "pipeline.fetch_and_clean_html",
-            return_value="<main>Verified contact source</main>",
+            return_value=(
+                "<main>Verified contact source</main>",
+                "https://current.test/contact",
+            ),
         ) as fetcher, patch(
             "pipeline.generate_interior_page",
             side_effect=GenerationResponseError("rejected generated body"),
@@ -4926,11 +5016,16 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertEqual(generator.call_count, 1)
         fetcher.assert_called_once_with(
             "https://current.test/contact",
+            include_source_url=True,
             required_origin="https://current.test/contact",
         )
         self.assertEqual(
             generator.call_args.kwargs["source_content"],
             "<main>Verified contact source</main>",
+        )
+        self.assertEqual(
+            generator.call_args.kwargs["page_url"],
+            "https://current.test/contact",
         )
 
         with patch(

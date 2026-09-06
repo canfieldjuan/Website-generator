@@ -1456,6 +1456,49 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         )
         self.assertFalse(admitted["pages_to_fetch"][2]["fetchable"])
 
+    def test_source_base_controls_relative_resource_and_page_resolution(self):
+        document = {
+            "site": {"name": "Acme Cleaning"},
+            "pages_to_fetch": [
+                {
+                    "label": "Services",
+                    "url": "services",
+                    "page_type": "services",
+                    "priority": 1,
+                    "fetchable": False,
+                }
+            ],
+            "images": [
+                {
+                    "url": "hero.jpg",
+                    "alt": None,
+                    "context": "hero",
+                }
+            ],
+        }
+        source = (
+            '<base href="/">'
+            "<h1>Acme Cleaning</h1>"
+            '<a href="services">Services</a>'
+            '<img src="hero.jpg">'
+        )
+
+        admitted = validate_site_analysis(
+            document,
+            source,
+            source_url="https://acme.test/subdir/index.html",
+        )
+
+        self.assertEqual(
+            admitted["pages_to_fetch"][0]["url"],
+            "https://acme.test/services",
+        )
+        self.assertTrue(admitted["pages_to_fetch"][0]["fetchable"])
+        self.assertEqual(
+            admitted["images"][0]["url"],
+            "https://acme.test/hero.jpg",
+        )
+
     def test_image_alt_must_belong_to_the_same_image(self):
         source = (
             "<h1>Acme Cleaning</h1>"
@@ -2374,6 +2417,46 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             empty,
         )
 
+    def test_redesign_service_location_contract_preserves_only_complete_claims(self):
+        separate = pipeline._redesign_service_location_contract(
+            {
+                "site": {"name": "Acme", "location": "Effingham, IL"},
+                "sections": [
+                    {
+                        "type": "services",
+                        "headline": "Our Services",
+                        "items": [{"title": "Drain Cleaning"}],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(separate.services, ("Drain Cleaning",))
+        self.assertEqual(separate.locations, ("Effingham, IL",))
+        self.assertEqual(separate.allowed_claims, ())
+
+        related = pipeline._redesign_service_location_contract(
+            {
+                "site": {"name": "Acme", "location": "Effingham, IL"},
+                "sections": [
+                    {
+                        "type": "services",
+                        "items": [
+                            {
+                                "title": "Drain Cleaning",
+                                "description": (
+                                    "Drain Cleaning throughout Effingham, IL"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(
+            related.allowed_claims,
+            ("Drain Cleaning throughout Effingham, IL",),
+        )
+
     def test_generation_action_contract_keeps_only_action_owned_urls(self):
         contract = pipeline._redesign_action_url_contract(
             {
@@ -2484,6 +2567,26 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
                 ("Members Only Book Appointment", "/aria-action"),
                 ("External", "/external"),
             ),
+        )
+
+    def test_generation_action_contract_resolves_source_form_against_base(self):
+        contract = pipeline._redesign_action_url_contract(
+            {"site": {"name": "Acme Cleaning"}},
+            pipeline._redesign_contact_contract({}),
+            source_content=(
+                '<base href="/">'
+                '<form action="submit"><button>Send</button></form>'
+            ),
+            source_url="https://acme.test/contact/index.html",
+        )
+
+        self.assertEqual(
+            contract.allowed_form_urls,
+            ("https://acme.test/submit",),
+        )
+        self.assertIn(
+            ("Send", "https://acme.test/submit"),
+            contract.allowed_pairs,
         )
 
     def test_generation_action_contract_excludes_inert_source_actions(self):
@@ -3329,7 +3432,10 @@ class RedesignPromptAuthorityTests(unittest.TestCase):
             prompt,
         )
         self.assertNotIn("Build the headline from `site.type`", prompt)
-        self.assertIn("do not substitute `site.type` as", prompt)
+        self.assertIn(
+            "do not substitute `site.type` as",
+            " ".join(prompt.split()).lower(),
+        )
         self.assertNotIn("Every redesign includes a trust strip", prompt)
         self.assertIn("If none of the source-owned values above exists, omit", prompt)
         self.assertNotIn('Hours + "Order Online" or "Reserve" button', interior_prompt)

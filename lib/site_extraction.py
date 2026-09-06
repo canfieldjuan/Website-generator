@@ -782,12 +782,21 @@ def same_site_origin(first_url: Any, second_url: Any) -> bool:
 
 
 def _resolved_distinct_fetchable_page(
-    value: Any, source_url: str | None
+    value: Any,
+    source_url: str | None,
+    resolution_base_url: str | None,
 ) -> str | None:
-    if not isinstance(value, str) or not value.strip() or not source_url:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or not source_url
+        or not resolution_base_url
+    ):
         return None
     source = urlsplit(source_url)
-    destination = urlsplit(urljoin(source_url, html.unescape(value).strip()))
+    destination = urlsplit(
+        urljoin(resolution_base_url, html.unescape(value).strip())
+    )
     if (
         source.scheme.casefold() not in {"http", "https"}
         or destination.scheme.casefold() not in {"http", "https"}
@@ -985,6 +994,41 @@ def is_source_semantic_element(element: Any) -> bool:
         getattr(candidate, "name", None) in _IGNORED_TEXT_TAGS
         or is_render_suppressed_element(candidate)
         for candidate in (element, *getattr(element, "parents", ()))
+    )
+
+
+def _source_document_base_from_soup(
+    soup: BeautifulSoup | Tag,
+    source_url: str | None,
+) -> str | None:
+    if not source_url:
+        return None
+    for base in soup.find_all("base", href=True, limit=MAX_ITEMS):
+        if any(
+            getattr(parent, "name", None) in _IGNORED_TEXT_TAGS
+            for parent in base.parents
+        ):
+            continue
+        raw_href = base.get("href")
+        if not isinstance(raw_href, str):
+            continue
+        candidate = urljoin(source_url, html.unescape(raw_href).strip())
+        parsed = urlsplit(candidate)
+        if parsed.scheme.casefold() in {"http", "https"} and parsed.hostname:
+            return candidate
+    return source_url
+
+
+def source_document_base_url(
+    source_html: str,
+    source_url: str | None,
+) -> str | None:
+    """Return the browser-effective HTTP(S) base owned by one source document."""
+    if not isinstance(source_html, str):
+        return source_url
+    return _source_document_base_from_soup(
+        BeautifulSoup(source_html, "html.parser"),
+        source_url,
     )
 
 
@@ -1377,6 +1421,7 @@ class SourceEvidence:
     form_control_labels: tuple[str, ...]
     emails: frozenset[str]
     phones: frozenset[str]
+    resolution_base_url: str | None
     records: tuple[SourceEvidence, ...]
     content_sections: tuple[SourceEvidence, ...]
     section_targets: tuple[tuple[str, SourceEvidence], ...]
@@ -1391,6 +1436,7 @@ class SourceEvidence:
         _include_content_sections: bool = True,
         _include_section_targets: bool = True,
         _group_heading_claims: bool = True,
+        _resolution_base_url: str | None = None,
     ) -> "SourceEvidence":
         if not isinstance(source_html, str) or not source_html.strip():
             raise SiteExtractionError("Source HTML must be non-empty text.")
@@ -1402,6 +1448,10 @@ class SourceEvidence:
             )
 
         soup = BeautifulSoup(source_html, "html.parser")
+        resolution_base_url = _resolution_base_url or _source_document_base_from_soup(
+            soup,
+            source_url,
+        )
         preserved_image_urls: set[str] = set()
         for inventory in soup.find_all(
             "template",
@@ -1841,8 +1891,8 @@ class SourceEvidence:
                 if not candidate:
                     continue
                 admitted.add(candidate)
-                if source_url:
-                    admitted.add(urljoin(source_url, candidate))
+                if resolution_base_url:
+                    admitted.add(urljoin(resolution_base_url, candidate))
             return frozenset(admitted)
 
         emails: set[str] = set()
@@ -1888,6 +1938,7 @@ class SourceEvidence:
                     _include_content_sections=False,
                     _include_section_targets=False,
                     _group_heading_claims=False,
+                    _resolution_base_url=resolution_base_url,
                 )
                 for fragment in _record_fragments(soup)
             )
@@ -1902,6 +1953,7 @@ class SourceEvidence:
                     _include_content_sections=False,
                     _include_section_targets=False,
                     _group_heading_claims=False,
+                    _resolution_base_url=resolution_base_url,
                 )
                 for fragment in _content_section_fragments(soup)
             )
@@ -1917,6 +1969,7 @@ class SourceEvidence:
                         source_url,
                         _include_section_targets=False,
                         _group_heading_claims=False,
+                        _resolution_base_url=resolution_base_url,
                     ),
                 )
                 for element in soup.find_all(id=True, limit=MAX_ITEMS)
@@ -1968,6 +2021,7 @@ class SourceEvidence:
             form_control_labels=tuple(form_control_labels),
             emails=frozenset(emails),
             phones=frozenset(phones),
+            resolution_base_url=resolution_base_url,
             records=records,
             content_sections=content_sections,
             section_targets=section_targets,
@@ -2369,7 +2423,11 @@ def _require_site_facts(
         evidence.require_action(f"footer_links[{index}]", item["label"], item["url"])
     for index, page in enumerate(document.get("pages_to_fetch") or []):
         evidence.require_action(f"pages_to_fetch[{index}]", page["label"], page["url"])
-        resolved_url = _resolved_distinct_fetchable_page(page["url"], source_url)
+        resolved_url = _resolved_distinct_fetchable_page(
+            page["url"],
+            source_url,
+            evidence.resolution_base_url,
+        )
         page["fetchable"] = resolved_url is not None
         if resolved_url is not None:
             page["url"] = resolved_url
@@ -2447,11 +2505,9 @@ def _require_site_facts(
             )
 
 
-def _canonicalize_admitted_image_urls(
-    document: dict, source_url: str | None
-) -> None:
+def _canonicalize_admitted_image_urls(document: dict, base_url: str | None) -> None:
     """Resolve every admitted image resource against its source document."""
-    if not source_url:
+    if not base_url:
         return
 
     def visit(value: Any, *, image_record: bool = False) -> None:
@@ -2461,7 +2517,7 @@ def _canonicalize_admitted_image_urls(
                     key in {"image_url", "logo_url"}
                     or (image_record and key == "url")
                 ):
-                    value[key] = urljoin(source_url, html.unescape(nested).strip())
+                    value[key] = urljoin(base_url, html.unescape(nested).strip())
                 elif key == "images" and isinstance(nested, list):
                     for image in nested:
                         visit(image, image_record=True)
@@ -2484,7 +2540,7 @@ def validate_site_analysis(
         raise SiteExtractionError(error)
     evidence = SourceEvidence.from_html(source_html, source_url)
     _require_site_facts(admitted, evidence, source_url)
-    _canonicalize_admitted_image_urls(admitted, source_url)
+    _canonicalize_admitted_image_urls(admitted, evidence.resolution_base_url)
     return admitted
 
 
@@ -2574,5 +2630,5 @@ def validate_enrichment_result(
             raise SiteExtractionError(
                 "Content enrichment headline and items must share one source section."
             )
-    _canonicalize_admitted_image_urls(admitted, source_url)
+    _canonicalize_admitted_image_urls(admitted, evidence.resolution_base_url)
     return admitted

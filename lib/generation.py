@@ -21,6 +21,7 @@ from openai import DefaultHttpxClient, OpenAI
 
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 from lib.site_extraction import (
+    SourceEvidence,
     action_element_labels,
     is_render_suppressed_element,
     is_labelled_action_element,
@@ -267,6 +268,7 @@ _EXPECTED_FORM_ACTION_UNSET = object()
 _EXPECTED_REVIEWS_UNSET = object()
 _SOURCE_CONTACT_UNSET = object()
 _EXPECTED_LOCATION_UNSET = object()
+_EXPECTED_SERVICE_LOCATION_UNSET = object()
 _EXPECTED_IMAGES_UNSET = object()
 _EXPECTED_ACTION_URLS_UNSET = object()
 REQUIRED_FOOTER_CLASS_COUNTS = (
@@ -395,6 +397,13 @@ class LocationAdmissionContract:
 
 
 @dataclass(frozen=True)
+class ServiceLocationAdmissionContract:
+    services: tuple[str, ...] = ()
+    locations: tuple[str, ...] = ()
+    allowed_claims: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ImageAdmissionContract:
     allowed_urls: tuple[str, ...] = ()
     nav_logo_url: str | None = None
@@ -416,7 +425,7 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
         "are allowed. Every other generated anchor must copy one exact source "
-        f"URL from {json.dumps(allowed_urls, ensure_ascii=False)}, use a `tel:` or `sms:` "
+        f"URL from {json.dumps(allowed_urls, ensure_ascii=False)}, use a `tel:` "
         f"target matching one of {json.dumps(phones, ensure_ascii=False)}, or use "
         "a `mailto:` target matching one of "
         f"{json.dumps(emails, ensure_ascii=False)}. Every generated form action "
@@ -2127,12 +2136,7 @@ def action_element_destinations(element: Tag, root: Tag) -> tuple[str, ...]:
     if tag_name not in {"button", "input"}:
         return ()
 
-    control_type = str(element.get("type") or "").casefold()
-    is_submit_control = (
-        tag_name == "button" and control_type not in {"button", "reset"}
-        or tag_name == "input" and control_type in {"submit", "image"}
-    )
-    if not is_submit_control:
+    if not _is_submit_action_element(element):
         return ()
 
     form_id = element.get("form")
@@ -2147,6 +2151,15 @@ def action_element_destinations(element: Tag, root: Tag) -> tuple[str, ...]:
         return (formaction,) if isinstance(formaction, str) else ()
     action = owner.get("action")
     return (action,) if isinstance(action, str) else ()
+
+
+def _is_submit_action_element(element: Tag) -> bool:
+    tag_name = element.name.casefold()
+    control_type = str(element.get("type") or "").casefold()
+    return (
+        tag_name == "button" and control_type not in {"button", "reset"}
+        or tag_name == "input" and control_type in {"submit", "image"}
+    )
 
 
 _NEUTRAL_ACTION_LABELS = frozenset(
@@ -2257,6 +2270,14 @@ def _validate_action_urls(
         else:
             form_action_values.extend(declared_destinations)
         element_values = action_element_destinations(element, body_root)
+        if tag_name == "form" and not declared_destinations:
+            raise GeneratedBodyError(
+                "Generated body form must declare one admitted action endpoint."
+            )
+        if _is_submit_action_element(element) and not element_values:
+            raise GeneratedBodyError(
+                "Generated body submit control has no admitted effective form action."
+            )
         if is_labelled_action:
             action_entries.append(
                 (action_element_labels(element, body_root), element_values)
@@ -2280,7 +2301,7 @@ def _validate_action_urls(
             raise GeneratedBodyError(
                 "Generated body contains an action URL outside source-owned destinations."
             )
-        if allow_contact_destinations and scheme.casefold() in {"tel", "sms"}:
+        if allow_contact_destinations and scheme.casefold() == "tel":
             phone_digits = _canonical_phone_digits(target.split("?", 1)[0])
             if phone_digits and phone_digits in allowed_phone_digits:
                 return
@@ -2315,7 +2336,7 @@ def _validate_action_urls(
             ):
                 for destination in stripped_destinations:
                     scheme, separator, target = destination.partition(":")
-                    if separator and scheme.casefold() in {"tel", "sms"}:
+                    if separator and scheme.casefold() == "tel":
                         destination_phone = _canonical_phone_digits(
                             target.split("?", 1)[0]
                         )
@@ -2505,6 +2526,58 @@ def _validate_location_claims(
                 )
 
 
+def _validate_service_location_claims(
+    body_root: Tag,
+    contract: ServiceLocationAdmissionContract,
+) -> None:
+    if not isinstance(contract, ServiceLocationAdmissionContract):
+        raise GeneratedBodyError("Service-location admission contract is invalid.")
+    services = _contract_text_values(contract.services, "Source service")
+    locations = _contract_text_values(contract.locations, "Source location")
+    allowed_claims = _contract_text_values(
+        contract.allowed_claims,
+        "Source service-location claim",
+    )
+    if not services or not locations:
+        return
+
+    def combines_service_and_location(value: str) -> bool:
+        return any(
+            _contains_complete_token_sequence(value, service)
+            for service in services
+        ) and any(
+            _contains_complete_token_sequence(value, location)
+            for location in locations
+        )
+
+    if any(not combines_service_and_location(claim) for claim in allowed_claims):
+        raise GeneratedBodyError(
+            "Service-location admission contract contains an unrelated claim."
+        )
+    normalized_allowed = {
+        _normalize_claim_match_text(claim) for claim in allowed_claims
+    }
+    evidence = SourceEvidence.from_html(
+        str(body_root),
+        None,
+        _include_records=False,
+        _include_content_sections=False,
+        _include_section_targets=False,
+    )
+    owners = tuple(
+        dict.fromkeys(owner for _local, owner in evidence.assertion_occurrences)
+    )
+    for owner in owners:
+        if (
+            combines_service_and_location(owner)
+            and _normalize_claim_match_text(owner) not in normalized_allowed
+        ):
+            raise GeneratedBodyError(
+                "Generated body combines a service and location without one "
+                "complete source-owned assertion."
+            )
+
+
 def _srcset_urls(value: str) -> tuple[str, ...]:
     urls: list[str] = []
     for candidate in value.split(","):
@@ -2667,6 +2740,7 @@ def validate_generated_body(
     expected_address: object = _EXPECTED_ADDRESS_UNSET,
     source_contacts: object = _SOURCE_CONTACT_UNSET,
     expected_location: object = _EXPECTED_LOCATION_UNSET,
+    expected_service_locations: object = _EXPECTED_SERVICE_LOCATION_UNSET,
     expected_images: object = _EXPECTED_IMAGES_UNSET,
     expected_tenure: object = _EXPECTED_TENURE_UNSET,
     expected_action_urls: object = _EXPECTED_ACTION_URLS_UNSET,
@@ -2917,6 +2991,8 @@ def validate_generated_body(
         )
     if expected_location is not _EXPECTED_LOCATION_UNSET:
         _validate_location_claims(exact_claim_surfaces, expected_location)
+    if expected_service_locations is not _EXPECTED_SERVICE_LOCATION_UNSET:
+        _validate_service_location_claims(body_root, expected_service_locations)
     if expected_images is not _EXPECTED_IMAGES_UNSET:
         _validate_image_sources(body_root, expected_images)
     if expected_tenure is not _EXPECTED_TENURE_UNSET:
@@ -3250,6 +3326,7 @@ def assemble_generated_html(
     expected_address: object = _EXPECTED_ADDRESS_UNSET,
     source_contacts: object = _SOURCE_CONTACT_UNSET,
     expected_location: object = _EXPECTED_LOCATION_UNSET,
+    expected_service_locations: object = _EXPECTED_SERVICE_LOCATION_UNSET,
     expected_images: object = _EXPECTED_IMAGES_UNSET,
     expected_tenure: object = _EXPECTED_TENURE_UNSET,
     expected_action_urls: object = _EXPECTED_ACTION_URLS_UNSET,
@@ -3285,6 +3362,7 @@ def assemble_generated_html(
         expected_address=expected_address,
         source_contacts=source_contacts,
         expected_location=expected_location,
+        expected_service_locations=expected_service_locations,
         expected_images=expected_images,
         expected_tenure=expected_tenure,
         expected_action_urls=expected_action_urls,

@@ -20,6 +20,7 @@ from lib.site_extraction import (
     SiteExtractionError,
     same_site_origin,
     is_source_action_available,
+    source_document_base_url,
     validate_enrichment_result,
     validate_site_analysis,
 )
@@ -32,6 +33,7 @@ from lib.generation import (
     DocumentColors,
     ImageAdmissionContract,
     PromptPart,
+    ServiceLocationAdmissionContract,
     SourceContactAdmissionContract,
     action_element_destinations,
     action_url_contract_instruction,
@@ -143,11 +145,68 @@ def _redesign_contact_contract(site_json):
     )
 
 
+def _redesign_service_location_contract(site_json):
+    site = site_json.get("site")
+    location = site.get("location") if isinstance(site, dict) else None
+    if not isinstance(location, str) or not location.strip():
+        return ServiceLocationAdmissionContract()
+
+    services = []
+    source_claims = []
+
+    def append_text(values, value):
+        if isinstance(value, str) and value.strip() and value.strip() not in values:
+            values.append(value.strip())
+
+    def collect_service_section(section):
+        if not isinstance(section, dict):
+            return
+        append_text(source_claims, section.get("headline"))
+        for item in section.get("items") or ():
+            if not isinstance(item, dict):
+                continue
+            append_text(services, item.get("title"))
+            for field in ("title", "description", "meta"):
+                append_text(source_claims, item.get(field))
+
+    for section in site_json.get("sections") or ():
+        if isinstance(section, dict) and section.get("type") == "services":
+            collect_service_section(section)
+    for section in site_json.get("single_page_sections") or ():
+        if not isinstance(section, dict) or section.get("page_type") not in {
+            "services",
+            "single-service",
+        }:
+            continue
+        collect_service_section(section.get("content"))
+
+    def contains_complete_phrase(value, phrase):
+        normalized_value = " ".join(value.casefold().split())
+        normalized_phrase = " ".join(phrase.casefold().split())
+        return re.search(
+            rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)",
+            normalized_value,
+        ) is not None
+
+    allowed_claims = tuple(
+        claim
+        for claim in source_claims
+        if contains_complete_phrase(claim, location)
+        and any(contains_complete_phrase(claim, service) for service in services)
+    )
+    return ServiceLocationAdmissionContract(
+        services=tuple(services),
+        locations=(location.strip(),),
+        allowed_claims=allowed_claims,
+    )
+
+
 def _redesign_action_url_contract(
     site_json,
     contact_contract,
     *,
     source_content=None,
+    source_url=None,
     extra_urls=(),
 ):
     allowed_urls = []
@@ -213,13 +272,22 @@ def _redesign_action_url_contract(
         _append_source_value(allowed_urls, url)
     if isinstance(source_content, str) and "<" in source_content:
         source_root = BeautifulSoup(source_content, "html.parser")
+        source_base_url = source_document_base_url(source_content, source_url)
+
+        def resolve_destination(value):
+            if not isinstance(value, str) or not source_base_url:
+                return value
+            return urllib.parse.urljoin(source_base_url, value)
 
         for element in source_root.find_all(
             ["a", "area", "form", "button", "input"]
         ):
             if not is_source_action_available(element):
                 continue
-            destinations = action_element_destinations(element, source_root)
+            destinations = tuple(
+                resolve_destination(destination)
+                for destination in action_element_destinations(element, source_root)
+            )
             if element.name in {"a", "area"}:
                 for destination in destinations:
                     _append_source_value(allowed_urls, destination)
@@ -725,6 +793,7 @@ def generate_redesign(
     image_contract = _redesign_image_contract(site_json)
     site_name = site_json.get("site", {}).get("name") or "Website"
     contact_contract = _redesign_contact_contract(site_json)
+    service_location_contract = _redesign_service_location_contract(site_json)
     action_url_contract = _redesign_action_url_contract(
         site_json,
         contact_contract,
@@ -777,6 +846,7 @@ text, HTML head metadata, or unresolved template token.
             allowed_class_names=homepage_classes,
             required_exposed_values=(("site_name", site_name),),
             source_contacts=contact_contract,
+            expected_service_locations=service_location_contract,
             expected_images=image_contract,
             expected_action_urls=action_url_contract,
             required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
@@ -821,8 +891,9 @@ def generate_interior_page(
         content_source = "fetched-page" if page_url else "provided-source"
     elif page_url:
         print(f"[*] Fetching interior page content from {page_url}...")
-        source_content = fetch_and_clean_html(
+        source_content, page_url = fetch_and_clean_html(
             page_url,
+            include_source_url=True,
             required_origin=page_url,
         )
         content_source = "fetched-page"
@@ -838,10 +909,12 @@ def generate_interior_page(
 
     site_name = site_json.get("site", {}).get("name") or "Website"
     contact_contract = _redesign_contact_contract(site_json)
+    service_location_contract = _redesign_service_location_contract(site_json)
     action_url_contract = _redesign_action_url_contract(
         site_json,
         contact_contract,
         source_content=source_content,
+        source_url=page_url,
         extra_urls=(page_url,),
     )
         
@@ -889,6 +962,7 @@ SOURCE CONTENT:
             allowed_class_names=template_classes,
             required_exposed_values=(("site_name", site_name),),
             source_contacts=contact_contract,
+            expected_service_locations=service_location_contract,
             expected_images=image_contract,
             expected_action_urls=action_url_contract,
             required_class_counts=REQUIRED_FOOTER_CLASS_COUNTS,
@@ -910,8 +984,9 @@ def _generate_contact_page(site_json, contact_page, theme, generation_config):
     contact_url = contact_page.get("url")
     if contact_page.get("fetchable") is True and contact_url:
         try:
-            contact_source = fetch_and_clean_html(
+            contact_source, fetched_contact_url = fetch_and_clean_html(
                 contact_url,
+                include_source_url=True,
                 required_origin=contact_url,
             )
         except Exception as error:
@@ -921,7 +996,7 @@ def _generate_contact_page(site_json, contact_page, theme, generation_config):
             return generate_interior_page(
                 site_json,
                 "contact",
-                page_url=contact_url,
+                page_url=fetched_contact_url,
                 source_content=contact_source,
                 theme=theme,
                 generation_config=generation_config,

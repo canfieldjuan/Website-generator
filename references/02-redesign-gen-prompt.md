@@ -183,19 +183,19 @@ does, where it operates, and what to do next without scrolling.
 
 Hero section structure (always in this order):
 1. **Full-bleed hero image section** — If the JSON contains ANY image with context='hero' or 'background', you MUST render it using BOTH the `dual-cta-hero` AND `hero-fullbleed` CSS classes on the section element, with the image as an inline `style="background-image: url('[URL]')"`. The `hero-fullbleed` class handles the overlay and min-height automatically — all text will be white. This is NON-NEGOTIABLE — the hero must be a visual, image-driven section.
-2. Headline = [Primary Service or Value] + [Location]. Keep it under 8 words.
-   Example: "Drain Cleaning in Effingham, IL" when "Drain Cleaning" is a
-   source-owned service, or "Acme Plumbing — Effingham, IL" from the grounded
-   business name and location.
+2. Keep the headline under 8 words. Use one complete source-owned assertion
+   only when that assertion already relates a service to a location. Otherwise
+   use the grounded business name plus `site.location`, for example
+   "Acme Plumbing — Effingham, IL".
    The headline is derived. Do NOT use `site.tagline` verbatim as the headline if
-   the tagline is a mission statement. Build the headline from the most specific
-   grounded service in `sections[]` plus `site.location`. If no grounded service
-   exists, use `site.name` plus `site.location`; do not substitute `site.type` as
-   a claimed service. The tagline rarely makes a good headline.
+   the tagline is a mission statement. Never combine a service found in one field
+   with a location found in another field; their separate presence does not prove
+   service coverage. Do not substitute `site.type` as a claimed service. The
+   tagline rarely makes a good headline.
 3. Subheadline = one concrete outcome statement -- what the visitor GETS, not what
    the business BELIEVES. Must NOT echo the headline's key phrase.
-   - CORRECT: Join exact service names and a source-owned location without adding
-     a response-time, price, outcome, or availability promise.
+   - CORRECT: Reuse one complete source-owned service-and-location assertion
+     without shortening, expanding, or recombining it.
    - CORRECT: Reuse one complete source-owned outcome or coverage line verbatim.
    - WRONG: "Working together as a team to provide dedicated advocacy." (this is a mission statement, not a benefit)
    - WRONG: Any tagline that starts with "We believe", "Our mission", or "Committed to"
@@ -610,7 +610,8 @@ Before outputting, verify:
 - [ ] Ticker present only if site has news/alerts content
 - [ ] Logo visible in nav (with text fallback)
 - [ ] Brand colors are recognizable from the original site
-- [ ] Above-the-fold shows headline (service + location) and dual CTAs; an
+- [ ] Above-the-fold shows a business-name/location headline, or one complete
+      source-owned service/location assertion, plus dual CTAs; an
       evidence-backed trust strip is also visible there when one exists
 - [ ] Dual CTA pattern matches conversion_profile.urgency_type
 - [ ] CTA labels are exact admitted source labels or bounded capability-neutral
