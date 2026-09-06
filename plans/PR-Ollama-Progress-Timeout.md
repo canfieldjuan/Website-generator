@@ -110,7 +110,9 @@ Ollama clients cannot be required to participate.
 - User-interface progress rendering is separate; this slice makes the provider
   transport progress-aware and bounded.
 
-## Historical verification
+## Verification
+
+### Historical evidence
 
 Initial local evidence, recorded 2026-09-06 against base
 `826f0c8919615d4ed2849ebed8fb511bc6bc994b` plus only the four declared working
@@ -225,7 +227,7 @@ Current shared-stream evidence, gathered from the final working tree based on
   the output is byte-identical to the fresh rendered spot-check at
   `/dev/shm/website-generator-pr46-fixture-final-read1.png`.
 
-## Current revision-bound evidence
+### Current revision-bound evidence
 
 Commit `3c820de4b1250ef2c4b87e660b52189e9b099554` preserves one absolute
 inactivity deadline across connect, request write, response headers, and the
