@@ -1240,6 +1240,68 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "source phone"):
             validate_site_analysis(reverse_grouped_fax, reverse_grouped_source)
 
+        for separator in (".", ";"):
+            prefix_then_postfix_fax = (
+                "<h1>Acme Cleaning</h1><p>"
+                f"Phone: 217-555-0199{separator} "
+                "217-555-0100 or 217-555-0101 (fax)</p>"
+            )
+            self.assertEqual(
+                validate_site_analysis(grouped_phone, prefix_then_postfix_fax),
+                grouped_phone,
+            )
+            for fax_number in ("217-555-0100", "217-555-0101"):
+                fax_document = copy.deepcopy(base_phone)
+                fax_document["site"]["contact"]["phone"] = fax_number
+                with (
+                    self.subTest(
+                        separator=separator,
+                        prefix_then_postfix_fax_number=fax_number,
+                    ),
+                    self.assertRaisesRegex(SiteExtractionError, "source phone"),
+                ):
+                    validate_site_analysis(
+                        fax_document,
+                        prefix_then_postfix_fax,
+                    )
+
+            prefix_then_postfix_phone = (
+                "<h1>Acme Cleaning</h1><p>"
+                f"Fax: 217-555-0199{separator} "
+                "217-555-0100 or 217-555-0101 (phone)</p>"
+            )
+            with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+                validate_site_analysis(grouped_phone, prefix_then_postfix_phone)
+            for phone_number in ("217-555-0100", "217-555-0101"):
+                phone_document = copy.deepcopy(base_phone)
+                phone_document["site"]["contact"]["phone"] = phone_number
+                self.assertEqual(
+                    validate_site_analysis(
+                        phone_document,
+                        prefix_then_postfix_phone,
+                    ),
+                    phone_document,
+                )
+
+        for ambiguous_roles in (
+            "Phone: 217-555-0100 or 217-555-0101 (fax)",
+            "Fax: 217-555-0100 or 217-555-0101 (phone)",
+        ):
+            for ambiguous_number in ("217-555-0100", "217-555-0101"):
+                ambiguous_document = copy.deepcopy(base_phone)
+                ambiguous_document["site"]["contact"]["phone"] = ambiguous_number
+                with (
+                    self.subTest(
+                        ambiguous_roles=ambiguous_roles,
+                        ambiguous_number=ambiguous_number,
+                    ),
+                    self.assertRaisesRegex(SiteExtractionError, "source phone"),
+                ):
+                    validate_site_analysis(
+                        ambiguous_document,
+                        f"<h1>Acme Cleaning</h1><p>{ambiguous_roles}</p>",
+                    )
+
         for shared_fax in (
             "Fax: 217-555-0100 or 217-555-0101",
             "217-555-0100 or 217-555-0101 (fax)",

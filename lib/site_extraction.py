@@ -770,11 +770,39 @@ def _contact_occurrence_is_noncallable(
 ) -> bool:
     """Return whether the owning role in this bounded assertion is non-callable."""
     occurrence_end = start + length
-    roles = tuple(_PHONE_ROLE_PATTERN.finditer(text))
+    all_roles = tuple(_PHONE_ROLE_PATTERN.finditer(text))
+    all_numbers = tuple(_PHONE_PATTERN.finditer(text))
+    protected_spans = tuple(
+        (match.start(), match.end()) for match in (*all_roles, *all_numbers)
+    )
+    clause_breaks = tuple(
+        match.start()
+        for match in _SENTENCE_BREAK_PATTERN.finditer(text)
+        if not any(
+            protected_start <= match.start() < protected_end
+            for protected_start, protected_end in protected_spans
+        )
+    )
+    clause_start = max(
+        (boundary + 1 for boundary in clause_breaks if boundary < start),
+        default=0,
+    )
+    clause_end = min(
+        (boundary for boundary in clause_breaks if boundary >= occurrence_end),
+        default=len(text),
+    )
+    roles = tuple(
+        role
+        for role in all_roles
+        if role.start() >= clause_start and role.end() <= clause_end
+    )
     if not roles:
         return False
-
-    numbers = tuple(_PHONE_PATTERN.finditer(text))
+    numbers = tuple(
+        number
+        for number in all_numbers
+        if number.start() >= clause_start and number.end() <= clause_end
+    )
 
     def span_distance(
         first_start: int,
@@ -824,7 +852,16 @@ def _contact_occurrence_is_noncallable(
     if following is not None and not is_prefix_role(following):
         governed_roles.append(following)
     if not governed_roles:
-        return False
+        return any(
+            role.group("role").casefold() in {"fax", "facsimile"}
+            for role in roles
+        )
+    governed_role_kinds = {
+        role.group("role").casefold() in {"fax", "facsimile"}
+        for role in governed_roles
+    }
+    if len(governed_role_kinds) > 1:
+        return True
     owner = min(
         governed_roles,
         key=lambda role: span_distance(
