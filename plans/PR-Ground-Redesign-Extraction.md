@@ -399,9 +399,9 @@ business-specific claims.
 - Issue #46 was not reproduced: the full local request completed. It remains a
   separate open issue because one successful run does not resolve its historical
   stall.
-- `bash scripts/local_pr_review.sh` and final-head GitHub/review reconciliation
-  follow on the plan-only descendant so evidence is not claimed against a dirty
-  or superseded head.
+- `bash scripts/local_pr_review.sh origin/main` passed on the clean plan-only
+  descendant. Final-head GitHub/review reconciliation follows after publication
+  so it is not claimed against an unpublished or superseded head.
 
 ### Historical evidence (earlier revisions; not final-head proof)
 
