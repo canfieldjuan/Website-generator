@@ -24,7 +24,7 @@ continue beyond that interval when Ollama is actively streaming response chunks.
 The existing total generation ceiling remains independent and authoritative.
 
 This four-file slice necessarily exceeds the repository's 400-line soft cap:
-the final diff is +832 / -28. The native stream decoder is a new
+the final diff is +933 / -29. The native stream decoder is a new
 trusted provider boundary, and splitting its malformed-frame, terminal,
 size-limit, inactivity, and total-deadline regressions into a later PR would
 ship that boundary without its required negative proof.
@@ -133,7 +133,7 @@ files:
 - Focused timeout and exact byte-boundary regressions passed: 5 tests, 0
   failures. An earlier complete generation-module run passed 150 tests. After
   the deadline-aware stream-reader correction, the final full repository suite
-  passed: 297 tests, 34 skipped, 0 failures; log:
+  passed: 298 tests, 34 skipped, 0 failures; log:
   `/dev/shm/website-generator-pr46-full-tests.log`.
 - `python -m ruff check lib/generation.py tests/test_generation.py --ignore F401`,
   `python -m compileall -q lib/generation.py tests/test_generation.py`, and
@@ -172,9 +172,24 @@ the 71,983-byte artifact again had SHA-256
 is byte-identical to the rendered artifact. Both scans again returned status 1.
 Log: `/dev/shm/website-generator-pr46-fixture-final-bounded.log`.
 
+Raw-NDJSON correction evidence: the producer now consumes 64 KiB raw chunks and
+assembles newline-delimited frames under a bounded raw-frame ceiling before
+enqueueing them. Boundary tests admit an exactly-maximal frame, reject one byte
+over, and preserve the existing exactly-2-MiB decoded Unicode response even
+when JSON escaping expands its wire representation. The exact-reader fixture
+ran from `2026-09-06T10:58:09-05:00` through
+`2026-09-06T10:59:25-05:00` with exit status 0 and changed the artifact
+timestamp from `1788709728` to `1788710365`. The resulting 71,970-byte artifact
+has SHA-256
+`098c17edbe569afe7bbfc7286718e9d2b8e3b2b384592f4501818ba1a0a6a43a`;
+both required scans returned status 1. A 3,000-millisecond virtual-time Chrome
+render showed the header, hero, verified phone/CTA, coverage prompt, and service
+cards. Screenshot: `/dev/shm/website-generator-pr46-fixture-final-raw-delayed.png`;
+log: `/dev/shm/website-generator-pr46-fixture-final-raw.log`.
+
 ## Estimated diff size
 
-Actual: four declared files, +832 / -28. The stream decoder and
+Actual: four declared files, +933 / -29. The stream decoder and
 its negative-path tests are indivisible because streaming changes the trusted
 response boundary; the final line count is secondary to keeping that transport
 boundary and its negative cases together.

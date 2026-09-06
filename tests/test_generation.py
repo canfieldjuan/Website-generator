@@ -26,6 +26,8 @@ from lib.generation import (
     DEFAULT_LOCAL_TIMEOUT_SECONDS,
     DEFAULT_MAX_OUTPUT_TOKENS,
     LOCAL_CONTEXT_SAFETY_TOKENS,
+    LOCAL_STREAM_CHUNK_BYTES,
+    MAX_LOCAL_STREAM_FRAME_BYTES,
     MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS,
     MAX_SHORT_TEXT_OUTPUT_TOKENS,
     MAX_GENERATED_BODY_BYTES,
@@ -200,6 +202,7 @@ class FakeLocalResponse:
         *,
         json_error=None,
         stream_lines=None,
+        stream_chunks=None,
         stream_error=None,
         status_error=None,
         status_code=200,
@@ -207,6 +210,7 @@ class FakeLocalResponse:
         self.payload = payload
         self.json_error = json_error
         self.stream_lines = stream_lines
+        self.stream_chunks = stream_chunks
         self.stream_error = stream_error
         self.status_error = status_error
         self.status_code = status_code
@@ -235,6 +239,21 @@ class FakeLocalResponse:
             return
         yield json.dumps(self.payload).encode("utf-8")
 
+    def iter_content(self, *, chunk_size):
+        if self.stream_error:
+            raise self.stream_error
+        if self.stream_chunks is not None:
+            source_chunks = self.stream_chunks
+        elif self.stream_lines is not None:
+            source_chunks = tuple(line + b"\n" for line in self.stream_lines)
+        elif self.json_error:
+            source_chunks = (b"not-json\n",)
+        else:
+            source_chunks = (json.dumps(self.payload).encode("utf-8") + b"\n",)
+        for source_chunk in source_chunks:
+            for offset in range(0, len(source_chunk), chunk_size):
+                yield source_chunk[offset : offset + chunk_size]
+
     def close(self):
         self.close_calls += 1
         self.closed = True
@@ -257,6 +276,7 @@ class FakeLocalClient:
         prompt_post_error=None,
         chat_post_error=None,
         chat_stream_lines=None,
+        chat_stream_chunks=None,
         chat_stream_error=None,
         health_status_code=200,
         models_status_code=200,
@@ -296,6 +316,7 @@ class FakeLocalClient:
             else chat_payload,
             json_error=chat_json_error,
             stream_lines=chat_stream_lines,
+            stream_chunks=chat_stream_chunks,
             stream_error=chat_stream_error,
             status_error=chat_status_error,
             status_code=chat_status_code,
@@ -895,14 +916,14 @@ class ProviderBoundaryTests(unittest.TestCase):
                 self.extra_frames_produced = 0
                 self.finished = threading.Event()
 
-            def iter_lines(self):
+            def iter_content(self, *, chunk_size):
                 try:
-                    yield b"not-json"
+                    yield b"not-json\n"
                     for _ in range(1000):
                         self.extra_frames_produced += 1
                         yield json.dumps(
                             {"message": {"content": "x"}, "done": False}
-                        ).encode("utf-8")
+                        ).encode("utf-8") + b"\n"
                 finally:
                     self.finished.set()
 
@@ -921,6 +942,39 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertTrue(client.chat_response.finished.wait(timeout=0.5))
         self.assertLess(client.chat_response.extra_frames_produced, 1000)
         self.assertEqual(client.chat_response.close_calls, 1)
+
+    def test_local_stream_bounds_raw_frame_before_ndjson_assembly(self):
+        terminal_payload = local_chat_payload()
+        terminal = json.dumps(terminal_payload).encode("utf-8")
+        exact_frame = terminal + b" " * (
+            MAX_LOCAL_STREAM_FRAME_BYTES - len(terminal)
+        )
+        accepted = FakeLocalClient(chat_stream_chunks=(exact_frame + b"\n",))
+        generated = generate_text(
+            config(),
+            system_prompt="system",
+            user_parts=(PromptPart("input"),),
+            temperature=0.4,
+            client=accepted,
+        )
+        self.assertEqual(generated.content, terminal_payload["message"]["content"])
+        self.assertEqual(
+            len(exact_frame),
+            MAX_LOCAL_STREAM_FRAME_BYTES,
+        )
+        self.assertEqual(LOCAL_STREAM_CHUNK_BYTES, 64 * 1024)
+
+        rejected = FakeLocalClient(
+            chat_stream_chunks=(b"x" * (MAX_LOCAL_STREAM_FRAME_BYTES + 1),)
+        )
+        with self.assertRaisesRegex(GenerationResponseError, "oversized stream frame"):
+            generate_text(
+                config(),
+                system_prompt="system",
+                user_parts=(PromptPart("input"),),
+                temperature=0.4,
+                client=rejected,
+            )
 
     def test_local_request_rejects_reasoning_or_tools_in_any_stream_frame(self):
         invalid_messages = (
@@ -1032,9 +1086,9 @@ class ProviderBoundaryTests(unittest.TestCase):
         gate = threading.Event()
 
         class BlockingResponse(FakeLocalResponse):
-            def iter_lines(self):
+            def iter_content(self, *, chunk_size):
                 gate.wait()
-                yield json.dumps(local_chat_payload()).encode("utf-8")
+                yield json.dumps(local_chat_payload()).encode("utf-8") + b"\n"
 
             def close(self):
                 super().close()
@@ -1073,9 +1127,9 @@ class ProviderBoundaryTests(unittest.TestCase):
         gate = threading.Event()
 
         class BlockingResponse(FakeLocalResponse):
-            def iter_lines(self):
+            def iter_content(self, *, chunk_size):
                 gate.wait()
-                yield json.dumps(local_chat_payload()).encode("utf-8")
+                yield json.dumps(local_chat_payload()).encode("utf-8") + b"\n"
 
             def close(self):
                 super().close()

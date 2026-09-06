@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Iterator
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import requests
@@ -36,12 +36,14 @@ DEFAULT_LOCAL_TIMEOUT_SECONDS = 7200.0
 DEFAULT_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS = 300.0
 MAX_LOCAL_NO_PROGRESS_TIMEOUT_SECONDS = 900.0
 LOCAL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
+LOCAL_STREAM_CHUNK_BYTES = 64 * 1024
 # Non-HTML generation keeps the historical ceiling. HTML callers apply the
 # tighter body-only ceiling before trusted code assembles the final document.
 DEFAULT_MAX_OUTPUT_TOKENS = 65536
 MAX_GENERATED_BODY_TOKENS = 8192
 MAX_SHORT_TEXT_OUTPUT_TOKENS = 4096
 MAX_HTML_BYTES = 2 * 1024 * 1024
+MAX_LOCAL_STREAM_FRAME_BYTES = MAX_HTML_BYTES * 6 + LOCAL_STREAM_CHUNK_BYTES
 MAX_GENERATED_BODY_BYTES = 512 * 1024
 SUPPORTED_PROVIDERS = frozenset(("local", "openrouter"))
 HOMEPAGE_SHARED_PAGE_CLASSES = frozenset(("page-wrap",))
@@ -844,6 +846,35 @@ def _local_no_progress_error(
     )
 
 
+def _iter_bounded_local_stream_lines(response: Any) -> Iterator[bytes]:
+    pending = bytearray()
+    for chunk in response.iter_content(chunk_size=LOCAL_STREAM_CHUNK_BYTES):
+        if not chunk:
+            continue
+        if not isinstance(chunk, bytes):
+            raise GenerationResponseError(
+                "Local generation provider returned non-byte stream data."
+            )
+        pending.extend(chunk)
+        while True:
+            newline = pending.find(b"\n")
+            if newline < 0:
+                break
+            if newline > MAX_LOCAL_STREAM_FRAME_BYTES:
+                raise GenerationResponseError(
+                    "Local generation provider returned an oversized stream frame."
+                )
+            raw_line = bytes(pending[:newline])
+            del pending[: newline + 1]
+            yield raw_line
+        if len(pending) > MAX_LOCAL_STREAM_FRAME_BYTES:
+            raise GenerationResponseError(
+                "Local generation provider returned an oversized stream frame."
+            )
+    if pending:
+        yield bytes(pending)
+
+
 def _read_local_chat_stream(
     response: Any,
     *,
@@ -868,7 +899,7 @@ def _read_local_chat_stream(
 
     def pump_stream() -> None:
         try:
-            for raw_line in response.iter_lines():
+            for raw_line in _iter_bounded_local_stream_lines(response):
                 if not emit(("line", raw_line)):
                     return
         except Exception as exc:
