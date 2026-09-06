@@ -468,8 +468,8 @@ _PHONE_EXTENSION_SUFFIX_PATTERN = re.compile(
     r"\s*(?:x|ext\.?)\s*\d+\s*$",
     re.I,
 )
-_NONCALLABLE_PHONE_PREFIX_PATTERN = re.compile(
-    r"\b(?:fax|facsimile)(?:\s+(?:line|number))?\s*[:\-–—]?\s*$",
+_PHONE_ROLE_PATTERN = re.compile(
+    r"\b(?P<role>fax|facsimile|phone|telephone|mobile|cell|call)\b",
     re.I,
 )
 _CSS_URL_PATTERN = re.compile(r"url\(\s*['\"]?([^)'\"\s]+)", re.I)
@@ -764,7 +764,13 @@ def _contact_occurrence_is_negated(text: str, start: int, length: int) -> bool:
 
 def _contact_occurrence_is_noncallable(text: str, start: int) -> bool:
     """Return whether the nearest source field marks a number as non-callable."""
-    return _NONCALLABLE_PHONE_PREFIX_PATTERN.search(text[:start]) is not None
+    preceding = text[:start]
+    sentence_start = max(
+        (match.end() for match in _SENTENCE_BREAK_PATTERN.finditer(preceding)),
+        default=0,
+    )
+    roles = tuple(_PHONE_ROLE_PATTERN.finditer(preceding[sentence_start:]))
+    return bool(roles and roles[-1].group("role").casefold() in {"fax", "facsimile"})
 
 
 def _contact_destination(value: str) -> tuple[str, str] | None:
@@ -1173,6 +1179,55 @@ def _source_form_owner(
     return control.find_parent("form")
 
 
+def action_element_declared_destinations(element: Tag) -> tuple[str, ...]:
+    """Return destinations explicitly declared by one browser action element."""
+    tag_name = element.name.casefold()
+    if tag_name in {"a", "area"}:
+        attributes = ("href", "xlink:href")
+    elif tag_name == "form":
+        attributes = ("action",)
+    elif tag_name in {"button", "input"}:
+        attributes = ("formaction",)
+    else:
+        return ()
+    return tuple(
+        value
+        for attribute in attributes
+        if isinstance((value := element.get(attribute)), str)
+    )
+
+
+def is_submit_action_element(element: Tag) -> bool:
+    """Return whether one button or input submits its owning form."""
+    tag_name = element.name.casefold()
+    control_type = str(element.get("type") or "").casefold()
+    return (
+        tag_name == "button" and control_type not in {"button", "reset"}
+        or tag_name == "input" and control_type in {"submit", "image"}
+    )
+
+
+def action_element_destinations(
+    element: Tag,
+    root: BeautifulSoup | Tag,
+) -> tuple[str, ...]:
+    """Return the browser-effective destinations owned by one action element."""
+    tag_name = element.name.casefold()
+    if tag_name in {"a", "area", "form"}:
+        return action_element_declared_destinations(element)
+    if tag_name not in {"button", "input"} or not is_submit_action_element(element):
+        return ()
+
+    owner = _source_form_owner(element, root)
+    if owner is None:
+        return ()
+    if element.has_attr("formaction"):
+        formaction = element.get("formaction")
+        return (formaction,) if isinstance(formaction, str) else ()
+    action = owner.get("action")
+    return (action,) if isinstance(action, str) else ()
+
+
 def _source_form_control_label(
     control: Tag,
     root: BeautifulSoup | Tag,
@@ -1213,6 +1268,55 @@ def _source_form_control_label(
             control.get("placeholder") or control.get("title") or ""
         ).strip()
     return _normalize_text(accessible_label)
+
+
+def _source_form_submitters(
+    form: Tag,
+    root: BeautifulSoup | Tag,
+) -> tuple[Tag, ...]:
+    submitters: list[Tag] = []
+    for candidate in root.find_all(["button", "input"]):
+        if not is_source_action_available(candidate):
+            continue
+        if is_submit_action_element(candidate) and _source_form_owner(candidate, root) is form:
+            submitters.append(candidate)
+    return tuple(submitters)
+
+
+def _source_form_action_url(
+    form: Tag,
+    root: BeautifulSoup | Tag,
+    *,
+    resolution_base_url: str | None,
+    source_url: str | None,
+) -> str | None:
+    submitters = _source_form_submitters(form, root)
+    raw_actions: list[str | None]
+    if submitters:
+        raw_actions = [
+            next(iter(action_element_destinations(submitter, root)), source_url)
+            for submitter in submitters
+        ]
+    else:
+        raw_actions = [
+            next(iter(action_element_declared_destinations(form)), source_url)
+        ]
+
+    actions: list[str] = []
+    for raw_action in raw_actions:
+        action_candidate = urljoin(
+            resolution_base_url or "",
+            html.unescape(raw_action).strip() if isinstance(raw_action, str) else "",
+        )
+        parsed_action = urlsplit(action_candidate)
+        if (
+            parsed_action.scheme.casefold() not in {"http", "https"}
+            or not parsed_action.hostname
+        ):
+            return None
+        if action_candidate not in actions:
+            actions.append(action_candidate)
+    return actions[0] if len(actions) == 1 else None
 
 
 def _marked_identity_text_parts(
@@ -1607,6 +1711,7 @@ class SourceEvidence:
             "div",
             "figure",
             "li",
+            "main",
             "section",
             "td",
             "th",
@@ -1688,7 +1793,7 @@ class SourceEvidence:
                         break
                     if (
                         parent.name in _INDEPENDENT_RECORD_TAGS
-                        or parent.name in {"body", "html"}
+                        or parent.name == "html"
                     ):
                         siblings = []
                         break
@@ -2008,20 +2113,11 @@ class SourceEvidence:
                 if _source_form_owner(control, soup) is form
                 if (label := _source_form_control_label(control, soup))
             )
-            raw_action = form.get("action")
-            if isinstance(raw_action, str) and raw_action.strip():
-                action_candidate = urljoin(
-                    resolution_base_url or "",
-                    html.unescape(raw_action).strip(),
-                )
-            else:
-                action_candidate = source_url
-            parsed_action = urlsplit(action_candidate or "")
-            action_url = (
-                action_candidate
-                if parsed_action.scheme.casefold() in {"http", "https"}
-                and parsed_action.hostname
-                else None
+            action_url = _source_form_action_url(
+                form,
+                soup,
+                resolution_base_url=resolution_base_url,
+                source_url=source_url,
             )
             forms.append(SourceFormEvidence(labels, action_url))
 

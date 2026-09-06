@@ -16,6 +16,7 @@ from lib.images import generate_image_openrouter
 from lib.deploy import deploy_to_vercel
 from lib.email import send_pitch_email
 from lib.site_extraction import (
+    action_element_destinations,
     action_element_labels,
     css_image_urls,
     SiteExtractionError,
@@ -36,7 +37,6 @@ from lib.generation import (
     PromptPart,
     ServiceLocationAdmissionContract,
     SourceContactAdmissionContract,
-    action_element_destinations,
     action_url_contract_instruction,
     assemble_generated_html,
     atomic_write_text,

@@ -22,9 +22,12 @@ from openai import DefaultHttpxClient, OpenAI
 from lib.clients import OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 from lib.site_extraction import (
     SourceEvidence,
+    action_element_declared_destinations,
+    action_element_destinations,
     action_element_labels,
     is_render_suppressed_element,
     is_labelled_action_element,
+    is_submit_action_element,
 )
 
 
@@ -2111,57 +2114,6 @@ def _validate_action_pair_membership(
         raise GeneratedBodyError("Action pair contract exceeds its label authority.")
 
 
-def _action_element_declared_destinations(element: Tag) -> tuple[str, ...]:
-    tag_name = element.name.casefold()
-    if tag_name in {"a", "area"}:
-        attributes = ("href", "xlink:href")
-    elif tag_name == "form":
-        attributes = ("action",)
-    elif tag_name in {"button", "input"}:
-        attributes = ("formaction",)
-    else:
-        return ()
-    return tuple(
-        value
-        for attribute in attributes
-        if isinstance((value := element.get(attribute)), str)
-    )
-
-
-def action_element_destinations(element: Tag, root: Tag) -> tuple[str, ...]:
-    """Return the browser-effective destinations owned by one action element."""
-    tag_name = element.name.casefold()
-    if tag_name in {"a", "area", "form"}:
-        return _action_element_declared_destinations(element)
-    if tag_name not in {"button", "input"}:
-        return ()
-
-    if not _is_submit_action_element(element):
-        return ()
-
-    form_id = element.get("form")
-    if isinstance(form_id, str) and form_id.strip():
-        owner = root.find("form", id=form_id.strip())
-    else:
-        owner = element.find_parent("form")
-    if owner is None:
-        return ()
-    if element.has_attr("formaction"):
-        formaction = element.get("formaction")
-        return (formaction,) if isinstance(formaction, str) else ()
-    action = owner.get("action")
-    return (action,) if isinstance(action, str) else ()
-
-
-def _is_submit_action_element(element: Tag) -> bool:
-    tag_name = element.name.casefold()
-    control_type = str(element.get("type") or "").casefold()
-    return (
-        tag_name == "button" and control_type not in {"button", "reset"}
-        or tag_name == "input" and control_type in {"submit", "image"}
-    )
-
-
 _NEUTRAL_ACTION_LABELS = frozenset(
     {
         "back",
@@ -2266,7 +2218,7 @@ def _validate_action_urls(
     for element in (body_root, *body_root.find_all(True)):
         tag_name = element.name.casefold()
         is_labelled_action = is_labelled_action_element(element)
-        declared_destinations = _action_element_declared_destinations(element)
+        declared_destinations = action_element_declared_destinations(element)
         if (
             tag_name != "form"
             and not is_labelled_action
@@ -2282,7 +2234,7 @@ def _validate_action_urls(
             raise GeneratedBodyError(
                 "Generated body form must declare one admitted action endpoint."
             )
-        if _is_submit_action_element(element) and not element_values:
+        if is_submit_action_element(element) and not element_values:
             raise GeneratedBodyError(
                 "Generated body submit control has no admitted effective form action."
             )

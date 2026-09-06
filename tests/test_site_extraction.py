@@ -746,6 +746,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             complete_wrapped_heading_scope,
         )
 
+        for shell in (
+            "<main><h3>Free Estimates</h3><p>Members only.</p></main>",
+        ):
+            shell_scope = '<meta property="og:site_name" content="Acme">' + shell
+            with (
+                self.subTest(shell=shell),
+                self.assertRaisesRegex(SiteExtractionError, "assertion context"),
+            ):
+                validate_site_analysis(shortened, shell_scope)
+            self.assertEqual(
+                validate_site_analysis(complete_wrapped_heading_scope, shell_scope),
+                complete_wrapped_heading_scope,
+            )
+
         list_owned_scope = (
             '<meta property="og:site_name" content="Acme"><div>'
             "<h3>Free Estimates</h3><ul><li>Members only.</li></ul></div>"
@@ -1099,6 +1113,11 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         with self.assertRaisesRegex(SiteExtractionError, "source phone"):
             validate_site_analysis(
                 base_phone,
+                "<h1>Acme Cleaning</h1><p>Our fax is 217-555-0100</p>",
+            )
+        with self.assertRaisesRegex(SiteExtractionError, "source phone"):
+            validate_site_analysis(
+                base_phone,
                 (
                     "<h1>Acme Cleaning</h1><p>"
                     '<a href="tel:217-555-0100">Fax</a></p>'
@@ -1108,6 +1127,13 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(
                 base_phone,
                 "<h1>Acme Cleaning</h1><p>Phone: 217-555-0100 ext. 42</p>",
+            ),
+            base_phone,
+        )
+        self.assertEqual(
+            validate_site_analysis(
+                base_phone,
+                "<h1>Acme Cleaning</h1><p>Our phone is 217-555-0100</p>",
             ),
             base_phone,
         )
@@ -3576,6 +3602,62 @@ class EnrichmentGroundingTests(unittest.TestCase):
             source_url="https://acme.test/contact",
         )
         self.assertEqual(admitted["form_action"], "https://forms.acme.test/v1/submit")
+
+        submitter_admitted = validate_enrichment_result(
+            {"form_fields": ["Email"]},
+            page_type="contact",
+            source_html=(
+                '<form><label>Email<input name="email"></label>'
+                '<button formaction="/send">Send</button></form>'
+            ),
+            source_url="https://acme.test/contact",
+        )
+        self.assertEqual(submitter_admitted["form_action"], "https://acme.test/send")
+
+        same_endpoint_admitted = validate_enrichment_result(
+            {"form_fields": ["Email"]},
+            page_type="contact",
+            source_html=(
+                '<form action="/send"><label>Email<input name="email"></label>'
+                '<button>Send</button><button formaction="/send">Send another</button>'
+                "</form>"
+            ),
+            source_url="https://acme.test/contact",
+        )
+        self.assertEqual(
+            same_endpoint_admitted["form_action"],
+            "https://acme.test/send",
+        )
+
+        late_submitter_admitted = validate_enrichment_result(
+            {"form_fields": ["Email"]},
+            page_type="contact",
+            source_html=(
+                '<form action="/default"><label>Email<input name="email"></label>'
+                + "".join(
+                    f'<button type="button">Helper {index}</button>'
+                    for index in range(MAX_ITEMS)
+                )
+                + '<button formaction="/late-send">Send</button></form>'
+            ),
+            source_url="https://acme.test/contact",
+        )
+        self.assertEqual(
+            late_submitter_admitted["form_action"],
+            "https://acme.test/late-send",
+        )
+
+        with self.assertRaisesRegex(SiteExtractionError, "one source-owned form endpoint"):
+            validate_enrichment_result(
+                {"form_fields": ["Email"]},
+                page_type="contact",
+                source_html=(
+                    '<form action="/default"><label>Email<input name="email"></label>'
+                    '<button>Send</button>'
+                    '<button formaction="/alternate">Alternate</button></form>'
+                ),
+                source_url="https://acme.test/contact",
+            )
 
         contract = pipeline._redesign_action_url_contract(
             {"site": {"name": "Acme"}, "contact_form": admitted},
