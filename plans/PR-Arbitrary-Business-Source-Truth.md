@@ -108,8 +108,11 @@ and all four supported indirect ARIA reference attributes use the same resolver
 and exact catalog. Native control labels and the complete standard set of
 text-valued ARIA properties come from one shared enumerator used by claim and
 copy admission, including the standards-defined table-header abbreviation.
-Current numeric ARIA values plus native input, meter, and progress values use
-the same source-owned catalog.
+Ordinary native input values use the same source-owned catalog. Generated
+numeric range widgets and ARIA value semantics fail closed because the build
+has no generic source contract that can bind their related label/current/min/max
+meaning; canonical review-score components remain governed by the existing
+review evidence contract.
 The no-radius service-area prompt uses the same exact `Service Area` casing as
 the code-owned catalog.
 
@@ -138,7 +141,7 @@ the code-owned catalog.
 ## Verification
 
 Current implementation evidence is based on commit
-`2988de6fd000519b6cb12e482a97b4d94c801ca8`. The generated artifact and evidence logs are
+`8aebf26f712686571f17f3316c7cdb40a855788e`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -153,7 +156,7 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 395 passed, 34 skipped, 677 subtests passed in 44.26s
+# 395 passed, 34 skipped, 680 subtests passed in 45.18s
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
@@ -178,11 +181,11 @@ Chromium computed-style inspection and direct PNG pixel reads confirmed the
 white page, red gradient hero, visible white hero copy, service grid, and
 page-function content.
 
-After the final text-attribute enumerator change, the same artifact body was
+After the final numeric-semantic guard change, the same artifact body was
 replayed deterministically through the real `generate_build_html()` admission
-path without a model call. Admission passed and produced 70,544 validated bytes
+path without a model call. Admission passed and produced 70,581 validated bytes
 with SHA-256
-`3ca030e6cc0d2cf3befbdc902b1aa2c92ea08b4572c87b4d65e184dfcf00663b`.
+`a8986d4d0651344dbe20c37f4848d16a98946d30577c9eca58e2e934942903da`.
 
 No live OpenRouter request was made; doing so would spend provider credit and
 is unnecessary to prove the provider-independent prompt and admission contract.
@@ -192,7 +195,7 @@ block after this evidence note is committed.
 
 ## Estimated diff size
 
-The current PR diff is 2,250 changed lines across the 11 declared source files
+The current PR diff is 2,293 changed lines across the 11 declared source files
 plus this plan, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
