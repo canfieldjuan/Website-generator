@@ -3916,6 +3916,47 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     {**base, "services": services},
                 )
 
+    def test_prepare_prospect_enforces_representable_service_boundaries(self):
+        base = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+        }
+        accepted_sets = (
+            [f"Service {index}" for index in range(build.MAX_BUILD_SERVICES)],
+            ["x" * build.MAX_BUILD_SERVICE_NAME_CHARS],
+            [f"{index:02d}" + "x" * 73 for index in range(8)],
+        )
+        for services in accepted_sets:
+            with self.subTest(boundary="accepted", services=services):
+                prepared = build.prepare_prospect({**base, "services": services})
+                self.assertEqual(prepared["services"], services)
+
+        rejected_sets = (
+            (
+                [
+                    f"Service {index}"
+                    for index in range(build.MAX_BUILD_SERVICES + 1)
+                ],
+                "at most 12 items",
+            ),
+            (
+                ["x" * (build.MAX_BUILD_SERVICE_NAME_CHARS + 1)],
+                "at most 80 characters each",
+            ),
+            (
+                ["00" + "x" * 74]
+                + [f"{index:02d}" + "x" * 73 for index in range(1, 8)],
+                "at most 600 characters in total",
+            ),
+        )
+        for services, message in rejected_sets:
+            with self.subTest(boundary="rejected", services=services):
+                with self.assertRaisesRegex(ValueError, message):
+                    build.prepare_prospect({**base, "services": services})
+
     def test_uncatalogued_trade_uses_generic_document_colors(self):
         colors = build.resolve_build_document_colors(
             {"business_name": "Test Business", "trade": "roofer"}
@@ -4462,6 +4503,69 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
 
         self.assertIn('aria-valuetext="Services"', html)
+
+    def test_build_generator_rejects_unsupported_accessibility_numeric_values(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        value_surfaces = (
+            '<div role="meter" aria-label="Customer Reviews" '
+            'aria-valuenow="999"></div>',
+            '<meter value="999"></meter>',
+            '<progress value="999"></progress>',
+        )
+
+        for surface in value_surfaces:
+            unsupported = COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero">{surface}</section>',
+            )
+            with self.subTest(surface=surface), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(unsupported)),
+                )
+
+    def test_build_generator_allows_source_owned_accessibility_numeric_values(self):
+        services = ("5",)
+        supported = COMPLETE_BUILD_BODY.replace(
+            COMPLETE_SERVICES_GRID,
+            services_grid(services),
+        ).replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<div role="meter" aria-valuenow="5"></div>'
+            '<meter value="5"></meter>'
+            '<progress value="5"></progress>'
+            '</section>',
+        )
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(services),
+        }
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+
+        self.assertIn('aria-valuenow="5"', html)
+        self.assertIn('<meter value="5">', html)
+        self.assertIn('<progress value="5">', html)
 
     def test_arbitrary_business_hero_fallback_is_business_neutral(self):
         prompt = build.build_hero_prompt(

@@ -95,6 +95,9 @@ BUILD_OUTPUT_ROOT = os.path.join("outputs", "builds")
 EMAIL_DRAFT_ROOT = os.path.join("outputs", "email_drafts")
 BUILD_TEMPERATURE = 0.4
 BUILD_USER_TRUNCATE = 200000
+MAX_BUILD_SERVICES = 12
+MAX_BUILD_SERVICE_NAME_CHARS = 80
+MAX_BUILD_SERVICES_TOTAL_CHARS = 600
 BUILD_FORM_SUBMIT_LABELS = (
     "Send My Request",
     "Get My Estimate",
@@ -767,6 +770,25 @@ def prepare_prospect(prospect, build_date=None):
         " ".join(unicodedata.normalize("NFKC", service).split())
         for service in services
     ]
+    if len(normalized_services) > MAX_BUILD_SERVICES:
+        raise ValueError(
+            f"Prospect JSON services must contain at most {MAX_BUILD_SERVICES} items."
+        )
+    if any(
+        len(service) > MAX_BUILD_SERVICE_NAME_CHARS
+        for service in normalized_services
+    ):
+        raise ValueError(
+            "Prospect JSON service names must contain at most "
+            f"{MAX_BUILD_SERVICE_NAME_CHARS} characters each."
+        )
+    if sum(len(service) for service in normalized_services) > (
+        MAX_BUILD_SERVICES_TOTAL_CHARS
+    ):
+        raise ValueError(
+            "Prospect JSON service names must contain at most "
+            f"{MAX_BUILD_SERVICES_TOTAL_CHARS} characters in total."
+        )
     if len({service.casefold() for service in normalized_services}) != len(
         normalized_services
     ):

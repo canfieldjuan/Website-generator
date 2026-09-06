@@ -303,6 +303,9 @@ DIRECT_USER_FACING_TEXT_ATTRIBUTES = (
     "aria-label",
     "aria-description",
     "aria-valuetext",
+    "aria-valuenow",
+    "aria-valuemin",
+    "aria-valuemax",
     "aria-roledescription",
     "aria-placeholder",
     "aria-braillelabel",
@@ -1925,7 +1928,7 @@ def _direct_user_facing_text_values(element: Tag) -> tuple[str, ...]:
         for attribute in DIRECT_USER_FACING_TEXT_ATTRIBUTES
         if isinstance((value := element.get(attribute)), str) and value
     ]
-    if element.name.casefold() == "input":
+    if element.name.casefold() in {"input", "meter", "progress"}:
         value = element.get("value")
         if isinstance(value, str) and value:
             values.append(value)
