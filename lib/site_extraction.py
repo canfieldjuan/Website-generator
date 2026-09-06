@@ -579,8 +579,15 @@ def _occurrence_is_nonassertive(
     ]
     if _words_contain_restriction(preceding_words + following_words):
         return True
-    if strict_claim and _preceding_clause_scopes_claim(preceding_words):
-        return True
+    if strict_claim:
+        if _preceding_clause_scopes_claim(preceding_words):
+            return True
+        # Asserted facts may omit only a controlled leading request/provider
+        # wrapper. Unknown trailing predicates can narrow, condition, or reverse
+        # the extracted phrase, so they must remain part of the admitted claim.
+        if tuple(preceding_words) == ("not", "only"):
+            return not following_words or following_words[0] != "but"
+        return bool(following_words)
     if not strict_claim and _words_contain_scope_qualifier(preceding_words):
         return True
     return _words_contain_scope_qualifier(following_words)
@@ -1000,6 +1007,49 @@ def _identity_candidates_agree(first: str, second: str) -> bool:
     )
 
 
+def _select_supported_identity_parts(
+    *candidate_channels: Iterable[str],
+) -> tuple[str, ...]:
+    """Select one uniquely best-supported canonical identity across channels."""
+    channels = tuple(
+        tuple(
+            dict.fromkeys(
+                normalized
+                for part in channel
+                if (normalized := _normalize_text(part))
+            )
+        )
+        for channel in candidate_channels
+    )
+    candidates = tuple(dict.fromkeys(part for channel in channels for part in channel))
+    if not candidates:
+        return ()
+
+    support = {
+        candidate: sum(
+            any(_identity_candidates_agree(candidate, part) for part in channel)
+            for channel in channels
+        )
+        for candidate in candidates
+    }
+    strongest = max(support.values())
+    winners: list[str] = []
+    for candidate in candidates:
+        if support[candidate] != strongest or any(
+            _identity_candidates_agree(candidate, winner) for winner in winners
+        ):
+            continue
+        winners.append(candidate)
+    if len(winners) != 1:
+        return ()
+    winner = winners[0]
+    return tuple(
+        part
+        for part in candidates
+        if _identity_candidates_agree(part, winner)
+    )
+
+
 def _heading_owned_fragment(
     heading: Any,
     *,
@@ -1210,6 +1260,7 @@ class SourceEvidence:
         raw_image_pairs: set[tuple[str, str]] = set()
         raw_logo_urls: set[str] = set()
         identity_parts: list[str] = []
+        metadata_identity_parts: list[str] = []
         title_parts: list[str] = []
         h1_parts: list[str] = []
         heading_parts: list[str] = []
@@ -1232,7 +1283,7 @@ class SourceEvidence:
                 meta.get("property") or meta.get("name") or ""
             ).casefold()
             if property_name in {"application-name", "og:site_name"}:
-                identity_parts.extend(_attribute_values(meta.get("content")))
+                metadata_identity_parts.extend(_attribute_values(meta.get("content")))
             metadata_family = property_name.partition(":")[0]
             metadata_values = tuple(_attribute_values(meta.get("content")))
             if property_name in _IMAGE_METADATA_ROOT_PROPERTIES:
@@ -1321,7 +1372,9 @@ class SourceEvidence:
                 identity_parts.extend(_marked_identity_text_parts(element, soup))
 
         explicit_identity_seeds = tuple(
-            segment for part in identity_parts if (segment := _normalize_text(part))
+            segment
+            for part in (*metadata_identity_parts, *identity_parts)
+            if (segment := _normalize_text(part))
         )
         title_identity_parts: list[str] = []
         has_ambiguous_title_identity = False
@@ -1360,7 +1413,11 @@ class SourceEvidence:
         if candidate_h1_parts:
             identity_seeds = tuple(
                 segment
-                for part in (*identity_parts, *title_identity_parts)
+                for part in (
+                    *metadata_identity_parts,
+                    *identity_parts,
+                    *title_identity_parts,
+                )
                 if (segment := _normalize_text(part))
             )
             corroborated_h1_parts = [
@@ -1372,11 +1429,20 @@ class SourceEvidence:
                     for seed in identity_seeds
                 )
             ]
-            identity_parts.extend(
+            h1_identity_parts = (
                 corroborated_h1_parts
                 if identity_seeds
                 else ([] if has_ambiguous_title_identity else candidate_h1_parts[:1])
             )
+        else:
+            h1_identity_parts = []
+
+        admitted_identity_parts = _select_supported_identity_parts(
+            metadata_identity_parts,
+            identity_parts,
+            title_identity_parts,
+            h1_identity_parts,
+        )
 
         form_control_labels: list[str] = []
         for control in soup.find_all(["input", "select", "textarea"], limit=MAX_ITEMS):
@@ -1514,14 +1580,14 @@ class SourceEvidence:
             identity_segments=tuple(
                 dict.fromkeys(
                     segment
-                    for part in identity_parts
+                    for part in admitted_identity_parts
                     if (segment := _normalize_text(part))
                 )
             ),
             identity_exact_segments=tuple(
                 dict.fromkeys(
                     variant
-                    for part in (*title_identity_parts, *identity_parts)
+                    for part in admitted_identity_parts
                     for variant in _identity_canonical_variants(part)
                 )
             ),

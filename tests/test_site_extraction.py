@@ -428,7 +428,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             rhetorical_positive,
         )
 
-        postposed_positive = {
+        shortened_postposed = {
             "site": {"name": "Acme Cleaning"},
             "conversion_profile": {
                 "trust_signals": {"social_proof_lines": ["Free Estimates"]}
@@ -439,14 +439,26 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "Free Estimates are not exclusively available to members",
             "Free Estimates are available without obligation",
             "Free Estimates are available, however financing is not",
+            "Free Estimates are easy to request",
         ):
             with self.subTest(source_text=source_text):
+                with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+                    validate_site_analysis(
+                        shortened_postposed,
+                        f"<h1>Acme Cleaning</h1><p>{source_text}</p>",
+                    )
+                complete_postposed = {
+                    "site": {"name": "Acme Cleaning"},
+                    "conversion_profile": {
+                        "trust_signals": {"social_proof_lines": [source_text]}
+                    },
+                }
                 self.assertEqual(
                     validate_site_analysis(
-                        postposed_positive,
+                        complete_postposed,
                         f"<h1>Acme Cleaning</h1><p>{source_text}</p>",
                     ),
-                    postposed_positive,
+                    complete_postposed,
                 )
 
     def test_claim_text_rejects_questions_conditionals_and_inline_negation(self):
@@ -560,6 +572,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "Maintenance-plan members are eligible for Free Estimates",
             "Free Estimates apply to maintenance-plan members",
             "Maintenance-plan members redeem Free Estimates",
+            "Free Estimates require membership",
         ):
             source = f"<h1>Acme Cleaning</h1><p>{complete_claim}.</p>"
             with (
@@ -580,7 +593,6 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             "We offer Free Estimates",
             "Call for Free Estimates",
             "Call to request Free Estimates",
-            "Free Estimates are easy to request",
         ):
             with self.subTest(unrestricted_source=unrestricted_source):
                 self.assertEqual(
@@ -1035,6 +1047,35 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             validate_site_analysis(verified_identity, conflicting_single_title_source),
             verified_identity,
         )
+
+        conflicting_explicit_metadata = (
+            '<meta name="application-name" content="Customer Portal">'
+            '<meta property="og:site_name" content="Acme Plumbing">'
+            "<title>Acme Plumbing</title><h1>Acme Plumbing</h1>"
+        )
+        self.assertEqual(
+            validate_site_analysis(verified_identity, conflicting_explicit_metadata),
+            verified_identity,
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "identity"):
+            validate_site_analysis(
+                {"site": {"name": "Customer Portal"}},
+                conflicting_explicit_metadata,
+            )
+
+        unresolved_explicit_conflict = (
+            '<meta name="application-name" content="Customer Portal">'
+            '<meta property="og:site_name" content="Acme Plumbing">'
+        )
+        for uncorroborated_name in ("Customer Portal", "Acme Plumbing"):
+            with (
+                self.subTest(uncorroborated_name=uncorroborated_name),
+                self.assertRaisesRegex(SiteExtractionError, "identity"),
+            ):
+                validate_site_analysis(
+                    {"site": {"name": uncorroborated_name}},
+                    unresolved_explicit_conflict,
+                )
 
     def test_pages_to_fetch_derives_fetchability_from_destination(self):
         self.assertTrue(
