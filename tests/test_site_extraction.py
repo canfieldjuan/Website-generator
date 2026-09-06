@@ -685,6 +685,20 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             paragraph_claim,
         )
 
+        nested_blocks = (
+            '<meta property="og:site_name" content="Acme"><div>'
+            "<div>Free Estimates</div><div>Members only</div></div>"
+        )
+        with self.assertRaisesRegex(SiteExtractionError, "assertion context"):
+            validate_site_analysis(shortened, nested_blocks)
+        complete_nested_blocks = {
+            "site": {"name": "Acme", "tagline": "Free Estimates Members only"}
+        }
+        self.assertEqual(
+            validate_site_analysis(complete_nested_blocks, nested_blocks),
+            complete_nested_blocks,
+        )
+
     def test_contact_facts_allow_only_field_owned_presentation_labels(self):
         labeled = {
             "site": {
@@ -2248,6 +2262,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             contract.allowed_urls,
             (
+                "/",
                 "/contact",
                 "/book",
                 "/services",
@@ -2291,6 +2306,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             contract.allowed_pairs,
             (
+                ("Acme Cleaning", "/"),
                 ("Contact", "/contact"),
                 ("Book", "/book"),
                 ("Office", "/services/office"),
@@ -2320,10 +2336,10 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(contract.allowed_urls, ())
+        self.assertEqual(contract.allowed_urls, ("/",))
         self.assertEqual(contract.allowed_form_urls, ())
         self.assertEqual(contract.allowed_labels, ("Acme Cleaning",))
-        self.assertEqual(contract.allowed_pairs, ())
+        self.assertEqual(contract.allowed_pairs, (("Acme Cleaning", "/"),))
 
     def test_generation_action_contract_preserves_every_source_label_surface(self):
         contract = pipeline._redesign_action_url_contract(
@@ -2344,6 +2360,7 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
         self.assertEqual(
             contract.allowed_pairs,
             (
+                ("Acme Cleaning", "/"),
                 ("Contact Us", "/contact"),
                 ("Book Appointment", "/contact"),
             ),
@@ -2359,8 +2376,8 @@ class SiteAnalysisGroundingTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(contract.allowed_urls, ())
-        self.assertEqual(contract.allowed_pairs, ())
+        self.assertEqual(contract.allowed_urls, ("/",))
+        self.assertEqual(contract.allowed_pairs, (("Acme Cleaning", "/"),))
 
     def test_form_endpoint_cannot_be_repurposed_as_link_destination(self):
         with self.assertRaisesRegex(SiteExtractionError, r"cta\.url"):

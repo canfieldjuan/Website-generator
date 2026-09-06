@@ -4749,6 +4749,22 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             html = generator()
             self.assertIn(f'href="{source_url}"', html)
 
+        linked_brand = COMPLETE_PAGE_BODY.replace(
+            "<main>",
+            '<a href="/" class="nav-brand">Current Business</a><main>',
+        )
+        for generator in generators(linked_brand):
+            html = generator()
+            self.assertIn('<a href="/" class="nav-brand">Current Business</a>', html)
+
+        misbound_brand = linked_brand.replace('href="/"', f'href="{source_url}"')
+        for generator in generators(misbound_brand):
+            with self.assertRaisesRegex(
+                GeneratedBodyError,
+                "source-owned action pair",
+            ):
+                generator()
+
         wrong_identity = COMPLETE_PAGE_BODY.replace(
             "Current Business",
             "Invented Business",

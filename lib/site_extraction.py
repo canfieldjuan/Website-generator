@@ -1392,16 +1392,30 @@ class SourceEvidence:
             "th",
         }
         paragraph_claim_tags = {"p", "small"}
-        claim_scope_sibling_tags = set(paragraph_claim_tags)
-        if _group_heading_claims:
-            claim_scope_sibling_tags.update(
-                {"h1", "h2", "h3", "h4", "h5", "h6"}
+        assertion_context_ids = set(context_parts)
+
+        def is_flat_claim_context(element: Any) -> bool:
+            if not isinstance(element, Tag):
+                return False
+            if not _group_heading_claims:
+                return element.name in paragraph_claim_tags
+            return (
+                id(element) in assertion_context_ids
+                and element.name not in _INDEPENDENT_RECORD_TAGS
+                and _assertion_heading_level(element) is None
             )
+
+        def is_claim_scope_context(element: Any) -> bool:
+            return is_flat_claim_context(element) or (
+                _group_heading_claims
+                and _assertion_heading_level(element) is not None
+            )
+
         for context_key, local_parts in context_parts.items():
             context = context_elements[context_key]
             local_segment = _normalize_text(" ".join(local_parts))
             owner_segment = local_segment
-            if isinstance(context, Tag) and context.name in claim_scope_sibling_tags:
+            if is_claim_scope_context(context):
                 parent = context.parent
                 if isinstance(parent, Tag) and parent.name in claim_scope_parent_tags:
                     siblings = [
@@ -1426,8 +1440,7 @@ class SourceEvidence:
                         if heading_level is not None:
                             while (
                                 last + 1 < len(siblings)
-                                and siblings[last + 1].name
-                                in claim_scope_sibling_tags
+                                and is_claim_scope_context(siblings[last + 1])
                             ):
                                 next_sibling = siblings[last + 1]
                                 if _starts_presentation_field(
@@ -1447,8 +1460,7 @@ class SourceEvidence:
                             if not _starts_presentation_field(local_segment):
                                 while (
                                     first > 0
-                                    and siblings[first - 1].name
-                                    in paragraph_claim_tags
+                                    and is_flat_claim_context(siblings[first - 1])
                                 ):
                                     first -= 1
                                     if _starts_presentation_field(
@@ -1457,8 +1469,7 @@ class SourceEvidence:
                                         break
                             while (
                                 last + 1 < len(siblings)
-                                and siblings[last + 1].name
-                                in paragraph_claim_tags
+                                and is_flat_claim_context(siblings[last + 1])
                                 and not _starts_presentation_field(
                                     siblings[last + 1].get_text(" ", strip=True)
                                 )

@@ -118,6 +118,8 @@ analysis may control presentation but may not authorize a visible business claim
 | `PRRT_kwDOTDYaKM6fprAQ`: labeled contact fields discarded adjacent correction owners | A schema-owned presentation label may be omitted, but an unlabeled sibling or trailing qualifier in the same owner may not be discarded. Independently labeled contact fields must remain separate facts. | Exact Location/Address/Hours labels partition field records. A same-element label or exact heading label can wrap its value; unlabeled sibling corrections and same-line trailing qualifiers reject, including across sentence punctuation. | fixed/superseded | `lib/site_extraction.py:548-555,695-713,1374-1438,1813-1896,2047-2070`; `tests/test_site_extraction.py:670-728` |
 | `PRRT_kwDOTDYaKM6fpyOX`: non-identity H1 cards remained outside assertion ownership | Claim ownership is determined by a heading's structural role, not by its tag number or whether identity is sourced elsewhere. | The shared heading-owner classifier covers `h1` through `h6`; an explicit metadata identity plus a claim-bearing H1 cannot drop its following restriction, while the complete H1-owned claim admits. | fixed/superseded | `lib/site_extraction.py:716-722,1394-1445`; `tests/test_site_extraction.py:649-673` |
 | `PRRT_kwDOTDYaKM6fpyOY`: flat heading walks absorbed peer sections | Heading claim ownership must follow the document hierarchy, and paragraph facts must not inherit unrelated heading text. | A heading owns following claim elements only until a same-or-higher peer heading or field boundary. Paragraph/small-text runs remain directional and local, so `Licensed and insured.` under About admits without absorbing the peer Hours section. | fixed/superseded | `lib/site_extraction.py:716-722,1394-1466`; `tests/test_site_extraction.py:675-686` |
+| `PRRT_kwDOTDYaKM6fp4hx`: adjacent leaf block claims remained tag-dependent | Assertion ownership must follow actual direct source contexts while preserving explicit independent-record, heading, and field boundaries; the HTML spelling of a leaf block cannot change its owner. | Sibling leaf `<div>` blocks now share their direct parent owner, so `Free Estimates` cannot discard `Members only`; the complete owned assertion admits. Existing independent record containers and peer heading sections remain separate. | fixed/superseded | `lib/site_extraction.py:1394-1484`; `tests/test_site_extraction.py:606-699` |
+| `PRRT_kwDOTDYaKM6fp4hy`: validated brand identity and home destination were authorized independently | A code-owned generated navigation action must bind its exact validated label to its exact code-owned destination, just as source actions do. | The redesign action contract carries the exact site name paired with the catalog-owned `/` home route. A linked brand to `/` admits; rebinding that name to another otherwise admitted URL rejects. | fixed/superseded | `pipeline.py:146-247`; `lib/generation.py:2218-2382`; `tests/test_generation.py:4720-4774`; `tests/test_site_extraction.py:2213-2377` |
 
 ## Mechanism
 
@@ -128,7 +130,9 @@ to the extraction model, normalizes browser-equivalent text, gathers link/image
 attributes and their source-relative absolute forms, and checks every
 source-owned leaf through a field-specific evidence rule. Claim-bearing text uses
 DOM-local assertion contexts so inline markup cannot hide negation while separate
-elements cannot alter one another's meaning. CTA labels must exactly match an
+elements cannot alter one another's meaning. Direct leaf claim contexts share an
+owner independently of their HTML tag, but independent semantic records, peer
+heading sections, and schema-known fields remain explicit boundaries. CTA labels must exactly match an
 interactive element. Phone and email fields use canonical comparison against
 visible text or the scheme-specific `tel:`/`mailto:` destination, excluding URI
 parameters and cross-scheme tokens. Link destinations and image resources are
@@ -164,7 +168,9 @@ become a generated link, and a source link cannot become a generated form
 endpoint. Output URL sanitization separately checks every declared destination
 attribute, including an inert or orphaned `formaction`, without promoting that
 attribute into source authority. Pair evidence does not itself grant either kind
-of URL authority.
+of URL authority. The redesign catalog's exact validated business name and its
+internal `/` home route are likewise carried as one code-owned action pair; neither
+half can authorize rebinding the business identity to another destination.
 Flat heading records
 stop before sibling structural containers, including list wrappers, so a section
 heading cannot turn a collection of independent cards into one evidence record.

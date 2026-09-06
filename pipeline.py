@@ -157,7 +157,13 @@ def _redesign_action_url_contract(
 
     site = site_json.get("site")
     if isinstance(site, dict):
-        _append_source_value(allowed_labels, site.get("name"))
+        site_name = site.get("name")
+        _append_source_value(allowed_labels, site_name)
+        # The redesign catalog owns this internal navigation pair. Keep the
+        # verified business identity and its generated-site home destination
+        # bound together rather than authorizing either half independently.
+        _append_source_value(allowed_urls, "/")
+        _append_source_pair(allowed_pairs, site_name, "/")
 
     def append_field(value, field="url"):
         if isinstance(value, dict):
