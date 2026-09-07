@@ -4534,6 +4534,21 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             '<progress value="5"></progress>',
             '<input type="number" value="5">',
             '<input type="range" value="5">',
+            *(
+                '<div role="listitem" aria-label="Customer Reviews" '
+                f'{attribute}="5"></div>'
+                for attribute in (
+                    "aria-colcount",
+                    "aria-colindex",
+                    "aria-colspan",
+                    "aria-level",
+                    "aria-posinset",
+                    "aria-rowcount",
+                    "aria-rowindex",
+                    "aria-rowspan",
+                    "aria-setsize",
+                )
+            ),
         )
 
         for surface in value_surfaces:

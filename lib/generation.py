@@ -322,6 +322,15 @@ INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES = (
     "aria-errormessage",
 )
 UNCONTRACTED_NUMERIC_ARIA_ATTRIBUTES = (
+    "aria-colcount",
+    "aria-colindex",
+    "aria-colspan",
+    "aria-level",
+    "aria-posinset",
+    "aria-rowcount",
+    "aria-rowindex",
+    "aria-rowspan",
+    "aria-setsize",
     "aria-valuenow",
     "aria-valuemin",
     "aria-valuemax",
