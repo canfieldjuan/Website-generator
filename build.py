@@ -52,6 +52,7 @@ from lib.generation import (
     canonical_email_address,
     extract_homepage_class_names,
     extract_interior_only_class_names,
+    extract_template_layout_composition_class_names,
     extract_square_placeholder_tokens,
     generate_text,
     generate_with_local_admission_retry,
@@ -481,7 +482,12 @@ def expected_build_display_name(prospect):
     return without_suffix.title() or legal_name
 
 
-def expected_build_visible_copy(prospect, review_contract):
+def expected_build_visible_copy(
+    prospect,
+    review_contract,
+    *,
+    layout_composition_classes=(),
+):
     """Build the exhaustive visible-copy authority for from-scratch output."""
     display_name = expected_build_display_name(prospect)
     footer_tagline = f"{display_name} — {prospect['city']}, {prospect['state']}"
@@ -548,12 +554,38 @@ def expected_build_visible_copy(prospect, review_contract):
     phone = prospect.get("phone")
     if isinstance(phone, str) and phone.strip():
         allowed.extend((f"Call {phone.strip()}", f"Call {phone.strip()} →"))
+    hero_badge = None
     if prospect.get("has_24_7") is True:
-        allowed.extend(("Available 24/7", "24/7 Emergency Service Available"))
+        hero_badge = "Available 24/7"
+        allowed.append("24/7 Emergency Service Available")
+    else:
+        promises = prospect.get("service_promises")
+        normalized_promises = (
+            tuple(
+                promise.casefold()
+                for promise in promises
+                if isinstance(promise, str) and promise.strip()
+            )
+            if isinstance(promises, list)
+            else ()
+        )
+        if _field_claim_is_verified(
+            prospect,
+            "same_day_service",
+            normalized_promises,
+            claim="Same Day",
+        ):
+            hero_badge = "Same-Day Service"
+    if hero_badge is not None:
+        allowed.append(hero_badge)
         if isinstance(phone, str) and phone.strip():
-            allowed.append(f"{phone.strip()} Available 24/7")
-    if prospect.get("same_day_service") is True:
-        allowed.append("Same-Day Service")
+            phone_value = phone.strip()
+            allowed.extend(
+                (
+                    f"{hero_badge} {phone_value}",
+                    f"{phone_value} {hero_badge}",
+                )
+            )
     trust_components = []
     if prospect.get("licensed_and_insured") is True:
         trust_components.extend(("Licensed", "insured"))
@@ -637,6 +669,8 @@ def expected_build_visible_copy(prospect, review_contract):
     return VisibleCopyAdmissionContract(
         allowed_fragments=tuple(dict.fromkeys(allowed)),
         required_class_text=required_class_text,
+        layout_composition_classes=tuple(layout_composition_classes),
+        independent_component_classes=("benefit-card", "ft-address", "service-card"),
     )
 
 
@@ -1615,7 +1649,6 @@ def generate_build_html(prospect, generation_config=None, client=None):
         industry_defaults = f.read()
     industry_defaults = industry_generation_guidance(industry_defaults)
     review_contract = expected_review_contract(prospect)
-    visible_copy_contract = expected_build_visible_copy(prospect, review_contract)
     system_prompt = filter_review_prompt_branches(system_prompt, review_contract.mode)
     system_prompt = filter_unverified_claim_examples(system_prompt, prospect)
     industry_defaults = filter_unverified_claim_examples(industry_defaults, prospect)
@@ -1625,6 +1658,13 @@ def generate_build_html(prospect, generation_config=None, client=None):
         section_orders = f.read()
     with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
+    visible_copy_contract = expected_build_visible_copy(
+        prospect,
+        review_contract,
+        layout_composition_classes=(
+            extract_template_layout_composition_class_names(base_template)
+        ),
+    )
     homepage_classes = extract_homepage_class_names(base_template)
     class_catalog = "\n".join(homepage_classes)
     interior_only_classes = extract_interior_only_class_names(base_template)

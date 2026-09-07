@@ -59,6 +59,7 @@ from lib.generation import (
     extract_square_placeholder_tokens,
     extract_template_body_scaffold,
     extract_template_class_names,
+    extract_template_layout_composition_class_names,
     generate_text,
     generate_with_local_admission_retry,
     make_html_comment,
@@ -2004,6 +2005,17 @@ class BodyAssemblyTests(unittest.TestCase):
         self.assertIn("coverage-band", class_names)
         self.assertIn("reviews-card-grid", class_names)
         self.assertNotIn("{{SITE_NAME}}", class_names)
+
+    def test_template_layout_catalog_uses_the_target_selector(self):
+        template = """<style>
+        .parent .layout, .alternate.item { display: grid; }
+        .plain { display: block; }
+        </style>"""
+
+        self.assertEqual(
+            extract_template_layout_composition_class_names(template),
+            ("alternate", "item", "layout"),
+        )
 
     def test_mobile_trust_strip_wraps_without_horizontal_scroller(self):
         responsive_css = self.base_template.split(
@@ -4610,6 +4622,89 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             FakeLocalClient(local_chat_payload(supported)),
         )
         self.assertIn('<p>Roof</p><p>Repair</p>', html)
+
+    def test_build_generator_rejects_copy_composed_by_layout_class(self):
+        services = ("Roof", "Repair")
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(services),
+        }
+        for tag_name in ("div", "p"):
+            unsupported = COMPLETE_BUILD_BODY.replace(
+                COMPLETE_SERVICES_GRID,
+                services_grid(services),
+            ).replace(
+                '<section class="dual-cta-hero"></section>',
+                '<section class="dual-cta-hero dual-cta-row">'
+                f'<{tag_name}>Roof</{tag_name}>'
+                f'<{tag_name}>Repair</{tag_name}>'
+                '</section>',
+            )
+
+            with self.subTest(tag_name=tag_name), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(unsupported)),
+                )
+
+        supported = COMPLETE_BUILD_BODY.replace(
+            COMPLETE_SERVICES_GRID,
+            services_grid(services),
+        ).replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<ul class="ft-links"><li>Roof</li><li>Repair</li></ul>'
+            '</section>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+        self.assertIn('<li>Roof</li><li>Repair</li>', html)
+
+    def test_build_generator_allows_source_backed_cta_badge_and_phone(self):
+        cases = (
+            ({"has_24_7": True}, "Available 24/7"),
+            ({"same_day_service": True}, "Same-Day Service"),
+            ({"service_promises": ["Same-day service available"]}, "Same-Day Service"),
+        )
+        for evidence, badge in cases:
+            prospect = {
+                "business_name": "Test Business",
+                "trade": "plumber",
+                "city": "Effingham",
+                "state": "IL",
+                "phone": "217-555-0100",
+                "services": list(DEFAULT_BUILD_SERVICES),
+                **evidence,
+            }
+            supported = COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                '<section class="dual-cta-hero">'
+                '<div class="dual-cta-row">'
+                '<a class="cta-emergency" href="tel:2175550100">'
+                f'<span class="cta-emergency-badge">{badge}</span>'
+                '<span class="cta-emergency-number">217-555-0100</span>'
+                '</a><a class="cta-planned" href="#contact">Request Service</a>'
+                '</div></section>',
+            )
+
+            with self.subTest(evidence=evidence):
+                html = build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(supported)),
+                )
+                self.assertIn(badge, html)
 
     def test_build_generator_rejects_uncontracted_ordered_list_markers(self):
         prospect = {

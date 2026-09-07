@@ -348,6 +348,7 @@ VISIBLE_TEXT_OWNER_BOUNDARY_TAGS = DOM_ADJACENCY_BOUNDARY_TAGS | frozenset(
 ACCESSIBLE_TEXT_OWNER_TAGS = frozenset(
     ("a", "button", "img", "input", "option", "output", "select", "summary", "svg", "textarea")
 )
+INDEPENDENT_LAYOUT_ITEM_TAGS = ACCESSIBLE_TEXT_OWNER_TAGS | frozenset(("li",))
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -496,6 +497,8 @@ class VisibleCopyAdmissionContract:
 
     allowed_fragments: tuple[str, ...] = ()
     required_class_text: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    layout_composition_classes: tuple[str, ...] = ()
+    independent_component_classes: tuple[str, ...] = ()
 
 
 def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str:
@@ -3496,6 +3499,18 @@ def _validate_visible_copy(
     normalized_allowed = {
         _normalize_source_owned_text(fragment) for fragment in allowed_fragments
     }
+    layout_composition_classes = set(
+        _contract_text_values(
+            contract.layout_composition_classes,
+            "Visible-copy layout composition class",
+        )
+    )
+    independent_component_classes = set(
+        _contract_text_values(
+            contract.independent_component_classes,
+            "Visible-copy independent component class",
+        )
+    )
 
     required_classes: set[str] = set()
     for class_name, expected_values in contract.required_class_text:
@@ -3555,6 +3570,32 @@ def _validate_visible_copy(
             fragment
             for child in node.children
             if (fragment := _normalize_source_owned_text(inline_visible_text(child)))
+        )
+
+    def complete_visible_text(node: Any) -> str:
+        if isinstance(node, Comment):
+            return ""
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag) or not is_visually_exposed(node):
+            return ""
+        replacement = replacement_text(node)
+        if replacement:
+            return replacement
+        return " ".join(
+            fragment
+            for child in node.children
+            if (fragment := _normalize_source_owned_text(complete_visible_text(child)))
+        )
+
+    def owns_independent_layout_item(element: Tag) -> bool:
+        owner_classes = independent_component_classes | required_classes
+        return any(
+            candidate.name.casefold() in INDEPENDENT_LAYOUT_ITEM_TAGS
+            or bool(candidate.get("role"))
+            or bool(_exact_class_names(candidate) & owner_classes)
+            or _inside_review_root(candidate)
+            for candidate in (element, *element.find_all(True))
         )
 
     exposed_fragments: list[str] = []
@@ -3634,9 +3675,23 @@ def _validate_visible_copy(
                 if attribute.startswith("aria-")
             )
         ):
+            has_explicit_accessibility_copy = any(
+                isinstance(element.get(attribute), str)
+                and bool(element.get(attribute).strip())
+                for attribute in (
+                    *DIRECT_USER_FACING_TEXT_ATTRIBUTES,
+                    *INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES,
+                )
+                if attribute.startswith("aria-")
+            )
+            rendered_owner_copy = _normalize_source_owned_text(
+                complete_visible_text(element)
+            )
             accessible_fragment = _normalize_source_owned_text(
                 accessible_text(element, frozenset())
             )
+            if rendered_owner_copy and not has_explicit_accessibility_copy:
+                accessible_fragment = rendered_owner_copy
             if accessible_fragment:
                 exposed_fragments.append(accessible_fragment)
 
@@ -3669,6 +3724,34 @@ def _validate_visible_copy(
             if fragment:
                 inline_run.append(fragment)
         flush_inline_run()
+
+    for owner in (body_root, *body_root.find_all(True)):
+        if (
+            not is_visually_exposed(owner)
+            or _inside_review_root(owner)
+            or bool(
+                _exact_class_names(owner)
+                & (independent_component_classes | required_classes)
+            )
+            or not (_exact_class_names(owner) & layout_composition_classes)
+        ):
+            continue
+        layout_run: list[str] = []
+
+        def flush_layout_run() -> None:
+            fragment = _normalize_source_owned_text(" ".join(layout_run))
+            if fragment:
+                exposed_fragments.append(fragment)
+            layout_run.clear()
+
+        for child in owner.children:
+            if isinstance(child, Tag) and owns_independent_layout_item(child):
+                flush_layout_run()
+                continue
+            fragment = _normalize_source_owned_text(complete_visible_text(child))
+            if fragment:
+                layout_run.append(fragment)
+        flush_layout_run()
 
     unsupported = sorted(
         {fragment for fragment in exposed_fragments if fragment not in normalized_allowed},
@@ -4188,6 +4271,52 @@ def extract_template_class_names(template_html: str) -> tuple[str, ...]:
         )
     if not class_names:
         raise GeneratedHtmlError("Base template body has no class vocabulary.")
+    return tuple(sorted(class_names, key=str.casefold))
+
+
+def extract_template_layout_composition_class_names(
+    template_html: str,
+) -> tuple[str, ...]:
+    """Return classes whose template CSS can visually compose child copy."""
+    composing_displays = {
+        "contents",
+        "flex",
+        "grid",
+        "inline",
+        "inline-block",
+        "inline-flex",
+        "inline-grid",
+        "inline-table",
+        "table",
+        "table-cell",
+        "table-row",
+    }
+    class_names: set[str] = set()
+    for style_block in re.findall(
+        r"<style(?:\s[^>]*)?>(.*?)</style\s*>",
+        template_html,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        for selector_block, declarations in re.findall(
+            r"([^{}]+)\{([^{}]*)\}",
+            style_block,
+            re.DOTALL,
+        ):
+            display_values = {
+                match.group(1).casefold()
+                for match in re.finditer(
+                    r"(?:^|;)\s*display\s*:\s*([A-Za-z-]+)",
+                    declarations,
+                    re.IGNORECASE,
+                )
+            }
+            if not (display_values & composing_displays):
+                continue
+            for selector in selector_block.split(","):
+                target = re.split(r"\s+|[>+~]", selector.strip())[-1]
+                class_names.update(
+                    re.findall(r"\.([A-Za-z_][A-Za-z0-9_-]*)", target)
+                )
     return tuple(sorted(class_names, key=str.casefold))
 
 
