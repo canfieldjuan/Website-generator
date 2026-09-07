@@ -124,6 +124,11 @@ the guard rejects layout-created claims without joining unrelated controls,
 cards, list entries, or source-bound footer fields. CTA accessible names admit
 only the finite badge-and-phone combinations supported by verified 24/7 or
 same-day evidence, in either meaning-preserving visual order.
+Native table rows enter that same composition pass even without a CSS class, so
+adjacent cells cannot rebuild an unsupported phrase. Five-star glyphs have no
+global copy authority: they are admitted only inside review roots or ambient
+star components already bound to the verified review score by the review
+contract.
 Ordered-list markers also fail closed because their browser-generated copy has
 no source-bound owner in this page contract. Finite source-backed compositions,
 such as the verified phone beside verified 24/7 status, are admitted explicitly.
@@ -136,6 +141,8 @@ the code-owned catalog.
 | --- | --- | --- | --- | --- |
 | `PRRT_kwDOTDYaKM6fwRBN` | Layout styling must not recombine separately admitted fragments into a new offering. | `dual-cta-row` with adjacent `div` or `p` owners containing `Roof` and `Repair`. | fixed/superseded | `test_build_generator_rejects_copy_composed_by_layout_class` rejects both boundary forms while admitting native list items. |
 | `PRRT_kwDOTDYaKM6fwRBO` | Complete source-backed CTA accessible names must remain admissible. | Badge-first 24/7 and same-day CTA labels followed by the verified phone. | fixed/superseded | `test_build_generator_allows_source_backed_cta_badge_and_phone` admits field-backed 24/7, field-backed same-day, and promise-backed same-day labels. |
+| `PRRT_kwDOTDYaKM6fwcB-` | Review claims require source review authority and a validated score owner. | Raw `★★★★★` in an ordinary `div` while review mode is `omit`. | fixed/superseded | `test_build_generator_rejects_reviews_without_source_evidence` rejects the raw glyph; aggregate-review controls preserve canonical scored widgets. |
+| `PRRT_kwDOTDYaKM6fwcCA` | Native layout must not bypass complete-phrase admission. | One table row with `Roof` and `Repair` in adjacent cells. | fixed/superseded | `test_build_generator_rejects_copy_composed_by_native_table_row` rejects the combined row and admits the same source values in separate rows. |
 
 ## Intentional
 
@@ -162,7 +169,7 @@ the code-owned catalog.
 ## Verification
 
 Current implementation evidence is based on commit
-`d5ace9fbca81078a71b5cdcfbd0bba32f5d7ee10`. The generated artifact and evidence logs are
+`6253691dd31b191f447bd5f43d50ac2e43955ae8`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -177,11 +184,11 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 400 passed, 34 skipped, 688 subtests passed in 46.14s
+# 401 passed, 34 skipped, 688 subtests passed in 48.90s
 
 python3 -m pytest -q tests/test_generation.py \
-  -k 'copy_composed_by_layout_class or source_backed_cta_badge_and_phone or template_layout_catalog or binds_footer_address_to_source or uncatalogued_cleaning_brief'
-# 5 passed, 201 deselected, 5 subtests passed in 1.42s
+  -k 'visible_copy or aria or accessibility or service_cards or review_cards or layout_catalog or ordered_list or native_table_row or native_control_label or rendered_input_value or aggregate_review_claims or rejects_reviews_without_source_evidence'
+# 25 passed, 182 deselected, 35 subtests passed in 7.27s
 
 python3 -m compileall -q build.py pipeline.py connect_provider.py lib tests
 # Exit 0
@@ -209,7 +216,7 @@ Chromium computed-style inspection and direct PNG pixel reads confirmed the
 white page, red gradient hero, visible white hero copy, service grid, and
 page-function content.
 
-After the final layout-ownership change, the same artifact body was
+After the final layout, table-row, and review-star ownership changes, the same artifact body was
 replayed deterministically through the real `generate_build_html()` admission
 path without a model call. Admission passed and produced 70,581 validated bytes
 with SHA-256
