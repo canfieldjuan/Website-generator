@@ -129,6 +129,14 @@ adjacent cells cannot rebuild an unsupported phrase. Five-star glyphs have no
 global copy authority: they are admitted only inside review roots or ambient
 star components already bound to the verified review score by the review
 contract.
+Default-inline `label`, `output`, and `svg` owners also remain in their parent's
+complete visible run, so changing semantic tags cannot split one rendered
+phrase into separately admitted fragments. SVG metadata titles remain
+accessibility copy rather than visible text and therefore do not get joined to
+the SVG's rendered label. Source-owned service-name owners are additionally
+checked against the trusted template's case-transforming CSS classes, including
+inherited ancestor classes, so valid source spelling such as `eBay Repair`
+cannot render as a different-cased offering.
 Ordered-list markers also fail closed because their browser-generated copy has
 no source-bound owner in this page contract. Finite source-backed compositions,
 such as the verified phone beside verified 24/7 status, are admitted explicitly.
@@ -143,6 +151,8 @@ the code-owned catalog.
 | `PRRT_kwDOTDYaKM6fwRBO` | Complete source-backed CTA accessible names must remain admissible. | Badge-first 24/7 and same-day CTA labels followed by the verified phone. | fixed/superseded | `test_build_generator_allows_source_backed_cta_badge_and_phone` admits field-backed 24/7, field-backed same-day, and promise-backed same-day labels. |
 | `PRRT_kwDOTDYaKM6fwcB-` | Review claims require source review authority and a validated score owner. | Raw `★★★★★` in an ordinary `div` while review mode is `omit`. | fixed/superseded | `test_build_generator_rejects_reviews_without_source_evidence` rejects the raw glyph; aggregate-review controls preserve canonical scored widgets. |
 | `PRRT_kwDOTDYaKM6fwcCA` | Native layout must not bypass complete-phrase admission. | One table row with `Roof` and `Repair` in adjacent cells. | fixed/superseded | `test_build_generator_rejects_copy_composed_by_native_table_row` rejects the combined row and admits the same source values in separate rows. |
+| `PRRT_kwDOTDYaKM6fwkA1` | Native inline semantics must not split one rendered phrase into separately admitted fragments. | Adjacent `label`, `output`, or `svg` owners containing `Roof` and `Repair`. | fixed/superseded | `test_build_generator_rejects_copy_composed_by_native_inline_owners` rejects all three combined forms and preserves a source-backed SVG whose accessibility title and rendered text agree. |
+| `PRRT_kwDOTDYaKM6fwkA3` | Source-owned service spelling and case must survive rendered CSS. | `eBay Repair` owned by or descended from template class `ft-col-title`. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects both direct and inherited transforms while preserving the canonical service owner. |
 
 ## Intentional
 
@@ -169,7 +179,7 @@ the code-owned catalog.
 ## Verification
 
 Current implementation evidence is based on commit
-`6253691dd31b191f447bd5f43d50ac2e43955ae8`. The generated artifact and evidence logs are
+`dc52458c288fc32d9cd2d982a0d7292a72948e9a`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -184,11 +194,11 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 401 passed, 34 skipped, 688 subtests passed in 48.90s
+# 403 passed, 34 skipped, 693 subtests passed in 42.47s
 
 python3 -m pytest -q tests/test_generation.py \
-  -k 'visible_copy or aria or accessibility or service_cards or review_cards or layout_catalog or ordered_list or native_table_row or native_control_label or rendered_input_value or aggregate_review_claims or rejects_reviews_without_source_evidence'
-# 25 passed, 182 deselected, 35 subtests passed in 7.27s
+  -k 'visible_copy or aria or accessibility or service_cards or review_cards or layout_catalog or ordered_list or native_table_row or native_inline_owners or visual_case_transform or native_control_label or rendered_input_value or aggregate_review_claims or rejects_reviews_without_source_evidence'
+# 27 passed, 182 deselected, 40 subtests passed in 7.52s
 
 python3 -m compileall -q build.py pipeline.py connect_provider.py lib tests
 # Exit 0
@@ -216,11 +226,12 @@ Chromium computed-style inspection and direct PNG pixel reads confirmed the
 white page, red gradient hero, visible white hero copy, service grid, and
 page-function content.
 
-After the final layout, table-row, and review-star ownership changes, the same artifact body was
+After the final layout, table-row, review-star, native-inline, and visual-case
+ownership changes, the same artifact body was
 replayed deterministically through the real `generate_build_html()` admission
-path without a model call. Admission passed and produced 70,581 validated bytes
+path without a model call. Admission passed and reproduced 71,838 validated bytes
 with SHA-256
-`a8986d4d0651344dbe20c37f4848d16a98946d30577c9eca58e2e934942903da`.
+`2c16369fd1dc42ed0e79b98f344b1077990e3270aed25060667518e0bb6f2367`.
 
 No live OpenRouter request was made; doing so would spend provider credit and
 is unnecessary to prove the provider-independent prompt and admission contract.
