@@ -350,6 +350,7 @@ ACCESSIBLE_TEXT_OWNER_TAGS = frozenset(
 )
 INDEPENDENT_LAYOUT_ITEM_TAGS = ACCESSIBLE_TEXT_OWNER_TAGS | frozenset(("li",))
 NATIVE_LAYOUT_COMPOSITION_TAGS = frozenset(("tr",))
+NATIVE_INLINE_COMPOSITION_TAGS = frozenset(("label", "output", "svg"))
 AMBIENT_REVIEW_STAR_CLASSES = frozenset(("cta-trust-stars", "trust-stars"))
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
@@ -501,6 +502,8 @@ class VisibleCopyAdmissionContract:
     required_class_text: tuple[tuple[str, tuple[str, ...]], ...] = ()
     layout_composition_classes: tuple[str, ...] = ()
     independent_component_classes: tuple[str, ...] = ()
+    case_preserved_classes: tuple[str, ...] = ()
+    text_transforming_classes: tuple[str, ...] = ()
 
 
 def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str:
@@ -3513,6 +3516,18 @@ def _validate_visible_copy(
             "Visible-copy independent component class",
         )
     )
+    case_preserved_classes = set(
+        _contract_text_values(
+            contract.case_preserved_classes,
+            "Visible-copy case-preserved class",
+        )
+    )
+    text_transforming_classes = set(
+        _contract_text_values(
+            contract.text_transforming_classes,
+            "Visible-copy text-transforming class",
+        )
+    )
 
     required_classes: set[str] = set()
     for class_name, expected_values in contract.required_class_text:
@@ -3606,6 +3621,18 @@ def _validate_visible_copy(
             for candidate in (element, *element.parents)
             if isinstance(candidate, Tag)
         )
+
+    for class_name in case_preserved_classes:
+        for owner in _elements_with_class(body_root, class_name):
+            if any(
+                _exact_class_names(candidate) & text_transforming_classes
+                for candidate in (owner, *owner.parents)
+                if isinstance(candidate, Tag)
+            ):
+                raise GeneratedBodyError(
+                    "Generated body visually transforms source-owned case for "
+                    f"{class_name}."
+                )
 
     exposed_fragments: list[str] = []
     for node in body_root.descendants:
@@ -3733,6 +3760,13 @@ def _validate_visible_copy(
                 isinstance(child, Tag)
                 and child.name.casefold() in VISIBLE_TEXT_OWNER_BOUNDARY_TAGS
             ):
+                if child.name.casefold() in NATIVE_INLINE_COMPOSITION_TAGS:
+                    fragment = _normalize_source_owned_text(
+                        complete_visible_text(child)
+                    )
+                    if fragment:
+                        inline_run.append(fragment)
+                    continue
                 flush_inline_run()
                 continue
             fragment = _normalize_source_owned_text(inline_visible_text(child))
@@ -4330,6 +4364,39 @@ def extract_template_layout_composition_class_names(
                 )
             }
             if not (display_values & composing_displays):
+                continue
+            for selector in selector_block.split(","):
+                target = re.split(r"\s+|[>+~]", selector.strip())[-1]
+                class_names.update(
+                    re.findall(r"\.([A-Za-z_][A-Za-z0-9_-]*)", target)
+                )
+    return tuple(sorted(class_names, key=str.casefold))
+
+
+def extract_template_text_transforming_class_names(
+    template_html: str,
+) -> tuple[str, ...]:
+    """Return target classes whose template CSS transforms displayed case."""
+    class_names: set[str] = set()
+    for style_block in re.findall(
+        r"<style(?:\s[^>]*)?>(.*?)</style\s*>",
+        template_html,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        for selector_block, declarations in re.findall(
+            r"([^{}]+)\{([^{}]*)\}",
+            style_block,
+            re.DOTALL,
+        ):
+            transform_values = {
+                match.group(1).casefold()
+                for match in re.finditer(
+                    r"(?:^|;)\s*text-transform\s*:\s*([A-Za-z-]+)",
+                    declarations,
+                    re.IGNORECASE,
+                )
+            }
+            if not (transform_values - {"none", "initial", "inherit", "unset"}):
                 continue
             for selector in selector_block.split(","):
                 target = re.split(r"\s+|[>+~]", selector.strip())[-1]

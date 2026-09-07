@@ -53,6 +53,7 @@ from lib.generation import (
     extract_homepage_class_names,
     extract_interior_only_class_names,
     extract_template_layout_composition_class_names,
+    extract_template_text_transforming_class_names,
     extract_square_placeholder_tokens,
     generate_text,
     generate_with_local_admission_retry,
@@ -486,6 +487,7 @@ def expected_build_visible_copy(
     review_contract,
     *,
     layout_composition_classes=(),
+    text_transforming_classes=(),
 ):
     """Build the exhaustive visible-copy authority for from-scratch output."""
     display_name = expected_build_display_name(prospect)
@@ -670,6 +672,8 @@ def expected_build_visible_copy(
         required_class_text=required_class_text,
         layout_composition_classes=tuple(layout_composition_classes),
         independent_component_classes=("benefit-card", "ft-address", "service-card"),
+        case_preserved_classes=("service-card-name",),
+        text_transforming_classes=tuple(text_transforming_classes),
     )
 
 
@@ -1662,6 +1666,9 @@ def generate_build_html(prospect, generation_config=None, client=None):
         review_contract,
         layout_composition_classes=(
             extract_template_layout_composition_class_names(base_template)
+        ),
+        text_transforming_classes=(
+            extract_template_text_transforming_class_names(base_template)
         ),
     )
     homepage_classes = extract_homepage_class_names(base_template)

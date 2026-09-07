@@ -4711,6 +4711,83 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn('<tr><td>Roof</td></tr><tr><td>Repair</td></tr>', html)
 
+    def test_build_generator_rejects_copy_composed_by_native_inline_owners(self):
+        services = ("Roof", "Repair")
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(services),
+        }
+        for tag_name in ("label", "output", "svg"):
+            unsupported = COMPLETE_BUILD_BODY.replace(
+                COMPLETE_SERVICES_GRID,
+                services_grid(services),
+            ).replace(
+                '<section class="dual-cta-hero"></section>',
+                '<section class="dual-cta-hero">'
+                f'<{tag_name}>Roof</{tag_name}>'
+                f'<{tag_name}>Repair</{tag_name}>'
+                '</section>',
+            )
+
+            with self.subTest(tag_name=tag_name), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(unsupported)),
+                )
+
+    def test_build_generator_rejects_visual_case_transform_on_service_names(self):
+        services = ("eBay Repair", "Office Cleaning")
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(services),
+        }
+        canonical = COMPLETE_BUILD_BODY.replace(
+            COMPLETE_SERVICES_GRID,
+            services_grid(services),
+        )
+        transformed_name = canonical.replace(
+            'class="service-card-name">eBay Repair',
+            'class="service-card-name ft-col-title">eBay Repair',
+        )
+        transformed_parent = canonical.replace(
+            'class="service-card"><div class="service-card-name">eBay Repair',
+            'class="service-card ft-col-title">'
+            '<div class="service-card-name">eBay Repair',
+        )
+
+        for body in (transformed_name, transformed_parent):
+            with self.subTest(body=body), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visually transforms source-owned case",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(canonical)),
+        )
+        self.assertIn(
+            '<div class="service-card-name">eBay Repair</div>',
+            html,
+        )
+
     def test_build_generator_allows_source_backed_cta_badge_and_phone(self):
         cases = (
             ({"has_24_7": True}, "Available 24/7"),
