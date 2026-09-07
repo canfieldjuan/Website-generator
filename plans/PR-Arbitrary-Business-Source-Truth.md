@@ -116,11 +116,26 @@ review evidence contract.
 The same admission pass validates complete inline runs at HTML text owners and
 complete accessible names/descriptions at interactive or ARIA-owned elements,
 so separately allowed source fragments cannot be recombined into a new claim.
+It derives text-composing classes from the trusted template CSS and validates
+anonymous child runs at those layout owners as complete phrases. Native action
+owners, list items, exact required-text owners, and separately validated
+service, benefit, review, and footer-address components remain independent, so
+the guard rejects layout-created claims without joining unrelated controls,
+cards, list entries, or source-bound footer fields. CTA accessible names admit
+only the finite badge-and-phone combinations supported by verified 24/7 or
+same-day evidence, in either meaning-preserving visual order.
 Ordered-list markers also fail closed because their browser-generated copy has
 no source-bound owner in this page contract. Finite source-backed compositions,
 such as the verified phone beside verified 24/7 status, are admitted explicitly.
 The no-radius service-area prompt uses the same exact `Service Area` casing as
 the code-owned catalog.
+
+## Latest review finding ledger
+
+| Finding/thread | Affected invariant | Current reproduction | Disposition | Proof |
+| --- | --- | --- | --- | --- |
+| `PRRT_kwDOTDYaKM6fwRBN` | Layout styling must not recombine separately admitted fragments into a new offering. | `dual-cta-row` with adjacent `div` or `p` owners containing `Roof` and `Repair`. | fixed/superseded | `test_build_generator_rejects_copy_composed_by_layout_class` rejects both boundary forms while admitting native list items. |
+| `PRRT_kwDOTDYaKM6fwRBO` | Complete source-backed CTA accessible names must remain admissible. | Badge-first 24/7 and same-day CTA labels followed by the verified phone. | fixed/superseded | `test_build_generator_allows_source_backed_cta_badge_and_phone` admits field-backed 24/7, field-backed same-day, and promise-backed same-day labels. |
 
 ## Intentional
 
@@ -147,7 +162,7 @@ the code-owned catalog.
 ## Verification
 
 Current implementation evidence is based on commit
-`1bd24970618d01315eec1b1c0dd69c1490730bdc`. The generated artifact and evidence logs are
+`d5ace9fbca81078a71b5cdcfbd0bba32f5d7ee10`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -162,7 +177,14 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 397 passed, 34 skipped, 683 subtests passed in 48.67s
+# 400 passed, 34 skipped, 688 subtests passed in 46.14s
+
+python3 -m pytest -q tests/test_generation.py \
+  -k 'copy_composed_by_layout_class or source_backed_cta_badge_and_phone or template_layout_catalog or binds_footer_address_to_source or uncatalogued_cleaning_brief'
+# 5 passed, 201 deselected, 5 subtests passed in 1.42s
+
+python3 -m compileall -q build.py pipeline.py connect_provider.py lib tests
+# Exit 0
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
@@ -187,7 +209,7 @@ Chromium computed-style inspection and direct PNG pixel reads confirmed the
 white page, red gradient hero, visible white hero copy, service grid, and
 page-function content.
 
-After the final numeric-semantic guard change, the same artifact body was
+After the final layout-ownership change, the same artifact body was
 replayed deterministically through the real `generate_build_html()` admission
 path without a model call. Admission passed and produced 70,581 validated bytes
 with SHA-256
