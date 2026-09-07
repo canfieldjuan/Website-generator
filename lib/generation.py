@@ -3632,7 +3632,11 @@ def _validate_visible_copy(
         for owner in _elements_with_class(body_root, class_name):
             if any(
                 _exact_class_names(candidate) & text_transforming_classes
-                for candidate in (owner, *owner.parents)
+                for candidate in (
+                    owner,
+                    *owner.parents,
+                    *owner.find_all(True),
+                )
                 if isinstance(candidate, Tag)
             ):
                 raise GeneratedBodyError(

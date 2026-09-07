@@ -4783,8 +4783,13 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             'class="service-card ft-col-title">'
             '<div class="service-card-name">eBay Repair',
         )
+        transformed_descendant = canonical.replace(
+            'class="service-card-name">eBay Repair</div>',
+            'class="service-card-name">'
+            '<span class="ft-col-title">eBay Repair</span></div>',
+        )
 
-        for body in (transformed_name, transformed_parent):
+        for body in (transformed_name, transformed_parent, transformed_descendant):
             with self.subTest(body=body), self.assertRaisesRegex(
                 GeneratedBodyError,
                 "visually transforms source-owned case",
