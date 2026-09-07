@@ -111,8 +111,10 @@ copy admission, including the standards-defined table-header abbreviation.
 Ordinary native input values use the same source-owned catalog. Generated
 numeric range widgets and ARIA value semantics fail closed because the build
 has no generic source contract that can bind their related label/current/min/max
-meaning; canonical review-score components remain governed by the existing
-review evidence contract.
+meaning. The same fail-closed contract covers the complete WAI-ARIA numeric
+collection, hierarchy, grid, and span metadata family, so generated roles
+cannot announce invented positions or collection sizes. Canonical review-score
+components remain governed by the existing review evidence contract.
 The same admission pass validates complete inline runs at HTML text owners and
 complete accessible names/descriptions at interactive or ARIA-owned elements,
 so separately allowed source fragments cannot be recombined into a new claim.
@@ -158,6 +160,7 @@ the code-owned catalog.
 | `PRRT_kwDOTDYaKM6fwkA3` | Source-owned service spelling and case must survive rendered CSS. | `eBay Repair` owned by or descended from template class `ft-col-title`. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects both direct and inherited transforms while preserving the canonical service owner. |
 | `PRRT_kwDOTDYaKM6fwsni` | The complete service-name ownership subtree must preserve source case. | `ft-col-title` nested below the canonical `service-card-name` owner. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects transforming classes on the owner, its ancestors, and its descendants while preserving canonical markup. |
 | `PRRT_kwDOTDYaKM6fwzPq` | CSS authority must preserve the full selector that controls rendered case. | `.nav-links a` applied to an `a.service-card-name` under a `service-card.nav-links` ancestor. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects the complete descendant-selector path; the contract now matches full trusted-template selectors against each source text node's inheritance chain. |
+| `PRRT_kwDOTDYaKM6fw7aZ` | Assistive metadata must not create numeric claims without source authority. | `aria-setsize`, `aria-posinset`, `aria-rowcount`, or `aria-colcount` attached to otherwise admitted copy. | fixed/superseded | `test_build_generator_rejects_uncontracted_numeric_semantics` covers all WAI-ARIA numeric collection, hierarchy, grid, span, and value properties while source-owned ordinary numeric text remains admissible. |
 
 ## Intentional
 
@@ -184,7 +187,7 @@ the code-owned catalog.
 ## Verification
 
 Current implementation evidence is based on commit
-`a82f674844e9b711bf2bb2ca5f383dfbdac53db7`. The generated artifact and evidence logs are
+`91d2252432cc726368bd0dca1548b80340277d67`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -199,11 +202,11 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 403 passed, 34 skipped, 695 subtests passed in 44.67s
+# 403 passed, 34 skipped, 704 subtests passed in 45.74s
 
 python3 -m pytest -q tests/test_generation.py \
-  -k 'visible_copy or aria or accessibility or service_cards or review_cards or layout_catalog or ordered_list or native_table_row or native_inline_owners or visual_case_transform or native_control_label or rendered_input_value or aggregate_review_claims or rejects_reviews_without_source_evidence'
-# 27 passed, 182 deselected, 42 subtests passed in 8.10s
+  -k 'visible_copy or aria or accessibility or service_cards or review_cards or layout_catalog or ordered_list or native_table_row or native_inline_owners or visual_case_transform or numeric_semantics or native_control_label or rendered_input_value or aggregate_review_claims or rejects_reviews_without_source_evidence'
+# 28 passed, 181 deselected, 57 subtests passed in 10.80s
 
 python3 -m compileall -q build.py pipeline.py connect_provider.py lib tests
 # Exit 0
