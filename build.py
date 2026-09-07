@@ -550,6 +550,8 @@ def expected_build_visible_copy(prospect, review_contract):
         allowed.extend((f"Call {phone.strip()}", f"Call {phone.strip()} →"))
     if prospect.get("has_24_7") is True:
         allowed.extend(("Available 24/7", "24/7 Emergency Service Available"))
+        if isinstance(phone, str) and phone.strip():
+            allowed.append(f"{phone.strip()} Available 24/7")
     if prospect.get("same_day_service") is True:
         allowed.append("Same-Day Service")
     trust_components = []
@@ -582,13 +584,24 @@ def expected_build_visible_copy(prospect, review_contract):
     if review_contract.aggregate_score is not None:
         score = review_contract.aggregate_score
         count = review_contract.aggregate_count
+        score_phrases = (f"{score} out of 5",)
+        count_phrases = (
+            f"Based on {count} Google Reviews",
+            f"Based on {count} reviews on Google",
+        )
         allowed.extend(
             (
                 str(score),
-                f"{score} out of 5",
+                *score_phrases,
                 f"Based on {count} Google Reviews",
                 f"· Based on {count} Google Reviews",
                 f"Based on {count} reviews on Google",
+                *(
+                    f"{prefix}{score_phrase} {count_phrase}"
+                    for prefix in ("", "★★★★★ ")
+                    for score_phrase in score_phrases
+                    for count_phrase in count_phrases
+                ),
             )
         )
 

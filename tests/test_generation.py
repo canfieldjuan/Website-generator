@@ -4570,6 +4570,89 @@ class AtomicWriteAndCliTests(unittest.TestCase):
 
         self.assertIn('<input type="text" value="5">', html)
 
+    def test_build_generator_rejects_composed_visible_copy(self):
+        services = ("Roof", "Repair")
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(services),
+        }
+        unsupported = COMPLETE_BUILD_BODY.replace(
+            COMPLETE_SERVICES_GRID,
+            services_grid(services),
+        ).replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<span>Roof</span> <span>Repair</span>'
+            '</section>',
+        )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unsupported)),
+            )
+
+        supported = unsupported.replace(
+            '<span>Roof</span> <span>Repair</span>',
+            '<p>Roof</p><p>Repair</p>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+        self.assertIn('<p>Roof</p><p>Repair</p>', html)
+
+    def test_build_generator_rejects_uncontracted_ordered_list_markers(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        unsupported_lists = (
+            '<ol><li>Customer Reviews</li></ol>',
+            '<ol start="500"><li>Customer Reviews</li></ol>',
+            '<ul><li value="500">Customer Reviews</li></ul>',
+        )
+        for rendered_list in unsupported_lists:
+            unsupported = COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                f'<section class="dual-cta-hero">{rendered_list}</section>',
+            )
+            with self.subTest(rendered_list=rendered_list), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "browser-generated ordered-list copy",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(unsupported)),
+                )
+
+        supported = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<ul><li>Customer Reviews</li></ul>'
+            '</section>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+        self.assertIn('<ul><li>Customer Reviews</li></ul>', html)
+
     def test_arbitrary_business_hero_fallback_is_business_neutral(self):
         prompt = build.build_hero_prompt(
             {

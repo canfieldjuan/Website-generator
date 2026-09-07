@@ -329,6 +329,25 @@ UNCONTRACTED_NUMERIC_ROLE_NAMES = frozenset(
     ("meter", "progressbar", "scrollbar", "slider", "spinbutton")
 )
 UNCONTRACTED_NUMERIC_INPUT_TYPES = frozenset(("number", "range"))
+VISIBLE_TEXT_OWNER_BOUNDARY_TAGS = DOM_ADJACENCY_BOUNDARY_TAGS | frozenset(
+    (
+        "button",
+        "caption",
+        "img",
+        "input",
+        "label",
+        "legend",
+        "option",
+        "output",
+        "select",
+        "svg",
+        "textarea",
+        "title",
+    )
+)
+ACCESSIBLE_TEXT_OWNER_TAGS = frozenset(
+    ("a", "button", "img", "input", "option", "output", "select", "summary", "svg", "textarea")
+)
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -3513,6 +3532,31 @@ def _validate_visible_copy(
             if isinstance(candidate, Tag)
         )
 
+    accessible_text, resolve_references, _, replacement_text = (
+        _build_accessibility_text_resolver(
+            body_root,
+            is_excluded=lambda _element: False,
+        )
+    )
+
+    def inline_visible_text(node: Any) -> str:
+        if isinstance(node, Comment):
+            return ""
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag) or not is_visually_exposed(node):
+            return ""
+        if node.name.casefold() in VISIBLE_TEXT_OWNER_BOUNDARY_TAGS:
+            return ""
+        replacement = replacement_text(node)
+        if replacement:
+            return replacement
+        return " ".join(
+            fragment
+            for child in node.children
+            if (fragment := _normalize_source_owned_text(inline_visible_text(child)))
+        )
+
     exposed_fragments: list[str] = []
     for node in body_root.descendants:
         if (
@@ -3529,6 +3573,13 @@ def _validate_visible_copy(
         if not is_visually_exposed(element):
             continue
         tag_name = element.name.casefold()
+        if tag_name == "ol" or (
+            tag_name == "li" and isinstance(element.get("value"), str)
+        ):
+            raise GeneratedBodyError(
+                "Generated body contains browser-generated ordered-list copy "
+                "outside a source-bound component contract."
+            )
         role_names = {
             token.casefold()
             for token in str(element.get("role") or "").split()
@@ -3557,10 +3608,6 @@ def _validate_visible_copy(
             if fragment:
                 exposed_fragments.append(fragment)
 
-    _, resolve_references, _, _ = _build_accessibility_text_resolver(
-        body_root,
-        is_excluded=lambda _element: False,
-    )
     for element in (body_root, *body_root.find_all(True)):
         if not is_visually_exposed(element):
             continue
@@ -3573,6 +3620,55 @@ def _validate_visible_copy(
             )
             if fragment:
                 exposed_fragments.append(fragment)
+
+        if not _inside_review_root(element) and (
+            element.name.casefold() in ACCESSIBLE_TEXT_OWNER_TAGS
+            or bool(element.get("role"))
+            or any(
+                isinstance(element.get(attribute), str)
+                and bool(element.get(attribute).strip())
+                for attribute in (
+                    *DIRECT_USER_FACING_TEXT_ATTRIBUTES,
+                    *INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES,
+                )
+                if attribute.startswith("aria-")
+            )
+        ):
+            accessible_fragment = _normalize_source_owned_text(
+                accessible_text(element, frozenset())
+            )
+            if accessible_fragment:
+                exposed_fragments.append(accessible_fragment)
+
+    for owner in (body_root, *body_root.find_all(True)):
+        if (
+            not is_visually_exposed(owner)
+            or _inside_review_root(owner)
+            or (
+                owner is not body_root
+                and owner.name.casefold() not in VISIBLE_TEXT_OWNER_BOUNDARY_TAGS
+            )
+        ):
+            continue
+        inline_run: list[str] = []
+
+        def flush_inline_run() -> None:
+            fragment = _normalize_source_owned_text(" ".join(inline_run))
+            if fragment:
+                exposed_fragments.append(fragment)
+            inline_run.clear()
+
+        for child in owner.children:
+            if (
+                isinstance(child, Tag)
+                and child.name.casefold() in VISIBLE_TEXT_OWNER_BOUNDARY_TAGS
+            ):
+                flush_inline_run()
+                continue
+            fragment = _normalize_source_owned_text(inline_visible_text(child))
+            if fragment:
+                inline_run.append(fragment)
+        flush_inline_run()
 
     unsupported = sorted(
         {fragment for fragment in exposed_fragments if fragment not in normalized_allowed},
