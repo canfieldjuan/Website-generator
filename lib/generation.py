@@ -24,6 +24,7 @@ import requests
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from openai import DefaultHttpxClient, OpenAI
 from requests.adapters import HTTPAdapter
+from soupsieve.util import SelectorSyntaxError
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
@@ -193,7 +194,9 @@ SERVICE_RADIUS_CLAIM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CITY_STATE_CLAIM_PATTERN = re.compile(
-    r"(?<!\w)(?P<city>[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3}),"
+    r"(?<!\w)(?:(?i:(?:(?:now|proudly)\s+)?serving|located\s+in|based\s+in)\s+)?"
+    r"(?P<city>(?!(?i:serving|located|based)\b)[A-Z][A-Za-z.'-]*"
+    r"(?:\s+(?!(?i:serving|located|based)\b)[A-Z][A-Za-z.'-]*){0,3}),"
     r"\s*(?P<state>[A-Z]{2})(?![A-Za-z])",
 )
 SERVICE_PLACE_CLAIM_PATTERN = re.compile(
@@ -290,6 +293,75 @@ _EXPECTED_LOCATION_UNSET = object()
 _EXPECTED_SERVICE_LOCATION_UNSET = object()
 _EXPECTED_IMAGES_UNSET = object()
 _EXPECTED_ACTION_URLS_UNSET = object()
+_EXPECTED_SERVICES_UNSET = object()
+_EXPECTED_VISIBLE_COPY_UNSET = object()
+DIRECT_USER_FACING_TEXT_ATTRIBUTES = (
+    "alt",
+    "abbr",
+    "title",
+    "placeholder",
+    "label",
+    "aria-label",
+    "aria-description",
+    "aria-valuetext",
+    "aria-valuenow",
+    "aria-valuemin",
+    "aria-valuemax",
+    "aria-roledescription",
+    "aria-placeholder",
+    "aria-braillelabel",
+    "aria-brailleroledescription",
+    "aria-keyshortcuts",
+    "aria-colindextext",
+    "aria-rowindextext",
+)
+INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES = (
+    "aria-labelledby",
+    "aria-describedby",
+    "aria-details",
+    "aria-errormessage",
+)
+UNCONTRACTED_NUMERIC_ARIA_ATTRIBUTES = (
+    "aria-colcount",
+    "aria-colindex",
+    "aria-colspan",
+    "aria-level",
+    "aria-posinset",
+    "aria-rowcount",
+    "aria-rowindex",
+    "aria-rowspan",
+    "aria-setsize",
+    "aria-valuenow",
+    "aria-valuemin",
+    "aria-valuemax",
+)
+UNCONTRACTED_NUMERIC_ROLE_NAMES = frozenset(
+    ("meter", "progressbar", "scrollbar", "slider", "spinbutton")
+)
+UNCONTRACTED_NUMERIC_INPUT_TYPES = frozenset(("number", "range"))
+VISIBLE_TEXT_OWNER_BOUNDARY_TAGS = DOM_ADJACENCY_BOUNDARY_TAGS | frozenset(
+    (
+        "button",
+        "caption",
+        "img",
+        "input",
+        "label",
+        "legend",
+        "option",
+        "output",
+        "select",
+        "svg",
+        "textarea",
+        "title",
+    )
+)
+ACCESSIBLE_TEXT_OWNER_TAGS = frozenset(
+    ("a", "button", "img", "input", "option", "output", "select", "summary", "svg", "textarea")
+)
+INDEPENDENT_LAYOUT_ITEM_TAGS = ACCESSIBLE_TEXT_OWNER_TAGS | frozenset(("li",))
+NATIVE_LAYOUT_COMPOSITION_TAGS = frozenset(("tr",))
+NATIVE_INLINE_COMPOSITION_TAGS = frozenset(("label", "output", "svg"))
+AMBIENT_REVIEW_STAR_CLASSES = frozenset(("cta-trust-stars", "trust-stars"))
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -430,6 +502,18 @@ class ServiceLocationAdmissionContract:
 class ImageAdmissionContract:
     allowed_urls: tuple[str, ...] = ()
     nav_logo_url: str | None = None
+
+
+@dataclass(frozen=True)
+class VisibleCopyAdmissionContract:
+    """Exact visible-copy authority for one generated body."""
+
+    allowed_fragments: tuple[str, ...] = ()
+    required_class_text: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    layout_composition_classes: tuple[str, ...] = ()
+    independent_component_classes: tuple[str, ...] = ()
+    case_preserved_classes: tuple[str, ...] = ()
+    text_transforming_selectors: tuple[str, ...] = ()
 
 
 def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str:
@@ -1770,6 +1854,18 @@ def _normalize_claim_match_text(value: str) -> str:
     return " ".join(normalized.split()).casefold()
 
 
+def _normalize_source_owned_text(value: str) -> str:
+    """Canonicalize browser whitespace without changing source casing."""
+    return " ".join(unicodedata.normalize("NFKC", value).split())
+
+
+def source_owned_service_description(service: str) -> str:
+    """Return capability-neutral service copy derived only from its source name."""
+    if not isinstance(service, str) or not service.strip():
+        raise ValueError("Source-owned service must be non-empty text.")
+    return f"Ask us about {_normalize_source_owned_text(service)}"
+
+
 def _compact_claim_match_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     return "".join(character for character in normalized if character.isalnum())
@@ -1871,23 +1967,32 @@ def _canonical_email_value(value: str) -> str | None:
     return canonical_email_address(unquote(value))
 
 
-def _claim_exposure_texts(
+def _direct_user_facing_text_values(element: Tag) -> tuple[str, ...]:
+    """Return native and ARIA strings directly presented by one element."""
+    values = [
+        value
+        for attribute in DIRECT_USER_FACING_TEXT_ATTRIBUTES
+        if isinstance((value := element.get(attribute)), str) and value
+    ]
+    if element.name.casefold() in {"input", "meter", "progress"}:
+        value = element.get("value")
+        if isinstance(value, str) and value:
+            values.append(value)
+    return tuple(values)
+
+
+def _build_accessibility_text_resolver(
     body_root: Tag,
     *,
-    excluded_root_classes: Iterable[str] = (),
-) -> tuple[tuple[str, str], str]:
-    visual_parts: list[str] = []
-    phone_visual_parts: list[str] = []
+    is_excluded: Callable[[Tag], bool],
+) -> tuple[
+    Callable[[Any, frozenset[str]], str],
+    Callable[[Tag, str, frozenset[str]], str],
+    Callable[[Tag], bool],
+    Callable[[Tag], str],
+]:
+    """Build the one ARIA reference resolver used by claim and copy admission."""
     id_targets: dict[str, list[Tag]] = {}
-    excluded_classes = frozenset(excluded_root_classes)
-
-    def is_excluded(node: Tag) -> bool:
-        return bool(_exact_class_names(node) & excluded_classes) or any(
-            _exact_class_names(parent) & excluded_classes
-            for parent in node.parents
-            if isinstance(parent, Tag)
-        )
-
     for element in (body_root, *body_root.find_all(True)):
         if is_excluded(element):
             continue
@@ -1909,39 +2014,6 @@ def _claim_exposure_texts(
             value = node.get("value") or node.get("placeholder")
             return value if isinstance(value, str) else ""
         return ""
-
-    def tooltip_text(node: Tag) -> str:
-        value = node.get("title")
-        return value if isinstance(value, str) else ""
-
-    def visit_visual(node: Any) -> None:
-        if isinstance(node, Comment):
-            return
-        if isinstance(node, NavigableString):
-            text = str(node)
-            visual_parts.append(text)
-            phone_visual_parts.append(text)
-            return
-        if not isinstance(node, Tag):
-            return
-        if is_excluded(node):
-            return
-        if is_render_suppressed_element(node):
-            return
-        has_text_boundary = node.name.casefold() in DOM_ADJACENCY_BOUNDARY_TAGS
-        if has_text_boundary:
-            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
-        tooltip = tooltip_text(node)
-        if tooltip:
-            visual_parts.append(tooltip)
-        replacement = replacement_text(node)
-        if replacement:
-            visual_parts.append(replacement)
-            phone_visual_parts.append(replacement)
-        for child in node.children:
-            visit_visual(child)
-        if has_text_boundary:
-            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
 
     def resolve_references(
         node: Tag,
@@ -1969,11 +2041,7 @@ def _claim_exposure_texts(
             return ""
         if isinstance(node, NavigableString):
             return str(node)
-        if not isinstance(node, Tag):
-            return ""
-        if is_excluded(node):
-            return ""
-        if is_hidden_input(node):
+        if not isinstance(node, Tag) or is_excluded(node) or is_hidden_input(node):
             return ""
         aria_hidden = node.get("aria-hidden")
         if not active_references and (
@@ -2013,6 +2081,65 @@ def _claim_exposure_texts(
         )
         return " ".join((primary_text, *descriptions))
 
+    return accessible_text, resolve_references, is_hidden_input, replacement_text
+
+
+def _claim_exposure_texts(
+    body_root: Tag,
+    *,
+    excluded_root_classes: Iterable[str] = (),
+) -> tuple[tuple[str, str], str]:
+    visual_parts: list[str] = []
+    phone_visual_parts: list[str] = []
+    excluded_classes = frozenset(excluded_root_classes)
+
+    def is_excluded(node: Tag) -> bool:
+        return bool(_exact_class_names(node) & excluded_classes) or any(
+            _exact_class_names(parent) & excluded_classes
+            for parent in node.parents
+            if isinstance(parent, Tag)
+        )
+
+    (
+        accessible_text,
+        _resolve_references,
+        is_hidden_input,
+        replacement_text,
+    ) = _build_accessibility_text_resolver(body_root, is_excluded=is_excluded)
+
+    def tooltip_text(node: Tag) -> str:
+        value = node.get("title")
+        return value if isinstance(value, str) else ""
+
+    def visit_visual(node: Any) -> None:
+        if isinstance(node, Comment):
+            return
+        if isinstance(node, NavigableString):
+            text = str(node)
+            visual_parts.append(text)
+            phone_visual_parts.append(text)
+            return
+        if not isinstance(node, Tag):
+            return
+        if is_excluded(node):
+            return
+        if is_render_suppressed_element(node):
+            return
+        has_text_boundary = node.name.casefold() in DOM_ADJACENCY_BOUNDARY_TAGS
+        if has_text_boundary:
+            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
+        tooltip = tooltip_text(node)
+        if tooltip:
+            visual_parts.append(tooltip)
+        replacement = replacement_text(node)
+        if replacement:
+            visual_parts.append(replacement)
+            phone_visual_parts.append(replacement)
+        for child in node.children:
+            visit_visual(child)
+        if has_text_boundary:
+            phone_visual_parts.append(DOM_ADJACENCY_BOUNDARY)
+
     accessible_parts: list[str] = []
 
     def visit_accessible(node: Any) -> None:
@@ -2034,6 +2161,7 @@ def _claim_exposure_texts(
         ):
             return
         accessible_parts.append(accessible_text(node, frozenset()))
+        accessible_parts.extend(_direct_user_facing_text_values(node))
         for child in node.children:
             visit_accessible(child)
 
@@ -2564,6 +2692,60 @@ def _required_child_sequence_mismatches(
     return mismatches
 
 
+def _validate_service_cards(body_root: Tag, expected_services: object) -> None:
+    services = _contract_text_values(expected_services, "Expected service")
+    cards = _elements_with_class(body_root, "service-card")
+    actual_names: list[str] = []
+    actual_descriptions: list[str] = []
+    for card in cards:
+        names = [
+            child
+            for child in card.find_all(True, recursive=False)
+            if "service-card-name" in _exact_class_names(child)
+        ]
+        if len(names) != 1:
+            raise GeneratedBodyError(
+                "Generated body service card names do not have one direct owner per card."
+            )
+        value = names[0].get_text(" ", strip=True)
+        if not value:
+            raise GeneratedBodyError("Generated body service card names cannot be empty.")
+        actual_names.append(value)
+
+        descriptions = [
+            child
+            for child in card.find_all(True, recursive=False)
+            if "service-card-desc" in _exact_class_names(child)
+        ]
+        if len(descriptions) != 1:
+            raise GeneratedBodyError(
+                "Generated body service card descriptions do not have one direct owner per card."
+            )
+        value = descriptions[0].get_text(" ", strip=True)
+        if not value:
+            raise GeneratedBodyError(
+                "Generated body service card descriptions cannot be empty."
+            )
+        actual_descriptions.append(value)
+
+    normalized_expected = tuple(_normalize_source_owned_text(value) for value in services)
+    normalized_actual = tuple(_normalize_source_owned_text(value) for value in actual_names)
+    if normalized_actual != normalized_expected:
+        raise GeneratedBodyError(
+            "Generated body service card names do not match the supplied services."
+        )
+    expected_descriptions = tuple(
+        source_owned_service_description(service) for service in services
+    )
+    normalized_descriptions = tuple(
+        _normalize_source_owned_text(value) for value in actual_descriptions
+    )
+    if normalized_descriptions != expected_descriptions:
+        raise GeneratedBodyError(
+            "Generated body service card descriptions do not match code-owned source text."
+        )
+
+
 def _address_like_values(surface: str) -> tuple[str, ...]:
     normalized = unicodedata.normalize("NFKC", surface)
     values: list[str] = []
@@ -3051,6 +3233,8 @@ def _validate_source_contacts(
 def _validate_location_claims(
     claim_surfaces: Iterable[str],
     contract: LocationAdmissionContract,
+    *,
+    composed_claim_surfaces: Iterable[str] = (),
 ) -> None:
     if not isinstance(contract, LocationAdmissionContract):
         raise GeneratedBodyError("Expected location admission contract is invalid.")
@@ -3083,19 +3267,13 @@ def _validate_location_claims(
         for source in source_location_surfaces
         if source
     )
-    for raw_surface in claim_surfaces:
+    direct_surfaces = tuple(claim_surfaces)
+    composed_surfaces = tuple(composed_claim_surfaces)
+    for raw_surface in (*direct_surfaces, *composed_surfaces):
         for match in SERVICE_RADIUS_CLAIM_PATTERN.finditer(raw_surface):
             if int(match.group("miles")) not in source_radius_values:
                 raise GeneratedBodyError(
                     "Generated body service radius does not match verified location data."
-                )
-        for match in CITY_STATE_CLAIM_PATTERN.finditer(raw_surface):
-            location = _normalize_claim_match_text(
-                f"{match.group('city')}, {match.group('state')}"
-            )
-            if not any(location in source for source in normalized_sources):
-                raise GeneratedBodyError(
-                    "Generated body location does not match verified location data."
                 )
         for match in SERVICE_PLACE_CLAIM_PATTERN.finditer(raw_surface):
             place = match.group("place").strip()
@@ -3111,6 +3289,15 @@ def _validate_location_claims(
             ):
                 raise GeneratedBodyError(
                     "Generated body service location does not match verified location data."
+                )
+    for raw_surface in direct_surfaces:
+        for match in CITY_STATE_CLAIM_PATTERN.finditer(raw_surface):
+            location = _normalize_claim_match_text(
+                f"{match.group('city')}, {match.group('state')}"
+            )
+            if not any(location in source for source in normalized_sources):
+                raise GeneratedBodyError(
+                    "Generated body location does not match verified location data."
                 )
 
 
@@ -3313,6 +3500,355 @@ def _validate_tenure_claims(
                     )
 
 
+def _validate_visible_copy(
+    body_root: Tag,
+    contract: VisibleCopyAdmissionContract,
+) -> None:
+    """Reject visible or accessibility copy outside one exact authority set."""
+    if not isinstance(contract, VisibleCopyAdmissionContract):
+        raise GeneratedBodyError("Visible-copy admission contract is invalid.")
+    allowed_fragments = _contract_text_values(
+        contract.allowed_fragments,
+        "Visible-copy fragment",
+    )
+    normalized_allowed = {
+        _normalize_source_owned_text(fragment) for fragment in allowed_fragments
+    }
+    layout_composition_classes = set(
+        _contract_text_values(
+            contract.layout_composition_classes,
+            "Visible-copy layout composition class",
+        )
+    )
+    independent_component_classes = set(
+        _contract_text_values(
+            contract.independent_component_classes,
+            "Visible-copy independent component class",
+        )
+    )
+    case_preserved_classes = set(
+        _contract_text_values(
+            contract.case_preserved_classes,
+            "Visible-copy case-preserved class",
+        )
+    )
+    text_transforming_selectors = _contract_text_values(
+        contract.text_transforming_selectors,
+        "Visible-copy text-transforming selector",
+    )
+    text_transforming_element_ids: set[int] = set()
+    for selector in text_transforming_selectors:
+        try:
+            text_transforming_element_ids.update(
+                id(element) for element in body_root.select(selector)
+            )
+        except SelectorSyntaxError as exc:
+            raise GeneratedBodyError(
+                "Visible-copy text-transforming selector contract is invalid."
+            ) from exc
+
+    required_classes: set[str] = set()
+    for class_name, expected_values in contract.required_class_text:
+        if (
+            not isinstance(class_name, str)
+            or not class_name
+            or class_name in required_classes
+        ):
+            raise GeneratedBodyError(
+                "Visible-copy required-class contract is invalid."
+            )
+        required_classes.add(class_name)
+        normalized_expected = tuple(
+            _normalize_source_owned_text(value)
+            for value in _contract_text_values(
+                expected_values,
+                f"Visible-copy {class_name}",
+            )
+        )
+        actual = tuple(
+            _normalize_source_owned_text(element.get_text(" ", strip=True))
+            for element in _elements_with_class(body_root, class_name)
+        )
+        if actual != normalized_expected:
+            raise GeneratedBodyError(
+                "Generated body visible copy does not match the code-owned "
+                f"{class_name} contract."
+            )
+
+    def is_visually_exposed(element: Tag) -> bool:
+        return not any(
+            is_render_suppressed_element(candidate)
+            for candidate in (element, *element.parents)
+            if isinstance(candidate, Tag)
+        )
+
+    accessible_text, resolve_references, _, replacement_text = (
+        _build_accessibility_text_resolver(
+            body_root,
+            is_excluded=lambda _element: False,
+        )
+    )
+
+    def inline_visible_text(node: Any) -> str:
+        if isinstance(node, Comment):
+            return ""
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag) or not is_visually_exposed(node):
+            return ""
+        if node.name.casefold() in VISIBLE_TEXT_OWNER_BOUNDARY_TAGS:
+            return ""
+        replacement = replacement_text(node)
+        if replacement:
+            return replacement
+        return " ".join(
+            fragment
+            for child in node.children
+            if (fragment := _normalize_source_owned_text(inline_visible_text(child)))
+        )
+
+    def complete_visible_text(node: Any) -> str:
+        if isinstance(node, Comment):
+            return ""
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag) or not is_visually_exposed(node):
+            return ""
+        if (
+            node.name.casefold() == "title"
+            and isinstance(node.parent, Tag)
+            and node.parent.name.casefold() == "svg"
+        ):
+            return ""
+        replacement = replacement_text(node)
+        if replacement:
+            return replacement
+        return " ".join(
+            fragment
+            for child in node.children
+            if (fragment := _normalize_source_owned_text(complete_visible_text(child)))
+        )
+
+    def owns_independent_layout_item(element: Tag) -> bool:
+        owner_classes = independent_component_classes | required_classes
+        return any(
+            candidate.name.casefold() in INDEPENDENT_LAYOUT_ITEM_TAGS
+            or bool(candidate.get("role"))
+            or bool(_exact_class_names(candidate) & owner_classes)
+            or _inside_review_root(candidate)
+            for candidate in (element, *element.find_all(True))
+        )
+
+    def owns_validated_review_stars(element: Tag) -> bool:
+        return _inside_review_root(element) or any(
+            _exact_class_names(candidate) & AMBIENT_REVIEW_STAR_CLASSES
+            for candidate in (element, *element.parents)
+            if isinstance(candidate, Tag)
+        )
+
+    for class_name in case_preserved_classes:
+        for owner in _elements_with_class(body_root, class_name):
+            for text_node in owner.find_all(string=True):
+                if (
+                    isinstance(text_node, Comment)
+                    or not _normalize_source_owned_text(str(text_node))
+                    or not isinstance(text_node.parent, Tag)
+                ):
+                    continue
+                for candidate in (text_node.parent, *text_node.parent.parents):
+                    if not isinstance(candidate, Tag):
+                        continue
+                    if id(candidate) in text_transforming_element_ids:
+                        raise GeneratedBodyError(
+                            "Generated body visually transforms source-owned case for "
+                            f"{class_name}."
+                        )
+                    if candidate is body_root:
+                        break
+
+    exposed_fragments: list[str] = []
+    for node in body_root.descendants:
+        if (
+            isinstance(node, NavigableString)
+            and not isinstance(node, Comment)
+            and isinstance(node.parent, Tag)
+            and is_visually_exposed(node.parent)
+        ):
+            fragment = _normalize_source_owned_text(str(node))
+            if (
+                fragment
+                and not (
+                    fragment == "★★★★★"
+                    and owns_validated_review_stars(node.parent)
+                )
+            ):
+                exposed_fragments.append(fragment)
+
+    for element in (body_root, *body_root.find_all(True)):
+        if not is_visually_exposed(element):
+            continue
+        tag_name = element.name.casefold()
+        if tag_name == "ol" or (
+            tag_name == "li" and isinstance(element.get("value"), str)
+        ):
+            raise GeneratedBodyError(
+                "Generated body contains browser-generated ordered-list copy "
+                "outside a source-bound component contract."
+            )
+        role_names = {
+            token.casefold()
+            for token in str(element.get("role") or "").split()
+        }
+        input_type = str(element.get("type") or "text").casefold()
+        has_numeric_semantics = (
+            tag_name in {"meter", "progress"}
+            or (
+                tag_name == "input"
+                and input_type in UNCONTRACTED_NUMERIC_INPUT_TYPES
+            )
+            or bool(role_names & UNCONTRACTED_NUMERIC_ROLE_NAMES)
+            or any(
+                isinstance(element.get(attribute), str)
+                and bool(element.get(attribute).strip())
+                for attribute in UNCONTRACTED_NUMERIC_ARIA_ATTRIBUTES
+            )
+        )
+        if has_numeric_semantics:
+            raise GeneratedBodyError(
+                "Generated body contains numeric control semantics outside a "
+                "source-bound component contract."
+            )
+        for value in _direct_user_facing_text_values(element):
+            fragment = _normalize_source_owned_text(value)
+            if fragment:
+                exposed_fragments.append(fragment)
+
+    for element in (body_root, *body_root.find_all(True)):
+        if not is_visually_exposed(element):
+            continue
+        for attribute in INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES:
+            value = element.get(attribute)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            fragment = _normalize_source_owned_text(
+                resolve_references(element, attribute, frozenset())
+            )
+            if fragment:
+                exposed_fragments.append(fragment)
+
+        if not _inside_review_root(element) and (
+            element.name.casefold() in ACCESSIBLE_TEXT_OWNER_TAGS
+            or bool(element.get("role"))
+            or any(
+                isinstance(element.get(attribute), str)
+                and bool(element.get(attribute).strip())
+                for attribute in (
+                    *DIRECT_USER_FACING_TEXT_ATTRIBUTES,
+                    *INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES,
+                )
+                if attribute.startswith("aria-")
+            )
+        ):
+            has_explicit_accessibility_copy = any(
+                isinstance(element.get(attribute), str)
+                and bool(element.get(attribute).strip())
+                for attribute in (
+                    *DIRECT_USER_FACING_TEXT_ATTRIBUTES,
+                    *INDIRECT_ACCESSIBILITY_TEXT_ATTRIBUTES,
+                )
+                if attribute.startswith("aria-")
+            )
+            rendered_owner_copy = _normalize_source_owned_text(
+                complete_visible_text(element)
+            )
+            accessible_fragment = _normalize_source_owned_text(
+                accessible_text(element, frozenset())
+            )
+            if rendered_owner_copy and not has_explicit_accessibility_copy:
+                accessible_fragment = rendered_owner_copy
+            if accessible_fragment:
+                exposed_fragments.append(accessible_fragment)
+
+    for owner in (body_root, *body_root.find_all(True)):
+        if (
+            not is_visually_exposed(owner)
+            or _inside_review_root(owner)
+            or (
+                owner is not body_root
+                and owner.name.casefold() not in VISIBLE_TEXT_OWNER_BOUNDARY_TAGS
+            )
+        ):
+            continue
+        inline_run: list[str] = []
+
+        def flush_inline_run() -> None:
+            fragment = _normalize_source_owned_text(" ".join(inline_run))
+            if fragment:
+                exposed_fragments.append(fragment)
+            inline_run.clear()
+
+        for child in owner.children:
+            if (
+                isinstance(child, Tag)
+                and child.name.casefold() in VISIBLE_TEXT_OWNER_BOUNDARY_TAGS
+            ):
+                if child.name.casefold() in NATIVE_INLINE_COMPOSITION_TAGS:
+                    fragment = _normalize_source_owned_text(
+                        complete_visible_text(child)
+                    )
+                    if fragment:
+                        inline_run.append(fragment)
+                    continue
+                flush_inline_run()
+                continue
+            fragment = _normalize_source_owned_text(inline_visible_text(child))
+            if fragment:
+                inline_run.append(fragment)
+        flush_inline_run()
+
+    for owner in (body_root, *body_root.find_all(True)):
+        if (
+            not is_visually_exposed(owner)
+            or _inside_review_root(owner)
+            or owns_validated_review_stars(owner)
+            or bool(
+                _exact_class_names(owner)
+                & (independent_component_classes | required_classes)
+            )
+            or not (
+                owner.name.casefold() in NATIVE_LAYOUT_COMPOSITION_TAGS
+                or _exact_class_names(owner) & layout_composition_classes
+            )
+        ):
+            continue
+        layout_run: list[str] = []
+
+        def flush_layout_run() -> None:
+            fragment = _normalize_source_owned_text(" ".join(layout_run))
+            if fragment:
+                exposed_fragments.append(fragment)
+            layout_run.clear()
+
+        for child in owner.children:
+            if isinstance(child, Tag) and owns_independent_layout_item(child):
+                flush_layout_run()
+                continue
+            fragment = _normalize_source_owned_text(complete_visible_text(child))
+            if fragment:
+                layout_run.append(fragment)
+        flush_layout_run()
+
+    unsupported = sorted(
+        {fragment for fragment in exposed_fragments if fragment not in normalized_allowed},
+        key=str.casefold,
+    )
+    if unsupported:
+        raise GeneratedBodyError(
+            "Generated body contains visible copy outside the source-owned "
+            f"catalog: {unsupported[0]!r}."
+        )
+
+
 def validate_generated_body(
     result: GenerationResult,
     *,
@@ -3335,6 +3871,8 @@ def validate_generated_body(
     exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
+    expected_services: object = _EXPECTED_SERVICES_UNSET,
+    expected_visible_copy: object = _EXPECTED_VISIBLE_COPY_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -3562,6 +4100,11 @@ def validate_generated_body(
         *parser.decoded_attribute_values,
         *(unquote(value) for value in parser.decoded_attribute_values),
     )
+    location_claim_surfaces = (
+        dom_adjacent_visual_surface,
+        *parser.decoded_attribute_values,
+        *(unquote(value) for value in parser.decoded_attribute_values),
+    )
     if source_contacts is not _SOURCE_CONTACT_UNSET:
         _validate_source_contacts(
             body_root,
@@ -3578,7 +4121,11 @@ def validate_generated_body(
             exact_claim_surfaces,
         )
     if expected_location is not _EXPECTED_LOCATION_UNSET:
-        _validate_location_claims(exact_claim_surfaces, expected_location)
+        _validate_location_claims(
+            location_claim_surfaces,
+            expected_location,
+            composed_claim_surfaces=exposure_surfaces,
+        )
     if expected_service_locations is not _EXPECTED_SERVICE_LOCATION_UNSET:
         _validate_service_location_claims(body_root, expected_service_locations)
     if expected_images is not _EXPECTED_IMAGES_UNSET:
@@ -3766,6 +4313,10 @@ def validate_generated_body(
         raise GeneratedBodyError(
             f"Generated body contains unresolved prompt placeholders: {leaked}."
         )
+    if expected_services is not _EXPECTED_SERVICES_UNSET:
+        _validate_service_cards(body_root, expected_services)
+    if expected_visible_copy is not _EXPECTED_VISIBLE_COPY_UNSET:
+        _validate_visible_copy(body_root, expected_visible_copy)
     return body
 
 
@@ -3806,6 +4357,85 @@ def extract_template_class_names(template_html: str) -> tuple[str, ...]:
     if not class_names:
         raise GeneratedHtmlError("Base template body has no class vocabulary.")
     return tuple(sorted(class_names, key=str.casefold))
+
+
+def extract_template_layout_composition_class_names(
+    template_html: str,
+) -> tuple[str, ...]:
+    """Return classes whose template CSS can visually compose child copy."""
+    composing_displays = {
+        "contents",
+        "flex",
+        "grid",
+        "inline",
+        "inline-block",
+        "inline-flex",
+        "inline-grid",
+        "inline-table",
+        "table",
+        "table-cell",
+        "table-row",
+    }
+    class_names: set[str] = set()
+    for style_block in re.findall(
+        r"<style(?:\s[^>]*)?>(.*?)</style\s*>",
+        template_html,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        for selector_block, declarations in re.findall(
+            r"([^{}]+)\{([^{}]*)\}",
+            style_block,
+            re.DOTALL,
+        ):
+            display_values = {
+                match.group(1).casefold()
+                for match in re.finditer(
+                    r"(?:^|;)\s*display\s*:\s*([A-Za-z-]+)",
+                    declarations,
+                    re.IGNORECASE,
+                )
+            }
+            if not (display_values & composing_displays):
+                continue
+            for selector in selector_block.split(","):
+                target = re.split(r"\s+|[>+~]", selector.strip())[-1]
+                class_names.update(
+                    re.findall(r"\.([A-Za-z_][A-Za-z0-9_-]*)", target)
+                )
+    return tuple(sorted(class_names, key=str.casefold))
+
+
+def extract_template_text_transforming_selectors(
+    template_html: str,
+) -> tuple[str, ...]:
+    """Return complete template selectors that transform displayed case."""
+    selectors: set[str] = set()
+    for style_block in re.findall(
+        r"<style(?:\s[^>]*)?>(.*?)</style\s*>",
+        template_html,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        style_block = re.sub(r"/\*.*?\*/", "", style_block, flags=re.DOTALL)
+        for selector_block, declarations in re.findall(
+            r"([^{}]+)\{([^{}]*)\}",
+            style_block,
+            re.DOTALL,
+        ):
+            transform_values = {
+                match.group(1).casefold()
+                for match in re.finditer(
+                    r"(?:^|;)\s*text-transform\s*:\s*([A-Za-z-]+)",
+                    declarations,
+                    re.IGNORECASE,
+                )
+            }
+            if not (transform_values - {"none", "initial", "inherit", "unset"}):
+                continue
+            for selector in selector_block.split(","):
+                selector = selector.strip()
+                if selector:
+                    selectors.add(selector)
+    return tuple(sorted(selectors, key=str.casefold))
 
 
 def extract_interior_only_class_names(template_html: str) -> tuple[str, ...]:
@@ -3921,6 +4551,8 @@ def assemble_generated_html(
     exact_source_claims: Iterable[tuple[str, str, str]] = (),
     expected_form_action: object = _EXPECTED_FORM_ACTION_UNSET,
     expected_reviews: object = _EXPECTED_REVIEWS_UNSET,
+    expected_services: object = _EXPECTED_SERVICES_UNSET,
+    expected_visible_copy: object = _EXPECTED_VISIBLE_COPY_UNSET,
     required_class_counts: Iterable[tuple[str, int]] = (),
     required_child_class_sequences: Iterable[
         tuple[str, tuple[str, ...]]
@@ -3957,6 +4589,8 @@ def assemble_generated_html(
         exact_source_claims=exact_source_claims,
         expected_form_action=expected_form_action,
         expected_reviews=expected_reviews,
+        expected_services=expected_services,
+        expected_visible_copy=expected_visible_copy,
         required_class_counts=required_class_counts,
         required_child_class_sequences=required_child_class_sequences,
     )

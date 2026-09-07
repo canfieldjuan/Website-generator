@@ -2,7 +2,7 @@ export type ProspectDocument = Record<string, unknown>;
 
 export type ProspectFields = {
   businessName: string;
-  trade: "" | "plumber" | "hvac" | "electrician";
+  trade: string;
   city: string;
   state: string;
   phone: string;
@@ -77,10 +77,12 @@ export function fieldsFromProspect(document: ProspectDocument): ProspectFields {
     }
   }
   const trade = document.trade;
-  if (trade === "plumber" || trade === "hvac" || trade === "electrician") {
-    fields.trade = trade;
+  if (typeof trade === "string") {
+    const normalizedTrade = trade.trim();
+    if (trade && !normalizedTrade) throw new Error("trade must be non-empty text.");
+    fields.trade = normalizedTrade;
   } else if (trade !== undefined && trade !== null) {
-    throw new Error("trade must be plumber, hvac, or electrician.");
+    throw new Error("trade must be text.");
   }
   const services = document.services;
   if (Array.isArray(services)) {
@@ -111,8 +113,9 @@ export function mergeProspectFields(
     }
   }
   if (editedFields.has("trade")) {
-    if (fields.trade) {
-      merged.trade = fields.trade;
+    const trade = fields.trade.trim();
+    if (trade) {
+      merged.trade = trade;
     } else {
       delete merged.trade;
     }

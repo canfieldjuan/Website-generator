@@ -23,7 +23,9 @@ import hashlib
 import argparse
 import copy
 import sys
+import unicodedata
 from datetime import date
+from html import escape
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -42,6 +44,7 @@ from lib.generation import (
     ReviewAdmissionContract,
     ReviewEvidence,
     TenureAdmissionContract,
+    VisibleCopyAdmissionContract,
     action_url_contract_instruction,
     assemble_generated_html,
     atomic_write_text,
@@ -49,6 +52,8 @@ from lib.generation import (
     canonical_email_address,
     extract_homepage_class_names,
     extract_interior_only_class_names,
+    extract_template_layout_composition_class_names,
+    extract_template_text_transforming_selectors,
     extract_square_placeholder_tokens,
     generate_text,
     generate_with_local_admission_retry,
@@ -58,6 +63,7 @@ from lib.generation import (
     require_complete_text,
     resolve_generation_config,
     short_text_generation_config,
+    source_owned_service_description,
     validate_document_colors,
 )
 # lib.email.send_pitch_email is intentionally NOT imported here. The
@@ -91,12 +97,43 @@ BUILD_OUTPUT_ROOT = os.path.join("outputs", "builds")
 EMAIL_DRAFT_ROOT = os.path.join("outputs", "email_drafts")
 BUILD_TEMPERATURE = 0.4
 BUILD_USER_TRUNCATE = 200000
+MAX_BUILD_SERVICES = 12
+MAX_BUILD_SERVICE_NAME_CHARS = 80
+MAX_BUILD_SERVICES_TOTAL_CHARS = 600
 BUILD_FORM_SUBMIT_LABELS = (
     "Send My Request",
     "Get My Estimate",
     "Schedule My Service",
 )
 BUILD_CODE_OWNED_ACTION_PAIRS = (("Request Service", "#contact"),)
+BUILD_PAGE_FUNCTION_BENEFITS = (
+    ("Services", "Review the services listed on this page."),
+    ("Contact", "Use the contact information on this page."),
+    ("Request Service", "Send a service request through this page."),
+)
+BUILD_HERO_SUBHEADLINE = "Review our services and send a request."
+BUILD_FORM_TRUST_COPY = "Use this form to request service."
+BUILD_FIXED_VISIBLE_COPY = (
+    "Request Service",
+    "Not sure if we cover your area?",
+    "Services",
+    "Why Choose Us",
+    "Customer Reviews",
+    "Your name",
+    "Phone number",
+    "Email (optional)",
+    "What's going on?",
+    "Send My Request",
+    "Get My Estimate",
+    "Schedule My Service",
+    "Call us",
+    "Hours",
+    "Service Area",
+    "Read All on Google",
+    "Read All Reviews on Google",
+    "out of 5",
+    "or",
+)
 BUILD_RESPONSE_BOUNDARY_REMINDER = (
     "RESPONSE BOUNDARY: Begin your response immediately with <body. "
     "End immediately with </body>. Emit no leading comment, preamble, markdown "
@@ -156,20 +193,23 @@ BOOLEAN_CLAIM_FIELDS = frozenset(
 BUILD_REQUIRED_CLASS_COUNTS = (
     ("site-nav", 1),
     ("dual-cta-hero", 1),
+    ("dual-cta-headline", 1),
+    ("dual-cta-sub", 1),
     ("coverage-band", 1),
     ("services-grid", 1),
-    ("service-card", 6),
-    ("service-card-name", 6),
-    ("service-card-desc", 6),
     ("benefits-grid", 1),
     ("benefit-card", 3),
+    ("benefit-title", 3),
+    ("benefit-desc", 3),
     ("contact-form-wrap", 1),
+    ("form-trust", 1),
+    ("ft-tagline", 1),
     *REQUIRED_FOOTER_CLASS_COUNTS,
 )
 BUILD_REQUIRED_CHILD_CLASS_SEQUENCES = (
-    ("services-grid", ("service-card",) * 6),
     ("service-card", ("service-card-name", "service-card-desc")),
     ("benefits-grid", ("benefit-card",) * 3),
+    ("benefit-card", ("benefit-title", "benefit-desc")),
     *REQUIRED_FOOTER_CHILD_CLASS_SEQUENCES,
 )
 
@@ -338,6 +378,7 @@ def review_contract_instruction(contract):
 
 def required_build_class_counts(prospect):
     """Return the exact page skeleton valid for the sanitized prospect."""
+    service_count = len(prospect["services"])
     base_counts = (
         BUILD_REQUIRED_CLASS_COUNTS
         if prospect.get("phone")
@@ -346,7 +387,24 @@ def required_build_class_counts(prospect):
             for class_name, expected_count in BUILD_REQUIRED_CLASS_COUNTS
         )
     )
-    return (*base_counts, *_review_class_counts(expected_review_contract(prospect)))
+    service_counts = (
+        ("service-card", service_count),
+        ("service-card-name", service_count),
+        ("service-card-desc", service_count),
+    )
+    return (
+        *base_counts,
+        *service_counts,
+        *_review_class_counts(expected_review_contract(prospect)),
+    )
+
+
+def required_build_child_class_sequences(prospect):
+    """Return source-sized direct-child contracts for the build skeleton."""
+    return (
+        ("services-grid", ("service-card",) * len(prospect["services"])),
+        *BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
+    )
 
 
 def expected_build_form_action(prospect):
@@ -389,22 +447,252 @@ def expected_build_action_url_contract(prospect, review_contract):
     )
 
 
-BUILD_SERVICES_RESPONSE_SCAFFOLD = (
-    '<div class="page-wrap section-gap">\n'
-    '  <div class="sec-hd">\n'
-    '    <span class="sec-title"><span class="sec-dot"></span>Services</span>\n'
-    '  </div>\n'
-    '  <div class="services-grid">\n'
-    + "\n".join(
-        '    <div class="service-card">\n'
-        f'      <div class="service-card-name">[SERVICE_{index}_NAME]</div>\n'
-        f'      <p class="service-card-desc">[SERVICE_{index}_DESCRIPTION]</p>\n'
-        '    </div>'
-        for index in range(1, 7)
+def build_services_response_scaffold(services):
+    return (
+        '<div class="page-wrap section-gap">\n'
+        '  <div class="sec-hd">\n'
+        '    <span class="sec-title"><span class="sec-dot"></span>Services</span>\n'
+        '  </div>\n'
+        '  <div class="services-grid">\n'
+        + "\n".join(
+            '    <div class="service-card">\n'
+            f'      <div class="service-card-name">{escape(service)}</div>\n'
+            f'      <p class="service-card-desc">'
+            f'{escape(source_owned_service_description(service))}</p>\n'
+            '    </div>'
+            for service in services
+        )
+        + '\n  </div>\n'
+        '</div>'
     )
-    + '\n  </div>\n'
-    '</div>'
-)
+
+
+def expected_build_display_name(prospect):
+    """Return the exact source-owned display identity used in generated copy."""
+    display_name = prospect.get("display_name")
+    if isinstance(display_name, str) and display_name.strip():
+        return display_name.strip()
+    legal_name = prospect["business_name"].strip()
+    without_suffix = re.sub(
+        r"\s*,?\s+(?:incorporated|inc|llc|l\.l\.c|co|company)\.?$",
+        "",
+        legal_name,
+        flags=re.IGNORECASE,
+    ).strip()
+    return without_suffix.title() or legal_name
+
+
+def expected_build_visible_copy(
+    prospect,
+    review_contract,
+    *,
+    layout_composition_classes=(),
+    text_transforming_selectors=(),
+):
+    """Build the exhaustive visible-copy authority for from-scratch output."""
+    display_name = expected_build_display_name(prospect)
+    footer_tagline = f"{display_name} — {prospect['city']}, {prospect['state']}"
+    build_year = str(prospect.get("build_date") or date.today().isoformat())[:4]
+    copyright_line = (
+        f"© {build_year} {prospect['business_name']}. All rights reserved."
+    )
+    allowed = [
+        *BUILD_FIXED_VISIBLE_COPY,
+        BUILD_HERO_SUBHEADLINE,
+        BUILD_FORM_TRUST_COPY,
+        footer_tagline,
+        copyright_line,
+        *(value for pair in BUILD_PAGE_FUNCTION_BENEFITS for value in pair),
+    ]
+    for field in (
+        "business_name",
+        "display_name",
+        "trade",
+        "city",
+        "state",
+        "phone",
+        "owner_email",
+        "address",
+        "hours",
+        "service_radius",
+    ):
+        value = prospect.get(field)
+        if isinstance(value, str) and value.strip():
+            allowed.append(value.strip())
+    allowed.append(display_name)
+    allowed.extend(
+        (
+            f"Serving {prospect['city']}, {prospect['state']}.",
+            f"Serving the {prospect['city']} area.",
+        )
+    )
+    service_radius = prospect.get("service_radius")
+    if isinstance(service_radius, str) and service_radius.strip():
+        allowed.append(f"Serving {service_radius.strip().rstrip('.')}.")
+    hours = prospect.get("hours")
+    if isinstance(hours, str):
+        allowed.extend(
+            clause.strip()
+            for clause in hours.split(",")
+            if clause.strip()
+        )
+
+    for service in prospect["services"]:
+        allowed.extend((service, source_owned_service_description(service)))
+    promises = prospect.get("service_promises")
+    if isinstance(promises, list):
+        allowed.extend(
+            promise.strip()
+            for promise in promises
+            if isinstance(promise, str) and promise.strip()
+        )
+    allowed.extend(verified_source_claim_phrases(prospect))
+    allowed.extend(
+        exact_phrase
+        for _label, _trigger, exact_phrase in exact_source_claim_contracts(prospect)
+    )
+
+    phone = prospect.get("phone")
+    if isinstance(phone, str) and phone.strip():
+        allowed.extend((f"Call {phone.strip()}", f"Call {phone.strip()} →"))
+    hero_badge = None
+    if prospect.get("has_24_7") is True:
+        hero_badge = "Available 24/7"
+        allowed.append("24/7 Emergency Service Available")
+    else:
+        promises = prospect.get("service_promises")
+        normalized_promises = (
+            tuple(
+                promise.casefold()
+                for promise in promises
+                if isinstance(promise, str) and promise.strip()
+            )
+            if isinstance(promises, list)
+            else ()
+        )
+        if _field_claim_is_verified(
+            prospect,
+            "same_day_service",
+            normalized_promises,
+            claim="Same Day",
+        ):
+            hero_badge = "Same-Day Service"
+    if hero_badge is not None:
+        allowed.append(hero_badge)
+        if isinstance(phone, str) and phone.strip():
+            phone_value = phone.strip()
+            allowed.extend(
+                (
+                    f"{hero_badge} {phone_value}",
+                    f"{phone_value} {hero_badge}",
+                )
+            )
+    trust_components = []
+    if prospect.get("licensed_and_insured") is True:
+        trust_components.extend(("Licensed", "insured"))
+    if prospect.get("family_owned") is True:
+        trust_components.append("family-owned")
+    if prospect.get("locally_owned") is True:
+        trust_components.append("locally owned")
+    if trust_components:
+        allowed.append(", ".join(trust_components) + ".")
+    established_year = prospect.get("established_year")
+    if isinstance(established_year, int) and not isinstance(established_year, bool):
+        allowed.append(f"Established in {established_year}")
+    years_in_business = prospect.get("years_in_business")
+    if isinstance(years_in_business, int) and not isinstance(years_in_business, bool):
+        allowed.append(f"{years_in_business} years in business")
+
+    if review_contract.mode == "cards":
+        for review in review_contract.source_reviews:
+            allowed.extend(
+                (
+                    review.author,
+                    str(review.rating),
+                    review.date,
+                    review.platform,
+                    review.text,
+                )
+            )
+    if review_contract.aggregate_score is not None:
+        score = review_contract.aggregate_score
+        count = review_contract.aggregate_count
+        score_phrases = (f"{score} out of 5",)
+        count_phrases = (
+            f"Based on {count} Google Reviews",
+            f"Based on {count} reviews on Google",
+        )
+        allowed.extend(
+            (
+                str(score),
+                *score_phrases,
+                f"Based on {count} Google Reviews",
+                f"· Based on {count} Google Reviews",
+                f"Based on {count} reviews on Google",
+                *(
+                    f"{prefix}{score_phrase} {count_phrase}"
+                    for prefix in ("", "★★★★★ ")
+                    for score_phrase in score_phrases
+                    for count_phrase in count_phrases
+                ),
+            )
+        )
+
+    radius_match = re.search(
+        r"(?<!\d)(\d{1,4})\s*(?:-\s*)?(?:miles?|mi)\b",
+        str(prospect.get("service_radius") or ""),
+        flags=re.IGNORECASE,
+    )
+    if radius_match:
+        radius = radius_match.group(1)
+        allowed.extend(
+            (
+                f"{radius}-MILE RADIUS",
+                f"{radius}-mile service area centered on "
+                f"{prospect['city']}, {prospect['state']}",
+            )
+        )
+
+    required_class_text = (
+        ("dual-cta-headline", (display_name,)),
+        ("dual-cta-sub", (BUILD_HERO_SUBHEADLINE,)),
+        (
+            "benefit-title",
+            tuple(title for title, _description in BUILD_PAGE_FUNCTION_BENEFITS),
+        ),
+        (
+            "benefit-desc",
+            tuple(description for _title, description in BUILD_PAGE_FUNCTION_BENEFITS),
+        ),
+        ("form-trust", (BUILD_FORM_TRUST_COPY,)),
+        ("ft-tagline", (footer_tagline,)),
+    )
+    return VisibleCopyAdmissionContract(
+        allowed_fragments=tuple(dict.fromkeys(allowed)),
+        required_class_text=required_class_text,
+        layout_composition_classes=tuple(layout_composition_classes),
+        independent_component_classes=("benefit-card", "ft-address", "service-card"),
+        case_preserved_classes=("service-card-name",),
+        text_transforming_selectors=tuple(text_transforming_selectors),
+    )
+
+
+def visible_copy_contract_instruction(contract):
+    if not isinstance(contract, VisibleCopyAdmissionContract):
+        raise ValueError("Visible-copy contract is invalid.")
+    pinned = {
+        class_name: values for class_name, values in contract.required_class_text
+    }
+    return (
+        "VISIBLE COPY CONTRACT (EXHAUSTIVE): Every rendered text node and every "
+        "native user-facing text attribute or text-valued ARIA property must be "
+        "one complete, exact entry from this catalog: "
+        f"{json.dumps(contract.allowed_fragments, ensure_ascii=False)}. "
+        "Do not write free-form sales copy and do not split or combine catalog "
+        "entries to construct a new claim. These class owners are mandatory and "
+        "must contain the exact listed values in order: "
+        f"{json.dumps(pinned, ensure_ascii=False)}."
+    )
 
 REQUIRED_FIELDS = ("business_name", "trade", "city", "state", "phone")
 OPTIONAL_STRING_FIELDS = ("display_name", "owner_email", "address")
@@ -518,6 +806,44 @@ def prepare_prospect(prospect, build_date=None):
             "Prospect JSON required field(s) must be non-empty strings: "
             f"{', '.join(invalid)}"
         )
+    prospect["trade"] = prospect["trade"].strip()
+    services = prospect.get("services")
+    if (
+        not isinstance(services, list)
+        or not services
+        or any(not isinstance(service, str) or not service.strip() for service in services)
+    ):
+        raise ValueError(
+            "Prospect JSON services must be a non-empty list of non-empty strings."
+        )
+    normalized_services = [
+        " ".join(unicodedata.normalize("NFKC", service).split())
+        for service in services
+    ]
+    if len(normalized_services) > MAX_BUILD_SERVICES:
+        raise ValueError(
+            f"Prospect JSON services must contain at most {MAX_BUILD_SERVICES} items."
+        )
+    if any(
+        len(service) > MAX_BUILD_SERVICE_NAME_CHARS
+        for service in normalized_services
+    ):
+        raise ValueError(
+            "Prospect JSON service names must contain at most "
+            f"{MAX_BUILD_SERVICE_NAME_CHARS} characters each."
+        )
+    if sum(len(service) for service in normalized_services) > (
+        MAX_BUILD_SERVICES_TOTAL_CHARS
+    ):
+        raise ValueError(
+            "Prospect JSON service names must contain at most "
+            f"{MAX_BUILD_SERVICES_TOTAL_CHARS} characters in total."
+        )
+    if len({service.casefold() for service in normalized_services}) != len(
+        normalized_services
+    ):
+        raise ValueError("Prospect JSON services must not contain duplicates.")
+    prospect["services"] = normalized_services
     invalid_optional_strings = [
         key
         for key in OPTIONAL_STRING_FIELDS
@@ -834,6 +1160,13 @@ def filter_unverified_claim_examples(prompt_text, prospect):
             flags=re.IGNORECASE,
         )
     return filtered
+
+
+def industry_generation_guidance(prompt_text):
+    """Return only universal source-authority rules for body generation."""
+    first_trade = re.search(r"(?m)^## TRADE: [^\n]+\s*$", prompt_text)
+    preamble = prompt_text[: first_trade.start()] if first_trade else prompt_text
+    return preamble.strip() + "\n"
 
 
 REVIEW_PROMPT_BRANCH_PATTERN = re.compile(
@@ -1286,7 +1619,7 @@ def build_hero_prompt(prospect):
     if template:
         return template.replace("[CITY]", city).replace("[STATE]", state)
 
-    # Trade-agnostic fallback. Fires when the prospect's trade key has
+    # Business-neutral fallback. Fires when the prospect's trade key has
     # no matching `## TRADE:` section in 07, or the Path 2 block is
     # missing / unparseable. Keeps the build resilient if 07 is edited
     # in a way that breaks the regex; the prospect still gets a hero.
@@ -1294,10 +1627,10 @@ def build_hero_prompt(prospect):
     return (
         f"Professional photorealistic hero image for a local {display_trade} business in "
         f"{city}, {state}. Wide cinematic crop, golden-hour natural light, depth "
-        f"of field. Subject: a clean service van in a residential driveway OR a "
-        f"close-up of professional tools in use. NO text, NO logos, NO faces "
-        f"clearly visible, no branded apparel from any specific company. "
-        f"Generic-but-professional. Avoid stock-photo cliches."
+        f"of field. Subject: an abstract editorial composition of natural light, "
+        f"texture, and architectural geometry suitable for a professional local "
+        f"business. NO trade-specific equipment, products, vehicles, residential "
+        f"property, text, logos, or clearly visible faces. Avoid stock-photo cliches."
     )
 
 
@@ -1317,6 +1650,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         system_prompt = f.read()
     with open(INDUSTRY_DEFAULTS_PATH, "r") as f:
         industry_defaults = f.read()
+    industry_defaults = industry_generation_guidance(industry_defaults)
     review_contract = expected_review_contract(prospect)
     system_prompt = filter_review_prompt_branches(system_prompt, review_contract.mode)
     system_prompt = filter_unverified_claim_examples(system_prompt, prospect)
@@ -1327,16 +1661,25 @@ def generate_build_html(prospect, generation_config=None, client=None):
         section_orders = f.read()
     with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
+    visible_copy_contract = expected_build_visible_copy(
+        prospect,
+        review_contract,
+        layout_composition_classes=(
+            extract_template_layout_composition_class_names(base_template)
+        ),
+        text_transforming_selectors=(
+            extract_template_text_transforming_selectors(base_template)
+        ),
+    )
     homepage_classes = extract_homepage_class_names(base_template)
     class_catalog = "\n".join(homepage_classes)
     interior_only_classes = extract_interior_only_class_names(base_template)
 
-    # Static block -- same bytes for every plumber/HVAC/electrician build.
-    # Cache marker on the end of this lets consecutive builds within the
-    # 5-minute ephemeral window pay ~0.1x for these tokens instead of full
-    # price. The static block deliberately comes BEFORE the variable
-    # prospect JSON: prompt caching is a prefix match, so any byte change
-    # before the marker invalidates the cache for that breakpoint.
+    # Static block -- stable across business types because customer and trade
+    # facts live in the variable prospect block. Its cache marker lets
+    # consecutive builds reuse these tokens.
+    # The block deliberately comes BEFORE the variable prospect JSON because
+    # prompt caching is a prefix match.
     #
     # THEMES and SECTION ORDERS are inlined so the LLM can actually look
     # up _computed_theme and _computed_section_order in the catalogs.
@@ -1420,6 +1763,10 @@ def generate_build_html(prospect, generation_config=None, client=None):
         review_contract,
     )
     required_class_counts = required_build_class_counts(prospect)
+    required_child_class_sequences = required_build_child_class_sequences(prospect)
+    services_response_scaffold = build_services_response_scaffold(
+        prospect["services"]
+    )
     if logo_url:
         logo_instruction = (
             f"Use this exact logo URL when rendering the nav: {json.dumps(logo_url)}."
@@ -1435,11 +1782,14 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{json.dumps(dict(required_class_counts), ensure_ascii=False)}\n"
         "MANDATORY SERVICES: At the position required by "
         "prospect._computed_section_order, reproduce the exact scaffold below. "
-        "Replace every square-bracket token with the selected prospect or "
-        "canonical-trade service content; do not emit the tokens themselves.\n"
-        f"{BUILD_SERVICES_RESPONSE_SCAFFOLD}\n"
+        "Its names and descriptions are code-owned source text. Copy every card "
+        "exactly in source order; do not add, omit, merge, rename, re-case, or "
+        "rewrite any service text.\n"
+        f"MANDATORY SERVICE NAMES: {json.dumps(prospect['services'], ensure_ascii=False)}\n"
+        f"{services_response_scaffold}\n"
         "MANDATORY EXACT SUBSTITUTIONS: "
         f"{json.dumps(required_substitutions, ensure_ascii=False)}\n"
+        f"{visible_copy_contract_instruction(visible_copy_contract)}\n"
         f"{source_claim_boundary_instruction(prospect)}\n"
         f"{tenure_contract_instruction(tenure_contract)}\n"
         f"{location_contract_instruction(location_contract)}\n"
@@ -1492,8 +1842,10 @@ def generate_build_html(prospect, generation_config=None, client=None):
             exact_source_claims=exact_source_claim_contracts(prospect),
             expected_form_action=expected_build_form_action(prospect),
             expected_reviews=review_contract,
+            expected_services=tuple(prospect["services"]),
+            expected_visible_copy=visible_copy_contract,
             required_class_counts=required_class_counts,
-            required_child_class_sequences=BUILD_REQUIRED_CHILD_CLASS_SEQUENCES,
+            required_child_class_sequences=required_child_class_sequences,
         )
 
     result, html = generate_with_local_admission_retry(
