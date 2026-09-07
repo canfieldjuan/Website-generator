@@ -113,6 +113,12 @@ numeric range widgets and ARIA value semantics fail closed because the build
 has no generic source contract that can bind their related label/current/min/max
 meaning; canonical review-score components remain governed by the existing
 review evidence contract.
+The same admission pass validates complete inline runs at HTML text owners and
+complete accessible names/descriptions at interactive or ARIA-owned elements,
+so separately allowed source fragments cannot be recombined into a new claim.
+Ordered-list markers also fail closed because their browser-generated copy has
+no source-bound owner in this page contract. Finite source-backed compositions,
+such as the verified phone beside verified 24/7 status, are admitted explicitly.
 The no-radius service-area prompt uses the same exact `Service Area` casing as
 the code-owned catalog.
 
@@ -141,7 +147,7 @@ the code-owned catalog.
 ## Verification
 
 Current implementation evidence is based on commit
-`8aebf26f712686571f17f3316c7cdb40a855788e`. The generated artifact and evidence logs are
+`1bd24970618d01315eec1b1c0dd69c1490730bdc`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
 this block.
@@ -156,7 +162,7 @@ npm --prefix desktop run build
 # TypeScript check and Vite production build passed
 
 python3 -m pytest -q
-# 395 passed, 34 skipped, 680 subtests passed in 45.18s
+# 397 passed, 34 skipped, 683 subtests passed in 48.67s
 
 PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
   python3 build.py examples/prospect-plumber-template.json \
@@ -195,7 +201,7 @@ block after this evidence note is committed.
 
 ## Estimated diff size
 
-The current PR diff is 2,293 changed lines across the 11 declared source files
+The current PR diff is 2,767 changed lines across the 11 declared source files
 plus this plan, exceeding the 400-line soft target. It remains one indivisible
 source-authority slice: intake must accept the business type and services,
 generation must consume exactly those services without trade-profile facts,
