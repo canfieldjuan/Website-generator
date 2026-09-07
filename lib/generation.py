@@ -3596,6 +3596,12 @@ def _validate_visible_copy(
             return str(node)
         if not isinstance(node, Tag) or not is_visually_exposed(node):
             return ""
+        if (
+            node.name.casefold() == "title"
+            and isinstance(node.parent, Tag)
+            and node.parent.name.casefold() == "svg"
+        ):
+            return ""
         replacement = replacement_text(node)
         if replacement:
             return replacement

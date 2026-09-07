@@ -4743,6 +4743,23 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     FakeLocalClient(local_chat_payload(unsupported)),
                 )
 
+        supported_svg = COMPLETE_BUILD_BODY.replace(
+            COMPLETE_SERVICES_GRID,
+            services_grid(services),
+        ).replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<svg role="img" aria-labelledby="roof-title">'
+            '<title id="roof-title">Roof</title><text>Roof</text>'
+            '</svg></section>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported_svg)),
+        )
+        self.assertIn('<title id="roof-title">Roof</title>', html)
+
     def test_build_generator_rejects_visual_case_transform_on_service_names(self):
         services = ("eBay Repair", "Office Cleaning")
         prospect = {
