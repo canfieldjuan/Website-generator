@@ -4671,6 +4671,46 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn('<li>Roof</li><li>Repair</li>', html)
 
+    def test_build_generator_rejects_copy_composed_by_native_table_row(self):
+        services = ("Roof", "Repair")
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "cleaning service",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(services),
+        }
+        unsupported = COMPLETE_BUILD_BODY.replace(
+            COMPLETE_SERVICES_GRID,
+            services_grid(services),
+        ).replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero">'
+            '<table><tr><td>Roof</td><td>Repair</td></tr></table>'
+            '</section>',
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(unsupported)),
+            )
+
+        supported = unsupported.replace(
+            '<tr><td>Roof</td><td>Repair</td></tr>',
+            '<tr><td>Roof</td></tr><tr><td>Repair</td></tr>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(supported)),
+        )
+        self.assertIn('<tr><td>Roof</td></tr><tr><td>Repair</td></tr>', html)
+
     def test_build_generator_allows_source_backed_cta_badge_and_phone(self):
         cases = (
             ({"has_24_7": True}, "Available 24/7"),
@@ -5313,6 +5353,20 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         fabricated_reviews = build_body_with_review_section(
             aggregate_review_section("4.9", "127")
         )
+
+        raw_stars = COMPLETE_BUILD_BODY.replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero"><div>★★★★★</div></section>',
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(raw_stars)),
+            )
 
         with self.assertRaisesRegex(
             GeneratedBodyError,

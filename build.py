@@ -132,7 +132,6 @@ BUILD_FIXED_VISIBLE_COPY = (
     "Read All Reviews on Google",
     "out of 5",
     "or",
-    "★★★★★",
 )
 BUILD_RESPONSE_BOUNDARY_REMINDER = (
     "RESPONSE BOUNDARY: Begin your response immediately with <body. "

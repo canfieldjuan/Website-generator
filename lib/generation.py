@@ -349,6 +349,8 @@ ACCESSIBLE_TEXT_OWNER_TAGS = frozenset(
     ("a", "button", "img", "input", "option", "output", "select", "summary", "svg", "textarea")
 )
 INDEPENDENT_LAYOUT_ITEM_TAGS = ACCESSIBLE_TEXT_OWNER_TAGS | frozenset(("li",))
+NATIVE_LAYOUT_COMPOSITION_TAGS = frozenset(("tr",))
+AMBIENT_REVIEW_STAR_CLASSES = frozenset(("cta-trust-stars", "trust-stars"))
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
     ("footer-grid", 1),
@@ -3598,6 +3600,13 @@ def _validate_visible_copy(
             for candidate in (element, *element.find_all(True))
         )
 
+    def owns_validated_review_stars(element: Tag) -> bool:
+        return _inside_review_root(element) or any(
+            _exact_class_names(candidate) & AMBIENT_REVIEW_STAR_CLASSES
+            for candidate in (element, *element.parents)
+            if isinstance(candidate, Tag)
+        )
+
     exposed_fragments: list[str] = []
     for node in body_root.descendants:
         if (
@@ -3607,7 +3616,13 @@ def _validate_visible_copy(
             and is_visually_exposed(node.parent)
         ):
             fragment = _normalize_source_owned_text(str(node))
-            if fragment:
+            if (
+                fragment
+                and not (
+                    fragment == "★★★★★"
+                    and owns_validated_review_stars(node.parent)
+                )
+            ):
                 exposed_fragments.append(fragment)
 
     for element in (body_root, *body_root.find_all(True)):
@@ -3729,11 +3744,15 @@ def _validate_visible_copy(
         if (
             not is_visually_exposed(owner)
             or _inside_review_root(owner)
+            or owns_validated_review_stars(owner)
             or bool(
                 _exact_class_names(owner)
                 & (independent_component_classes | required_classes)
             )
-            or not (_exact_class_names(owner) & layout_composition_classes)
+            or not (
+                owner.name.casefold() in NATIVE_LAYOUT_COMPOSITION_TAGS
+                or _exact_class_names(owner) & layout_composition_classes
+            )
         ):
             continue
         layout_run: list[str] = []
