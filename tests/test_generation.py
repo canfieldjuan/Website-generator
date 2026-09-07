@@ -4788,8 +4788,19 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             'class="service-card-name">'
             '<span class="ft-col-title">eBay Repair</span></div>',
         )
+        transformed_by_selector = canonical.replace(
+            '<div class="service-card">'
+            '<div class="service-card-name">eBay Repair</div>',
+            '<div class="service-card nav-links">'
+            '<a class="service-card-name">eBay Repair</a>',
+        )
 
-        for body in (transformed_name, transformed_parent, transformed_descendant):
+        for body in (
+            transformed_name,
+            transformed_parent,
+            transformed_descendant,
+            transformed_by_selector,
+        ):
             with self.subTest(body=body), self.assertRaisesRegex(
                 GeneratedBodyError,
                 "visually transforms source-owned case",

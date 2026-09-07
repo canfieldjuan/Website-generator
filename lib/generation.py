@@ -24,6 +24,7 @@ import requests
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from openai import DefaultHttpxClient, OpenAI
 from requests.adapters import HTTPAdapter
+from soupsieve.util import SelectorSyntaxError
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
@@ -503,7 +504,7 @@ class VisibleCopyAdmissionContract:
     layout_composition_classes: tuple[str, ...] = ()
     independent_component_classes: tuple[str, ...] = ()
     case_preserved_classes: tuple[str, ...] = ()
-    text_transforming_classes: tuple[str, ...] = ()
+    text_transforming_selectors: tuple[str, ...] = ()
 
 
 def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str:
@@ -3522,12 +3523,20 @@ def _validate_visible_copy(
             "Visible-copy case-preserved class",
         )
     )
-    text_transforming_classes = set(
-        _contract_text_values(
-            contract.text_transforming_classes,
-            "Visible-copy text-transforming class",
-        )
+    text_transforming_selectors = _contract_text_values(
+        contract.text_transforming_selectors,
+        "Visible-copy text-transforming selector",
     )
+    text_transforming_element_ids: set[int] = set()
+    for selector in text_transforming_selectors:
+        try:
+            text_transforming_element_ids.update(
+                id(element) for element in body_root.select(selector)
+            )
+        except SelectorSyntaxError as exc:
+            raise GeneratedBodyError(
+                "Visible-copy text-transforming selector contract is invalid."
+            ) from exc
 
     required_classes: set[str] = set()
     for class_name, expected_values in contract.required_class_text:
@@ -3630,19 +3639,23 @@ def _validate_visible_copy(
 
     for class_name in case_preserved_classes:
         for owner in _elements_with_class(body_root, class_name):
-            if any(
-                _exact_class_names(candidate) & text_transforming_classes
-                for candidate in (
-                    owner,
-                    *owner.parents,
-                    *owner.find_all(True),
-                )
-                if isinstance(candidate, Tag)
-            ):
-                raise GeneratedBodyError(
-                    "Generated body visually transforms source-owned case for "
-                    f"{class_name}."
-                )
+            for text_node in owner.find_all(string=True):
+                if (
+                    isinstance(text_node, Comment)
+                    or not _normalize_source_owned_text(str(text_node))
+                    or not isinstance(text_node.parent, Tag)
+                ):
+                    continue
+                for candidate in (text_node.parent, *text_node.parent.parents):
+                    if not isinstance(candidate, Tag):
+                        continue
+                    if id(candidate) in text_transforming_element_ids:
+                        raise GeneratedBodyError(
+                            "Generated body visually transforms source-owned case for "
+                            f"{class_name}."
+                        )
+                    if candidate is body_root:
+                        break
 
     exposed_fragments: list[str] = []
     for node in body_root.descendants:
@@ -4383,16 +4396,17 @@ def extract_template_layout_composition_class_names(
     return tuple(sorted(class_names, key=str.casefold))
 
 
-def extract_template_text_transforming_class_names(
+def extract_template_text_transforming_selectors(
     template_html: str,
 ) -> tuple[str, ...]:
-    """Return target classes whose template CSS transforms displayed case."""
-    class_names: set[str] = set()
+    """Return complete template selectors that transform displayed case."""
+    selectors: set[str] = set()
     for style_block in re.findall(
         r"<style(?:\s[^>]*)?>(.*?)</style\s*>",
         template_html,
         re.IGNORECASE | re.DOTALL,
     ):
+        style_block = re.sub(r"/\*.*?\*/", "", style_block, flags=re.DOTALL)
         for selector_block, declarations in re.findall(
             r"([^{}]+)\{([^{}]*)\}",
             style_block,
@@ -4409,11 +4423,10 @@ def extract_template_text_transforming_class_names(
             if not (transform_values - {"none", "initial", "inherit", "unset"}):
                 continue
             for selector in selector_block.split(","):
-                target = re.split(r"\s+|[>+~]", selector.strip())[-1]
-                class_names.update(
-                    re.findall(r"\.([A-Za-z_][A-Za-z0-9_-]*)", target)
-                )
-    return tuple(sorted(class_names, key=str.casefold))
+                selector = selector.strip()
+                if selector:
+                    selectors.add(selector)
+    return tuple(sorted(selectors, key=str.casefold))
 
 
 def extract_interior_only_class_names(template_html: str) -> tuple[str, ...]:
