@@ -445,12 +445,15 @@ def expected_build_action_url_contract(prospect, review_contract):
     business_name = prospect.get("business_name")
     if isinstance(business_name, str) and business_name.strip():
         # The brand may link only to the top of this one-page artifact, and
-        # only under the code-owned display identity. "/" would leave the page
-        # in the desktop blob preview and the saved standalone file.
-        display_identity = expected_build_display_name(prospect)
-        if display_identity not in allowed_labels:
-            allowed_labels.append(display_identity)
-        allowed_pairs.append((display_identity, BUILD_BRAND_HOME_DESTINATION))
+        # only under a source-owned business name. "/" would leave the page in
+        # the desktop blob preview and the saved standalone file.
+        brand_names = dict.fromkeys(
+            (expected_build_display_name(prospect), business_name.strip())
+        )
+        for brand_name in brand_names:
+            if brand_name not in allowed_labels:
+                allowed_labels.append(brand_name)
+            allowed_pairs.append((brand_name, BUILD_BRAND_HOME_DESTINATION))
     phone = prospect.get("phone")
     email = prospect.get("owner_email")
     return ActionUrlAdmissionContract(
@@ -609,6 +612,15 @@ def expected_build_visible_copy(
                     f"{phone_value} {hero_badge}",
                 )
             )
+            # A call label stays attached in front of the number; the badge may
+            # sit on either side of that unit, as with the bare phone above.
+            for label in BUILD_PHONE_ACTION_LABELS:
+                allowed.extend(
+                    (
+                        f"{label} {phone_value} {hero_badge}",
+                        f"{hero_badge} {label} {phone_value}",
+                    )
+                )
     trust_components = []
     if prospect.get("licensed_and_insured") is True:
         trust_components.extend(("Licensed", "insured"))

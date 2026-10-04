@@ -2792,8 +2792,9 @@ class BodyAssemblyTests(unittest.TestCase):
             review_contract,
         )
         self.assertIn(("Test Business", "#top"), contract.allowed_pairs)
+        self.assertIn(("Test Business LLC", "#top"), contract.allowed_pairs)
         self.assertIn("Test Business", contract.allowed_labels)
-        self.assertNotIn("Test Business LLC", contract.allowed_labels)
+        self.assertIn("Test Business LLC", contract.allowed_labels)
         self.assertEqual(contract.allowed_urls, ())
 
         nameless = build.expected_build_action_url_contract(
@@ -2802,8 +2803,18 @@ class BodyAssemblyTests(unittest.TestCase):
         )
         self.assertNotIn("#top", {destination for _label, destination in nameless.allowed_pairs})
 
+        same_names = build.expected_build_action_url_contract(
+            {"business_name": "Test Business", "formspree_endpoint": form_action},
+            review_contract,
+        )
+        self.assertEqual(
+            [pair for pair in same_names.allowed_pairs if pair[1] == "#top"],
+            [("Test Business", "#top")],
+        )
+
         for brand in (
             '<a href="#top" class="nav-brand">Test Business</a>',
+            '<a href="#top" class="nav-brand">Test Business LLC</a>',
             '<a href="#top" class="nav-brand">'
             '<img class="nav-logo" src="https://source.test/logo.png" alt="">'
             '<span class="nav-name">Test Business</span></a>',
@@ -2821,16 +2832,17 @@ class BodyAssemblyTests(unittest.TestCase):
                     body,
                 )
 
-        for destination in ("#contact", "#main", "/", "tel:2175550100", "https://source.test/"):
-            body = f'<body><nav><a href="{destination}">Test Business</a></nav></body>'
-            with self.subTest(destination=destination), self.assertRaises(
-                GeneratedBodyError
-            ):
-                validate_generated_body(body_result(body), expected_action_urls=contract)
+        for name in ("Test Business", "Test Business LLC"):
+            for destination in ("#contact", "#main", "/", "tel:2175550100", "https://source.test/"):
+                body = f'<body><nav><a href="{destination}">{name}</a></nav></body>'
+                with self.subTest(name=name, destination=destination), self.assertRaises(
+                    GeneratedBodyError
+                ):
+                    validate_generated_body(body_result(body), expected_action_urls=contract)
 
         for brand in (
-            '<a href="#top">Test Business LLC</a>',
             '<a href="#top">Test Business Pros</a>',
+            '<a href="#top">Test Business LLC Plumbing</a>',
             '<a href="#top"><img src="https://source.test/logo.png" '
             'alt="Test Business"><span>Test Business</span></a>',
             '<a href="#top"><span class="nav-name">Test Business</span>'
@@ -4982,6 +4994,80 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 prospect,
                 config(),
                 FakeLocalClient(local_chat_payload(composed)),
+            )
+
+    def test_build_generator_admits_call_labels_with_verified_badge(self):
+        number = '<span class="cta-emergency-number">217-555-0100</span>'
+
+        def emergency_cta(parts):
+            return COMPLETE_BUILD_BODY.replace(
+                '<section class="dual-cta-hero"></section>',
+                '<section class="dual-cta-hero"><div class="dual-cta-row">'
+                '<a class="cta-emergency" href="tel:2175550100">'
+                + "".join(parts)
+                + '</a><a class="cta-planned" href="#contact">Request Service</a>'
+                "</div></section>",
+            )
+
+        base = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        for evidence, badge in (
+            ({"has_24_7": True}, "Available 24/7"),
+            ({"same_day_service": True}, "Same-Day Service"),
+        ):
+            prospect = {**base, **evidence}
+            badge_span = f'<span class="cta-emergency-badge">{badge}</span>'
+            for label in build.BUILD_PHONE_ACTION_LABELS:
+                label_span = f'<span class="cta-emergency-label">{label}</span>'
+                for parts in (
+                    (label_span, number, badge_span),
+                    (badge_span, label_span, number),
+                ):
+                    with self.subTest(badge=badge, label=label, order=parts):
+                        html = build.generate_build_html(
+                            prospect,
+                            config(),
+                            FakeLocalClient(local_chat_payload(emergency_cta(parts))),
+                        )
+                        self.assertIn(badge, html)
+                with self.subTest(badge=badge, label=label, order="label badge number"), self.assertRaisesRegex(
+                    GeneratedBodyError,
+                    "visible copy outside the source-owned catalog",
+                ):
+                    build.generate_build_html(
+                        prospect,
+                        config(),
+                        FakeLocalClient(
+                            local_chat_payload(
+                                emergency_cta((label_span, badge_span, number))
+                            )
+                        ),
+                    )
+
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "unsupported prospect claims: 24/7",
+        ):
+            build.generate_build_html(
+                base,
+                config(),
+                FakeLocalClient(
+                    local_chat_payload(
+                        emergency_cta(
+                            (
+                                '<span class="cta-emergency-label">Call</span>',
+                                number,
+                                '<span class="cta-emergency-badge">Available 24/7</span>',
+                            )
+                        )
+                    )
+                ),
             )
 
     def test_build_channel_copy_requires_its_supplied_channel(self):
