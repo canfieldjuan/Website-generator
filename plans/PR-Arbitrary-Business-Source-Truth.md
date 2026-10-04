@@ -54,6 +54,9 @@ mandatory `services` field; unrelated cleanup remains excluded.
    both catalog entries and backed by an admitted action destination.
 10. Give the model a trust-strip structure that the existing composition gate
     already scores per chip (issue #52), without changing the gate.
+11. Let the nav brand link to the top of the page under the exact
+    code-owned display identity (issue #53), bound to one same-document
+    destination.
 
 ### Files touched
 
@@ -229,6 +232,37 @@ The template CSS keeps that list chip-shaped. The reset zeroes list padding,
 and the flex `trust-item` renders no marker. The build prompt's trust-strip
 rule now requires this structure, with exactly one catalog entry per item.
 
+### Brand home link (issue #53)
+
+The build action contract never admitted the business name as a link label.
+A brand link therefore failed:
+- the template's `<a href="/" class="nav-brand">` failed first on `/`, which
+  is not an admitted destination;
+- a model's `<a href="#main">{name}</a>` failed as a non-neutral label.
+
+The redesign flow already owns a brand pair, `(site_name, "/")`, but `/` is
+wrong for a one-page build. The desktop preview loads the page from a `blob:`
+URL in a sandboxed iframe, and the artifact is saved as a standalone `.html`
+file. In both places `/` leaves the page.
+
+When the prospect has a `business_name`, `expected_build_action_url_contract`
+now adds `expected_build_display_name(prospect)` to `allowed_labels`, plus
+exactly one pair: `(display identity, "#top")`. `#` fragments are already
+admitted destinations, and HTML scrolls `#top` to the top of the document. So
+no URL authority is added. The binding works as follows:
+
+- Only the code-owned display identity is admitted, not the legal name. The
+  legal name stays confined to the copyright line.
+- The label stays bound to `#top`. The brand pointing at `#contact`, `tel:`,
+  an external URL, or `/` still fails.
+- A prospect without `business_name` (contract-level callers) gets no pair, so
+  its tuples are unchanged.
+
+The build prompt's nav rule now says the brand is the exact display identity:
+either plain text, or `<a href="#top" class="nav-brand">` showing it once. A
+logo inside that link uses `alt=""` when the name is also visible text,
+because a logo `alt` plus visible text would form the label `Name Name`.
+
 ## Latest review finding ledger
 
 | Finding/thread | Affected invariant | Current reproduction | Disposition | Proof |
@@ -243,6 +277,7 @@ rule now requires this structure, with exactly one catalog entry per item.
 | `PRRT_kwDOTDYaKM6fwzPq` | CSS authority must preserve the full selector that controls rendered case. | `.nav-links a` applied to an `a.service-card-name` under a `service-card.nav-links` ancestor. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects the complete descendant-selector path; the contract now matches full trusted-template selectors against each source text node's inheritance chain. |
 | `PRRT_kwDOTDYaKM6fw7aZ` | Assistive metadata must not create numeric claims without source authority. | `aria-setsize`, `aria-posinset`, `aria-rowcount`, or `aria-colcount` attached to otherwise admitted copy. | fixed/superseded | `test_build_generator_rejects_uncontracted_numeric_semantics` covers all WAI-ARIA numeric collection, hierarchy, grid, span, and value properties while source-owned ordinary numeric text remains admissible. |
 | Issue #51 | Every neutral action label the build prompt offers must be renderable, and a source-owned composite must have admissible parts. | A `tel:` action with label `Call` (or `Call us`) and the verified phone in sibling nodes is rejected on `'Call'` (or `'Call us <phone>'`). The prompt offers 39 neutral labels, of which only `Call us` and `Contact` are catalog entries. | open (contract) | Planned tests: split `tel:` labels `Call` and `Call us` admit; mailto `Email`/`Email us` admit only with an owner email; the following reject: `Call Now`, `CALL`, `Text us`, phoneless `Call`/`Call us` text, `Call` on `#contact` or a button, `Email us <email>` as one link label, and `Call` composed with other copy; the build instruction lists only catalog-admissible labels backed by an admitted destination; the redesign instruction is unchanged; channel labels never enter `allowed_labels`. |
+| Issue #53 | The nav brand may link home only under the exact code-owned display identity and only to one same-document destination. | `<a href="/" class="nav-brand">` fails on the `/` destination, and `<a href="#main">{name}</a>` fails as a non-neutral label. | open (contract) | Planned tests: `<a href="#top" class="nav-brand">{display}</a>` admits as text and with an `alt=""` logo; the following reject: the brand on `#contact`, `tel:`, an external URL, or `/`; the legal-name label; a logo `alt` plus visible name; brand plus `.nav-sub`; a prospect without `business_name` keeps its exact tuples; the exact-tuple tests are updated; the redesign brand test is unchanged. |
 | Issue #52 | Each trust signal must be scored as its own complete phrase without letting layout recombine admitted fragments (preserves `PRRT_kwDOTDYaKM6fwRBN`). | Model-written `div` or `span` chips holding `Licensed`, `Insured`, and `Established in 2016` are rejected as one joined phrase. | open (contract) | Planned tests: the prompt's `ul.trust-strip-inner > li.trust-item` strip admits; inside one `li`, two `div` entries, two badges, or `Licensed and insured` reject; `dual-cta-row` Roof/Repair, with or without `trust-item`, still rejects; the prompt carries the structure and survives the unverified-claim filter. |
 
 ## Intentional
@@ -267,6 +302,12 @@ rule now requires this structure, with exactly one catalog entry per item.
 - Leave `references/03-base-template.html` unchanged. The build sends only its
   class names, so its sample `Call Now 24/7` label and its `div` chip markup
   never reach the model.
+- Bind the build brand to `#top` rather than mirror the redesign flow's `/`.
+  `/` is correct for multi-page redesigns, but leaves a one-page build in the
+  desktop preview and the saved file.
+- Do not special-case a business whose display identity equals a neutral
+  label. Admitting it as a source label binds it to `#top`. Any other use of
+  that label then fails closed rather than widening.
 
 ## Deferred
 
@@ -282,8 +323,10 @@ rule now requires this structure, with exactly one catalog entry per item.
 - Build-prompt example copy that the catalog rejects remains issue #55. The
   examples are the `<br>`-split footer address, `Licensed and insured.`, the
   industry trust-signal phrasings, and the stale BASE_TEMPLATE input line.
-- The build flow's business-name brand link (issue #53) exists on `main` as
-  well, so it is fixed in its own slice, `PR-Build-Brand-Home-Link`.
+- `main` keeps rejecting brand links until this PR merges. Its build flow has
+  no deterministic display identity to bind, because the model derives that
+  identity from a prose rule. So issue #53 is fixed here rather than in a
+  separate `main` slice.
 
 ## Verification
 
