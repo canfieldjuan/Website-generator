@@ -47,6 +47,13 @@ mandatory `services` field; unrelated cleanup remains excluded.
    copy. Pin the hero, benefits, form-trust line, and footer tagline to exact
    code-owned owners so an unsupported offering cannot move outside the
    service cards and bypass admission.
+9. Make every neutral action label the build prompt offers renderable
+   (issue #51). The catalog admits the bare channel labels, plus their
+   label-and-value compositions, exactly when that channel is supplied. The
+   build prompt offers only neutral labels that are both catalog entries and
+   backed by an admitted action destination.
+10. Treat the template's trust chips as separate items without exempting each
+    chip's own content from complete-phrase admission (issue #52).
 
 ### Files touched
 
@@ -148,6 +155,54 @@ such as the verified phone beside verified 24/7 status, are admitted explicitly.
 The no-radius service-area prompt uses the same exact `Service Area` casing as
 the code-owned catalog.
 
+### Channel action labels (issue #51)
+
+The shared action-label instruction offers 39 capability-neutral labels. The
+visible-copy catalog admitted only `Call us` and `Contact` of them. So a model
+that followed the action contract and labelled a `tel:` action `Call`, with the
+number in a sibling node, failed visible-copy admission. That happened even
+though the catalog already held the composite `Call <phone>`; its bare part
+`Call` was never admissible.
+
+The build catalog now admits `Call` and `Call us` when a prospect phone exists,
+with each label's `<label> <phone>` and `<label> <phone> →` compositions. It
+admits `Email` and `Email us` with `<label> <email>` only when an owner email
+exists. `Text` and `Text us` stay excluded because SMS capability is not a
+source fact.
+
+The build passes its visible-copy contract to `action_url_contract_instruction`.
+The instruction then offers only neutral labels that are exact catalog entries,
+in catalog case. It also drops channel labels whose scheme has no admitted
+destination: a phone for `tel`, an owner email for `mailto`, and an exact
+`sms:` URL for `sms`. The prompt therefore offers no label that either gate must
+reject.
+
+The redesign flow passes no visible-copy contract and keeps its existing
+instruction. A drift test ties the build's channel labels to the shared
+neutral-label authority.
+
+### Discrete trust chips (issue #52)
+
+`independent_component_classes` carries two effects. It ends the parent's
+layout run, and it exempts the element from being a layout owner itself. The
+second effect is safe for service and benefit cards only because their contents
+are pinned elsewhere. Trust chips have no pinned contents, and a planning probe
+confirmed the consequence: marking `trust-item` independent would admit
+`<div class="trust-item"><div>Roof</div><div>Repair</div></div>`.
+
+The visible-copy contract therefore gains `discrete_item_classes`, defaulting
+to empty. A layout child carrying one of these classes, or containing one, ends
+its parent's composed run, as an independent component does. The element still
+remains a layout owner, so a chip's own children are joined and checked as one
+phrase.
+
+The build declares `trust-item`. In the trusted template, each chip is a
+separate flex item, set apart by a `2rem` gap and, on desktop, by a divider.
+The template's own markup repeats one `trust-item` per signal. The tag-based
+inline pass is unchanged, so inline `span` chips still join and fail closed.
+The build prompt tells the model to render each trust signal as its own
+`div.trust-item` holding exactly one catalog entry.
+
 ## Latest review finding ledger
 
 | Finding/thread | Affected invariant | Current reproduction | Disposition | Proof |
@@ -161,6 +216,8 @@ the code-owned catalog.
 | `PRRT_kwDOTDYaKM6fwsni` | The complete service-name ownership subtree must preserve source case. | `ft-col-title` nested below the canonical `service-card-name` owner. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects transforming classes on the owner, its ancestors, and its descendants while preserving canonical markup. |
 | `PRRT_kwDOTDYaKM6fwzPq` | CSS authority must preserve the full selector that controls rendered case. | `.nav-links a` applied to an `a.service-card-name` under a `service-card.nav-links` ancestor. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects the complete descendant-selector path; the contract now matches full trusted-template selectors against each source text node's inheritance chain. |
 | `PRRT_kwDOTDYaKM6fw7aZ` | Assistive metadata must not create numeric claims without source authority. | `aria-setsize`, `aria-posinset`, `aria-rowcount`, or `aria-colcount` attached to otherwise admitted copy. | fixed/superseded | `test_build_generator_rejects_uncontracted_numeric_semantics` covers all WAI-ARIA numeric collection, hierarchy, grid, span, and value properties while source-owned ordinary numeric text remains admissible. |
+| Issue #51 | Every neutral action label the build prompt offers must be renderable, and a source-owned composite must have admissible parts. | A `tel:` action with label `Call` (or `Call us`) and the verified phone in sibling nodes is rejected on `'Call'` (or `'Call us <phone>'`). The prompt offers 39 neutral labels, of which only `Call us` and `Contact` are catalog entries. | open (contract) | Planned tests: template-shaped phone and email actions admit; `Text us`, `Call Now 24/7`, phoneless `Call`, and `Call` on a non-`tel:` action reject; the build instruction lists only catalog-admissible labels backed by an admitted destination; the redesign instruction is unchanged; build channel labels stay inside the shared neutral authority. |
+| Issue #52 | Template-declared discrete chips are separate from their siblings, while each chip's own content stays one complete phrase; layout styling still must not recombine admitted fragments (preserves `PRRT_kwDOTDYaKM6fwRBN`). | Template-shaped `trust-strip-inner > div.trust-item` chips holding `Licensed`, `Insured`, and `Established in 2016` are rejected as one joined phrase. | open (contract) | Planned tests: template chips admit; two `div` entries inside one chip, two badges inside one chip, and inline `span` chips reject; `test_build_generator_rejects_copy_composed_by_layout_class` and the card tests are unchanged. |
 
 ## Intentional
 
@@ -173,6 +230,17 @@ the code-owned catalog.
   rejection.
 - Keep the exact-services admission argument optional so unrelated redesign and
   generic assembly callers retain their existing behavior.
+- Exclude `Text` and `Text us` from the build catalog. They stay in the shared
+  neutral list, but SMS capability has no source field.
+- Keep `Call us` in the fixed code-owned copy, where the footer phone label
+  already uses it. It is offered as an action label only when a phone exists.
+- Leave the tag-based inline pass unchanged. Inline `span` chips keep failing
+  closed instead of the gate inferring CSS box separation.
+- Scope chip separation by class, not by parent, as with the existing card
+  classes. Each chip's own content is still composed, so misuse can only
+  separate whole chips, and their separation is template-CSS-backed.
+- Leave `references/03-base-template.html` unchanged. The build sends only its
+  class names, so its sample `Call Now 24/7` label never reaches the model.
 
 ## Deferred
 
@@ -183,6 +251,13 @@ the code-owned catalog.
 - Provider/model behavior, Ollama scheduling, OpenRouter live billing checks,
   redesign/extraction, Connect, packaging, deployment, email, and image
   generation do not change.
+- Icon- or role-bearing layout items can still opt out of the layout join.
+  That remains issue #54.
+- Build-prompt example copy that the catalog rejects remains issue #55. The
+  examples are the `<br>`-split footer address, `Licensed and insured.`, the
+  industry trust-signal phrasings, and the stale BASE_TEMPLATE input line.
+- The build flow's business-name brand link (issue #53) exists on `main` as
+  well, so it is fixed in its own slice, `PR-Build-Brand-Home-Link`.
 
 ## Verification
 
