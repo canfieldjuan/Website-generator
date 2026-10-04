@@ -5100,6 +5100,102 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         self.assertIn('"learn more"', redesign_instruction)
         self.assertIn('"text us"', redesign_instruction)
 
+    def test_build_generator_scores_list_trust_strip_items_separately(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+            "licensed_and_insured": True,
+            "established_year": 2016,
+        }
+
+        def trust_strip(items):
+            return COMPLETE_BUILD_BODY.replace(
+                "</nav>",
+                '</nav><div class="trust-strip"><ul class="trust-strip-inner">'
+                + "".join(f'<li class="trust-item">{item}</li>' for item in items)
+                + "</ul></div>",
+            )
+
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(
+                local_chat_payload(
+                    trust_strip(
+                        (
+                            '<span class="trust-badge">Licensed</span>',
+                            '<span class="trust-badge">Insured</span>',
+                            '<span class="trust-text">Established in 2016</span>',
+                        )
+                    )
+                )
+            ),
+        )
+        self.assertEqual(html.count('<li class="trust-item">'), 3)
+
+        for item in (
+            "<div>Licensed</div><div>Insured</div>",
+            '<span class="trust-badge">Licensed</span>'
+            '<span class="trust-badge">Insured</span>',
+            "Licensed and insured",
+        ):
+            with self.subTest(item=item), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(trust_strip((item,)))),
+                )
+
+        services = ("Roof", "Repair")
+        for item_class in ("", ' class="trust-item"'):
+            composed = COMPLETE_BUILD_BODY.replace(
+                COMPLETE_SERVICES_GRID,
+                services_grid(services),
+            ).replace(
+                '<section class="dual-cta-hero"></section>',
+                '<section class="dual-cta-hero dual-cta-row">'
+                f"<div{item_class}>Roof</div><div{item_class}>Repair</div>"
+                "</section>",
+            )
+            with self.subTest(item_class=item_class), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    {**prospect, "services": list(services)},
+                    config(),
+                    FakeLocalClient(local_chat_payload(composed)),
+                )
+
+    def test_build_prompt_requires_one_catalog_entry_per_trust_list_item(self):
+        client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
+        build.generate_build_html(
+            {
+                "business_name": "Test Business",
+                "trade": "plumber",
+                "city": "Effingham",
+                "state": "IL",
+                "phone": "217-555-0100",
+                "services": list(DEFAULT_BUILD_SERVICES),
+            },
+            config(),
+            client,
+        )
+        request = next(call for call in client.calls if call[0] == "POST")
+        prompt = "\n".join(
+            message["content"] for message in request[2]["json"]["messages"]
+        )
+        self.assertIn('`<ul class="trust-strip-inner">`', prompt)
+        self.assertIn('one `<li class="trust-item">` per trust signal', prompt)
+        self.assertIn("exactly one VISIBLE COPY CONTRACT entry", prompt)
+
     def test_build_generator_rejects_uncontracted_ordered_list_markers(self):
         prospect = {
             "business_name": "Test Business",

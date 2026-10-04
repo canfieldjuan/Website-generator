@@ -190,7 +190,12 @@ The per-section rules:
    places it AFTER the services grid, `reviews-led` places it after
    the services grid as well) -- pick the highest-tier signal the
    prospect actually has per the INDUSTRY_DEFAULTS trust signal
-   priority. NEVER fabricate.
+   priority. NEVER fabricate. Render the strip as
+   `<div class="trust-strip">` containing `<ul class="trust-strip-inner">`
+   with one `<li class="trust-item">` per trust signal. Each item holds
+   exactly one VISIBLE COPY CONTRACT entry, optionally inside one
+   `trust-badge` or `trust-text` span; never put two entries or any added
+   words in one item.
 3. Hero -- the harness picks one of three layout shapes per prospect
    and injects the choice as `prospect._computed_hero_shape`. **Read
    that field verbatim and apply the matching markup pattern below.**
