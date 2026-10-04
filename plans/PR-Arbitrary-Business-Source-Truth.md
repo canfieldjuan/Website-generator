@@ -54,9 +54,9 @@ mandatory `services` field; unrelated cleanup remains excluded.
    both catalog entries and backed by an admitted action destination.
 10. Give the model a trust-strip structure that the existing composition gate
     already scores per chip (issue #52), without changing the gate.
-11. Let the nav brand link to the top of the page under the exact
-    code-owned display identity (issue #53), bound to one same-document
-    destination.
+11. Let the nav brand link to the top of the page under a source-owned
+    business name (issue #53): the code-owned display identity or the legal
+    name. The link is bound to one same-document destination.
 
 ### Files touched
 
@@ -263,6 +263,43 @@ either plain text, or `<a href="#top" class="nav-brand">` showing it once. A
 logo inside that link uses `alt=""` when the name is also visible text,
 because a logo `alt` plus visible text would form the label `Name Name`.
 
+### Amendment after model verification (issues #51 and #53)
+
+The fixes above were checked by building all five example prospects with the
+production Qwen3.5-9B, before and after the change.
+- Two prospects that failed before on `Call us <phone>` now build on the first
+  attempt.
+- Two new failures traced to the same class of gap: parts that are each
+  admitted, but whose composition is not.
+
+**Channel label with a verified badge (#51).** The drees fixture labels its
+24/7 emergency CTA `Call (217) 857-6642 Available 24/7`. That is a channel
+label, the verified phone, and the verified badge. The catalog held the badge
+with the phone (in either order) and the label with the phone, but not all
+three.
+
+When a verified badge and a phone both exist, the catalog now also admits two
+forms for each phone channel label `L`:
+- `L <phone> <badge>`
+- `<badge> L <phone>`
+
+The label stays attached in front of the number, and the badge sits on either
+side of that unit, mirroring the existing either-order badge/phone rule. No
+other permutation is admitted. For example, `L <badge> <phone>`, or the label
+after the number, still fails.
+
+**Legal name on the brand link (#53).** With the nav rule inviting a brand
+link, Althoff labelled it with the legal name `Althoff Plumbing, Inc.` The
+visible-copy catalog already admits `business_name` as rendered text, so
+binding the legal name to the same single destination makes no new claim. It
+only stops the gate depending on which source-owned name the model picks.
+
+When `business_name` exists, the build contract therefore admits both the
+display identity and the stripped legal `business_name` as labels. Each gets
+exactly one pair to `#top`. They are deduplicated when the two are equal.
+Every other destination, near-miss name, and composed brand label still
+fails. This supersedes the "display identity only" binding above.
+
 ## Latest review finding ledger
 
 | Finding/thread | Affected invariant | Current reproduction | Disposition | Proof |
@@ -279,6 +316,8 @@ because a logo `alt` plus visible text would form the label `Name Name`.
 | Issue #51 | Every neutral action label the build prompt offers must be renderable, and a source-owned composite must have admissible parts. | A `tel:` action with label `Call` (or `Call us`) and the verified phone in sibling nodes is rejected on `'Call'` (or `'Call us <phone>'`). The prompt offers 39 neutral labels, of which only `Call us` and `Contact` are catalog entries. | fixed | `test_build_generator_admits_split_phone_channel_labels` admits split `Call`/`Call us` tel: labels and rejects `Call Now`, `CALL`, `Text us`, and `Call` composed with other copy; `test_build_channel_copy_requires_its_supplied_channel` rejects every channel label on a page without that channel; `test_build_generator_admits_email_channel_labels_with_owner_email` admits `Email`/`Email us` mailto labels and rejects `Email us <email>` as one label; `test_build_channel_labels_stay_bound_to_their_channel_scheme` rejects each label on `#contact` or the other channel and keeps them out of `allowed_labels`; `test_build_prompt_offers_only_renderable_neutral_action_labels` pins the offered list per channel set and the unchanged redesign instruction. |
 | Issue #53 | The nav brand may link home only under the exact code-owned display identity and only to one same-document destination. | `<a href="/" class="nav-brand">` fails on the `/` destination, and `<a href="#main">{name}</a>` fails as a non-neutral label. | fixed | `test_build_action_contract_binds_display_identity_to_page_top` admits the `#top` brand as text, with an `alt=""` logo, and as a logo alone, and rejects the brand on `#contact`, `#main`, `/`, `tel:`, or an external URL, the legal name, a near-miss name, logo `alt` plus visible name, and brand plus `.nav-sub`; it also proves a nameless contract has no `#top` pair; `test_build_generator_admits_brand_link_to_page_top` admits the brand link end to end, rejects `/`, and pins the nav prompt line; the two exact-tuple review tests include the display identity; the redesign brand test is unchanged. |
 | Issue #52 | Each trust signal must be scored as its own complete phrase without letting layout recombine admitted fragments (preserves `PRRT_kwDOTDYaKM6fwRBN`). | Model-written `div` or `span` chips holding `Licensed`, `Insured`, and `Established in 2016` are rejected as one joined phrase. | fixed | `test_build_generator_scores_list_trust_strip_items_separately` admits the `ul.trust-strip-inner > li.trust-item` strip and rejects two `div` entries, two badges, or `Licensed and insured` inside one item, plus `dual-cta-row` Roof/Repair with and without `trust-item`; `test_build_prompt_requires_one_catalog_entry_per_trust_list_item` pins the prompt structure under the unverified-claim filter. |
+| Issue #51 (amendment) | A verified badge composed with an admitted call label and the verified phone must remain admissible in meaning-preserving orders. | The drees fixture's tel: CTA `Call (217) 857-6642 Available 24/7` is rejected under the production model. | open (contract) | Planned tests: `L <phone> <badge>` and `<badge> L <phone>` admit for 24/7 and same-day evidence and for both labels; `L <badge> <phone>` and the badge without evidence reject. |
+| Issue #53 (amendment) | Either source-owned business name may label the one brand home link, and only that link. | Althoff's model links the brand as `Althoff Plumbing, Inc.`, which is rejected as a non-neutral label. | open (contract) | Planned tests: the legal name and the display identity each admit on `#top` and reject on every other destination; a near-miss name and composed brand labels reject; equal names produce one pair. |
 
 ## Intentional
 
