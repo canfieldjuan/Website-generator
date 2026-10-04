@@ -359,6 +359,9 @@ fails. This supersedes the "display identity only" binding above.
   generation do not change.
 - Icon- or role-bearing layout items can still opt out of the layout join.
   That remains issue #54.
+- Computed theme names leak into model-generated classes (`broadcast`,
+  `theme-civic`, `trust-strip--editorial`). This is the top remaining local
+  rejection and remains issue #56.
 - Build-prompt example copy that the catalog rejects remains issue #55. The
   examples are the `<br>`-split footer address, `Licensed and insured.`, the
   industry trust-signal phrasings, and the stale BASE_TEMPLATE input line.
@@ -369,7 +372,63 @@ fails. This supersedes the "display identity only" binding above.
 
 ## Verification
 
-Current implementation evidence is based on commit
+### Issues #51-#53 evidence (2026-10-04)
+
+This evidence is based on implementation commit
+`df180f28347719ba3ff372457a62656589ff5c67`. Each run used a clean `git archive`
+of that commit. Every new regression test was run against the pre-fix code
+first. Each test that covers a code change failed there. The #52 gate test
+passed there by design, because #52 changes only the prompt; its prompt test
+failed before the change.
+
+```bash
+python3 -B -m unittest discover -s tests
+# Ran 447 tests, OK (skipped=34); baseline before #51-#53 was 437 OK (skipped=34)
+
+python3 -m compileall -q build.py pipeline.py connect_provider.py lib tests
+# Exit 0
+
+bash scripts/local_pr_review.sh
+# git diff --check PASS; plan-doc presence PASS
+
+PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
+  python3 build.py examples/prospect-plumber-template.json \
+  --skip-image-gen --skip-email-draft --skip-deploy
+# Exit 0 on the first attempt; local:qwen3-30b-a3b:latest (the default local model)
+```
+
+The fixture wrote a fresh `outputs/builds/drees-plumbing-inc/index.html`:
+- 71,986 bytes, SHA-256
+  `916edc61505760a8211a1d01be9a85ad071e88bdbe38735099f22d70d977adb7`
+- log SHA-256 `fceeda8aaac8b79dfddedc295166b9faa6a1180b4ab23c7d3160b7c3d0de4b53`
+
+Both `AGENTS.md` guard greps returned 0: placeholder leaks and fabricated
+claims.
+
+**Production-model matrix.** The five checked-in prospects were built with
+local Qwen3.5-9B Q4_K_M (greedy decoding, so each result is deterministic),
+before (`a033607`) and after (`df180f2`) the fixes:
+
+| Prospect | Before | After |
+| --- | --- | --- |
+| `olney-heating-air-conditioning` | rejected `Call us <phone>` | built, first attempt |
+| `robert-niebrugge-sons-plumbing-dieterich` | rejected `Call us <phone>` and an invented class | built, first attempt |
+| `althoff-plumbing-effingham` | built after correction | rejected invented copy `Hours not currently available` |
+| `prospect-plumber-template` | built, first attempt | rejected invented classes (`broadcast`, `hero-chip-text`, `nav-phone-link`) |
+| `pruemers-service-plus-dieterich` | rejected class `theme-civic` | same |
+
+Summary:
+- Both gate-defect rejections are gone, and none of the remaining rejections
+  comes from the #51-#53 gates.
+- Every remaining rejection is model-invented copy or classes, which fail
+  closed. The theme-name class leak is issue #56.
+- **Caveat:** under this model the fixture produces no page, so its guard greps
+  were run on the two fresh pages that were built. Both returned 0 for both
+  greps.
+
+### Earlier slice evidence
+
+The earlier evidence below is based on commit
 `91d2252432cc726368bd0dca1548b80340277d67`. The generated artifact and evidence logs are
 ignored outputs, not source changes. The earlier evidence recorded against
 `758626d2df23865449f41b5b185a19cd79fd847b` is historical and superseded by
