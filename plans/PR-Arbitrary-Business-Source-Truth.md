@@ -48,12 +48,12 @@ mandatory `services` field; unrelated cleanup remains excluded.
    code-owned owners so an unsupported offering cannot move outside the
    service cards and bypass admission.
 9. Make every neutral action label the build prompt offers renderable
-   (issue #51). The catalog admits the bare channel labels, plus their
-   label-and-value compositions, exactly when that channel is supplied. The
-   build prompt offers only neutral labels that are both catalog entries and
-   backed by an admitted action destination.
-10. Treat the template's trust chips as separate items without exempting each
-    chip's own content from complete-phrase admission (issue #52).
+   (issue #51). The catalog admits the bare channel labels exactly when that
+   channel is supplied, plus the phone label-and-number compositions a split
+   `tel:` label produces. The build prompt offers only neutral labels that are
+   both catalog entries and backed by an admitted action destination.
+10. Give the model a trust-strip structure that the existing composition gate
+    already scores per chip (issue #52), without changing the gate.
 
 ### Files touched
 
@@ -164,11 +164,22 @@ number in a sibling node, failed visible-copy admission. That happened even
 though the catalog already held the composite `Call <phone>`; its bare part
 `Call` was never admissible.
 
-The build catalog now admits `Call` and `Call us` when a prospect phone exists,
-with each label's `<label> <phone>` and `<label> <phone> →` compositions. It
-admits `Email` and `Email us` with `<label> <email>` only when an owner email
-exists. `Text` and `Text us` stay excluded because SMS capability is not a
-source fact.
+The build catalog now admits `Call` and `Call us` only when a prospect phone
+exists, together with the `<label> <phone>` composition each one produces as a
+split `tel:` accessible name. The existing `Call <phone> →` coverage-band entry
+is unchanged. `Call us` moves out of the always-on fixed copy. Before this
+change, a phoneless page could render `Call us` even though the prompt says to
+omit every phone surface.
+
+The catalog admits `Email` and `Email us` only when an owner email exists. It
+adds no email composition: the action gate accepts an email label only when the
+whole label is the address, so `<label> <email>` could never be a link label
+and would admit only free text. `Text` and `Text us` stay excluded because SMS
+capability is not a source fact.
+
+The channel labels never enter the action contract's `allowed_labels`. If they
+did, the source-label branch, which runs before the neutral branch, would
+demand an exact pair and bypass the channel-to-scheme binding.
 
 The build passes its visible-copy contract to `action_url_contract_instruction`.
 The instruction then offers only neutral labels that are exact catalog entries,
@@ -178,30 +189,45 @@ destination: a phone for `tel`, an owner email for `mailto`, and an exact
 reject.
 
 The redesign flow passes no visible-copy contract and keeps its existing
-instruction. A drift test ties the build's channel labels to the shared
-neutral-label authority.
+instruction. Behaviour tests bind each build channel label to the shared
+authority. A `tel:` or `mailto:` action with that label admits, the same label
+on `#contact` raises the channel-specific error, and none of the labels appear
+in the build action contract's `allowed_labels`.
 
-### Discrete trust chips (issue #52)
+### Trust-strip structure (issue #52)
 
-`independent_component_classes` carries two effects. It ends the parent's
-layout run, and it exempts the element from being a layout owner itself. The
-second effect is safe for service and benefit cards only because their contents
-are pinned elsewhere. Trust chips have no pinned contents, and a planning probe
-confirmed the consequence: marking `trust-item` independent would admit
-`<div class="trust-item"><div>Roof</div><div>Repair</div></div>`.
+The build never sends the template markup, only its class names, so the model
+invents its own trust-strip structure. Its natural `div` or `span` chips are
+joined by the layout or inline composition pass and rejected as one phrase.
 
-The visible-copy contract therefore gains `discrete_item_classes`, defaulting
-to empty. A layout child carrying one of these classes, or containing one, ends
-its parent's composed run, as an independent component does. The element still
-remains a layout owner, so a chip's own children are joined and checked as one
-phrase.
+A design review considered marking `trust-item` as an independent component.
+That would also exempt the element from being a layout owner, because
+`independent_component_classes` both ends the parent's run and skips the
+element's own composition check. Two consequences:
+- `<div class="trust-item"><div>Roof</div><div>Repair</div></div>` would be
+  admitted;
+- the class could be used to split the `dual-cta-row` composition that
+  `PRRT_kwDOTDYaKM6fwRBN` guards.
 
-The build declares `trust-item`. In the trusted template, each chip is a
-separate flex item, set apart by a `2rem` gap and, on desktop, by a divider.
-The template's own markup repeats one `trust-item` per signal. The tag-based
-inline pass is unchanged, so inline `span` chips still join and fail closed.
-The build prompt tells the model to render each trust signal as its own
-`div.trust-item` holding exactly one catalog entry.
+A narrower variant still left the second escape.
+
+The gate therefore does not change. List items already end the parent's run,
+while a list item that carries `trust-item` is still a layout owner. So the
+structure below admits each catalog entry as its own fragment today, while
+anything combined inside one `li` still fails:
+
+```html
+<ul class="trust-strip-inner">
+  <li class="trust-item">one catalog entry, optionally in one .trust-badge/.trust-text span</li>
+</ul>
+```
+
+Combinations that still fail inside one `li` include two `div`s, two badges,
+or prose such as `Licensed and insured`.
+
+The template CSS keeps that list chip-shaped. The reset zeroes list padding,
+and the flex `trust-item` renders no marker. The build prompt's trust-strip
+rule now requires this structure, with exactly one catalog entry per item.
 
 ## Latest review finding ledger
 
@@ -216,8 +242,8 @@ The build prompt tells the model to render each trust signal as its own
 | `PRRT_kwDOTDYaKM6fwsni` | The complete service-name ownership subtree must preserve source case. | `ft-col-title` nested below the canonical `service-card-name` owner. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects transforming classes on the owner, its ancestors, and its descendants while preserving canonical markup. |
 | `PRRT_kwDOTDYaKM6fwzPq` | CSS authority must preserve the full selector that controls rendered case. | `.nav-links a` applied to an `a.service-card-name` under a `service-card.nav-links` ancestor. | fixed/superseded | `test_build_generator_rejects_visual_case_transform_on_service_names` rejects the complete descendant-selector path; the contract now matches full trusted-template selectors against each source text node's inheritance chain. |
 | `PRRT_kwDOTDYaKM6fw7aZ` | Assistive metadata must not create numeric claims without source authority. | `aria-setsize`, `aria-posinset`, `aria-rowcount`, or `aria-colcount` attached to otherwise admitted copy. | fixed/superseded | `test_build_generator_rejects_uncontracted_numeric_semantics` covers all WAI-ARIA numeric collection, hierarchy, grid, span, and value properties while source-owned ordinary numeric text remains admissible. |
-| Issue #51 | Every neutral action label the build prompt offers must be renderable, and a source-owned composite must have admissible parts. | A `tel:` action with label `Call` (or `Call us`) and the verified phone in sibling nodes is rejected on `'Call'` (or `'Call us <phone>'`). The prompt offers 39 neutral labels, of which only `Call us` and `Contact` are catalog entries. | open (contract) | Planned tests: template-shaped phone and email actions admit; `Text us`, `Call Now 24/7`, phoneless `Call`, and `Call` on a non-`tel:` action reject; the build instruction lists only catalog-admissible labels backed by an admitted destination; the redesign instruction is unchanged; build channel labels stay inside the shared neutral authority. |
-| Issue #52 | Template-declared discrete chips are separate from their siblings, while each chip's own content stays one complete phrase; layout styling still must not recombine admitted fragments (preserves `PRRT_kwDOTDYaKM6fwRBN`). | Template-shaped `trust-strip-inner > div.trust-item` chips holding `Licensed`, `Insured`, and `Established in 2016` are rejected as one joined phrase. | open (contract) | Planned tests: template chips admit; two `div` entries inside one chip, two badges inside one chip, and inline `span` chips reject; `test_build_generator_rejects_copy_composed_by_layout_class` and the card tests are unchanged. |
+| Issue #51 | Every neutral action label the build prompt offers must be renderable, and a source-owned composite must have admissible parts. | A `tel:` action with label `Call` (or `Call us`) and the verified phone in sibling nodes is rejected on `'Call'` (or `'Call us <phone>'`). The prompt offers 39 neutral labels, of which only `Call us` and `Contact` are catalog entries. | open (contract) | Planned tests: split `tel:` labels `Call` and `Call us` admit; mailto `Email`/`Email us` admit only with an owner email; the following reject: `Call Now`, `CALL`, `Text us`, phoneless `Call`/`Call us` text, `Call` on `#contact` or a button, `Email us <email>` as one link label, and `Call` composed with other copy; the build instruction lists only catalog-admissible labels backed by an admitted destination; the redesign instruction is unchanged; channel labels never enter `allowed_labels`. |
+| Issue #52 | Each trust signal must be scored as its own complete phrase without letting layout recombine admitted fragments (preserves `PRRT_kwDOTDYaKM6fwRBN`). | Model-written `div` or `span` chips holding `Licensed`, `Insured`, and `Established in 2016` are rejected as one joined phrase. | open (contract) | Planned tests: the prompt's `ul.trust-strip-inner > li.trust-item` strip admits; inside one `li`, two `div` entries, two badges, or `Licensed and insured` reject; `dual-cta-row` Roof/Repair, with or without `trust-item`, still rejects; the prompt carries the structure and survives the unverified-claim filter. |
 
 ## Intentional
 
@@ -232,15 +258,15 @@ The build prompt tells the model to render each trust signal as its own
   generic assembly callers retain their existing behavior.
 - Exclude `Text` and `Text us` from the build catalog. They stay in the shared
   neutral list, but SMS capability has no source field.
-- Keep `Call us` in the fixed code-owned copy, where the footer phone label
-  already uses it. It is offered as an action label only when a phone exists.
-- Leave the tag-based inline pass unchanged. Inline `span` chips keep failing
-  closed instead of the gate inferring CSS box separation.
-- Scope chip separation by class, not by parent, as with the existing card
-  classes. Each chip's own content is still composed, so misuse can only
-  separate whole chips, and their separation is template-CSS-backed.
+- Gate `Call us` on a supplied phone, like `Call`. Its only build surface is the
+  footer phone label, which the prompt already omits without a phone.
+- Change no composition-gate code for #52. Model `div` and `span` chips keep
+  failing closed. The prompt supplies the list structure the gate already
+  scores per item, rather than a new exemption class that could split other
+  layout runs.
 - Leave `references/03-base-template.html` unchanged. The build sends only its
-  class names, so its sample `Call Now 24/7` label never reaches the model.
+  class names, so its sample `Call Now 24/7` label and its `div` chip markup
+  never reach the model.
 
 ## Deferred
 
