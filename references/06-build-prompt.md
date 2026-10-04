@@ -182,9 +182,14 @@ before injecting; this fallback shouldn't fire in practice).
 The per-section rules:
 
 1. Sticky nav -- business name (no logo unless prospect provided one),
-   single CTA button anchored to `#contact`. If `prospect.phone` is set,
-   also render that exact phone with a matching `tel:` link; otherwise omit
-   the nav phone and every business-phone action.
+   single CTA button anchored to `#contact`. The brand is the exact
+   display identity shown once, either as plain text or inside
+   `<a href="#top" class="nav-brand">`; never link it anywhere else. A
+   nav logo inside that link uses `alt=""` when the name is also visible
+   text, and the link holds nothing besides the logo and the name.
+   If `prospect.phone` is set, also render that exact phone with a matching
+   `tel:` link; otherwise omit the nav phone and every business-phone
+   action.
 2. Trust strip (placement varies by `_computed_section_order`; the
    `default` ordering places it directly under the nav, `services-led`
    places it AFTER the services grid, `reviews-led` places it after

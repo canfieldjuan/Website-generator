@@ -2784,6 +2784,65 @@ class BodyAssemblyTests(unittest.TestCase):
                 expected_action_urls=contract,
             )
 
+    def test_build_action_contract_binds_display_identity_to_page_top(self):
+        review_contract = ReviewAdmissionContract(mode="omit")
+        form_action = "https://source.test/form"
+        contract = build.expected_build_action_url_contract(
+            {"business_name": "Test Business LLC", "formspree_endpoint": form_action},
+            review_contract,
+        )
+        self.assertIn(("Test Business", "#top"), contract.allowed_pairs)
+        self.assertIn("Test Business", contract.allowed_labels)
+        self.assertNotIn("Test Business LLC", contract.allowed_labels)
+        self.assertEqual(contract.allowed_urls, ())
+
+        nameless = build.expected_build_action_url_contract(
+            {"formspree_endpoint": form_action},
+            review_contract,
+        )
+        self.assertNotIn("#top", {destination for _label, destination in nameless.allowed_pairs})
+
+        for brand in (
+            '<a href="#top" class="nav-brand">Test Business</a>',
+            '<a href="#top" class="nav-brand">'
+            '<img class="nav-logo" src="https://source.test/logo.png" alt="">'
+            '<span class="nav-name">Test Business</span></a>',
+            '<a href="#top" class="nav-brand">'
+            '<img class="nav-logo" src="https://source.test/logo.png" '
+            'alt="Test Business"></a>',
+        ):
+            body = f"<body><nav>{brand}</nav></body>"
+            with self.subTest(brand=brand):
+                self.assertEqual(
+                    validate_generated_body(
+                        body_result(body),
+                        expected_action_urls=contract,
+                    ),
+                    body,
+                )
+
+        for destination in ("#contact", "#main", "/", "tel:2175550100", "https://source.test/"):
+            body = f'<body><nav><a href="{destination}">Test Business</a></nav></body>'
+            with self.subTest(destination=destination), self.assertRaises(
+                GeneratedBodyError
+            ):
+                validate_generated_body(body_result(body), expected_action_urls=contract)
+
+        for brand in (
+            '<a href="#top">Test Business LLC</a>',
+            '<a href="#top">Test Business Pros</a>',
+            '<a href="#top"><img src="https://source.test/logo.png" '
+            'alt="Test Business"><span>Test Business</span></a>',
+            '<a href="#top"><span class="nav-name">Test Business</span>'
+            '<span class="nav-sub">Effingham</span></a>',
+        ):
+            body = f"<body><nav>{brand}</nav></body>"
+            with self.subTest(brand=brand), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "non-neutral action label",
+            ):
+                validate_generated_body(body_result(body), expected_action_urls=contract)
+
     def test_body_action_labels_remain_bound_to_source_destinations(self):
         contract = ActionUrlAdmissionContract(
             allowed_urls=(
@@ -5174,6 +5233,39 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     FakeLocalClient(local_chat_payload(composed)),
                 )
 
+    def test_build_generator_admits_brand_link_to_page_top(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        brand_link = COMPLETE_BUILD_BODY.replace(
+            '<nav class="site-nav"><span>Test Business</span>',
+            '<nav class="site-nav"><a href="#top" class="nav-brand">Test Business</a>',
+        )
+        client = FakeLocalClient(local_chat_payload(brand_link))
+        html = build.generate_build_html(prospect, config(), client)
+        self.assertIn('<a href="#top" class="nav-brand">Test Business</a>', html)
+        request = next(call for call in client.calls if call[0] == "POST")
+        prompt = "\n".join(
+            message["content"] for message in request[2]["json"]["messages"]
+        )
+        self.assertIn('`<a href="#top" class="nav-brand">`', prompt)
+
+        root_link = brand_link.replace('href="#top"', 'href="/"')
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "action URL outside source-owned destinations",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(root_link)),
+            )
+
     def test_build_prompt_requires_one_catalog_entry_per_trust_list_item(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         build.generate_build_html(
@@ -5973,6 +6065,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 *build.BUILD_FORM_SUBMIT_LABELS,
                 *(label for label, _destination in build.BUILD_CODE_OWNED_ACTION_PAIRS),
                 "Read All Reviews on Google",
+                build.expected_build_display_name(prospect),
             ),
         )
         html = build.generate_build_html(
@@ -6133,6 +6226,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 *build.BUILD_FORM_SUBMIT_LABELS,
                 *(label for label, _destination in build.BUILD_CODE_OWNED_ACTION_PAIRS),
                 "Read All on Google",
+                build.expected_build_display_name(prospect),
             ),
         )
         html = build.generate_build_html(

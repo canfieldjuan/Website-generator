@@ -106,6 +106,7 @@ BUILD_FORM_SUBMIT_LABELS = (
     "Schedule My Service",
 )
 BUILD_CODE_OWNED_ACTION_PAIRS = (("Request Service", "#contact"),)
+BUILD_BRAND_HOME_DESTINATION = "#top"
 # Capability-neutral channel labels the build may render, gated on the
 # matching source channel. They stay out of the action contract's
 # allowed_labels so the shared neutral-label scheme binding keeps them on
@@ -441,6 +442,15 @@ def expected_build_action_url_contract(prospect, review_contract):
         )
         allowed_labels.append(review_label)
         allowed_pairs.append((review_label, review_contract.reviews_url))
+    business_name = prospect.get("business_name")
+    if isinstance(business_name, str) and business_name.strip():
+        # The brand may link only to the top of this one-page artifact, and
+        # only under the code-owned display identity. "/" would leave the page
+        # in the desktop blob preview and the saved standalone file.
+        display_identity = expected_build_display_name(prospect)
+        if display_identity not in allowed_labels:
+            allowed_labels.append(display_identity)
+        allowed_pairs.append((display_identity, BUILD_BRAND_HOME_DESTINATION))
     phone = prospect.get("phone")
     email = prospect.get("owner_email")
     return ActionUrlAdmissionContract(
