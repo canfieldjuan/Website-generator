@@ -516,7 +516,44 @@ class VisibleCopyAdmissionContract:
     text_transforming_selectors: tuple[str, ...] = ()
 
 
-def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str:
+def _renderable_neutral_action_labels(
+    visible_copy: VisibleCopyAdmissionContract,
+    *,
+    allowed_urls: tuple[str, ...],
+    phones: tuple[str, ...],
+    emails: tuple[str, ...],
+) -> list[str]:
+    """Return neutral labels that both admission gates can accept."""
+    if not isinstance(visible_copy, VisibleCopyAdmissionContract):
+        raise GeneratedBodyError("Visible-copy admission contract is invalid.")
+    fragments = _contract_text_values(
+        visible_copy.allowed_fragments,
+        "Visible-copy fragment",
+    )
+    admitted_schemes = {
+        "tel": bool(phones),
+        "mailto": bool(emails),
+        "sms": any(url.casefold().startswith("sms:") for url in allowed_urls),
+    }
+    labels: list[str] = []
+    for fragment in fragments:
+        if not _is_neutral_action_label(fragment):
+            continue
+        scheme = _CHANNEL_NEUTRAL_ACTION_SCHEMES.get(
+            _normalize_claim_match_text(fragment)
+        )
+        if scheme is not None and not admitted_schemes[scheme]:
+            continue
+        if fragment not in labels:
+            labels.append(fragment)
+    return sorted(labels, key=lambda label: (label.casefold(), label))
+
+
+def action_url_contract_instruction(
+    contract: ActionUrlAdmissionContract,
+    *,
+    visible_copy: VisibleCopyAdmissionContract | None = None,
+) -> str:
     if not isinstance(contract, ActionUrlAdmissionContract):
         raise GeneratedBodyError("Action URL admission contract is invalid.")
     allowed_urls = _contract_text_values(contract.allowed_urls, "Action URL")
@@ -530,7 +567,18 @@ def action_url_contract_instruction(contract: ActionUrlAdmissionContract) -> str
     allowed_labels = _contract_text_values(contract.allowed_labels, "Action label")
     allowed_pairs = _contract_action_pairs(contract.allowed_pairs)
     _validate_action_pair_membership(allowed_pairs, allowed_labels)
-    neutral_labels = sorted(_NEUTRAL_ACTION_LABELS)
+    if visible_copy is None:
+        neutral_labels = sorted(_NEUTRAL_ACTION_LABELS)
+    else:
+        # When visible copy is also contracted, offer only neutral labels that
+        # are exact catalog entries and whose channel has an admitted
+        # destination, so the prompt never offers a label a gate must reject.
+        neutral_labels = _renderable_neutral_action_labels(
+            visible_copy,
+            allowed_urls=allowed_urls,
+            phones=phones,
+            emails=emails,
+        )
     return (
         "ACTION DESTINATION CONTRACT (EXHAUSTIVE): Same-document `#` fragments "
         "are allowed. Every other generated anchor must copy one exact source "

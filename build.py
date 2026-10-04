@@ -106,6 +106,13 @@ BUILD_FORM_SUBMIT_LABELS = (
     "Schedule My Service",
 )
 BUILD_CODE_OWNED_ACTION_PAIRS = (("Request Service", "#contact"),)
+# Capability-neutral channel labels the build may render, gated on the
+# matching source channel. They stay out of the action contract's
+# allowed_labels so the shared neutral-label scheme binding keeps them on
+# tel:/mailto: actions. Text/SMS labels are omitted: no source field proves
+# SMS capability.
+BUILD_PHONE_ACTION_LABELS = ("Call", "Call us")
+BUILD_EMAIL_ACTION_LABELS = ("Email", "Email us")
 BUILD_PAGE_FUNCTION_BENEFITS = (
     ("Services", "Review the services listed on this page."),
     ("Contact", "Use the contact information on this page."),
@@ -126,7 +133,6 @@ BUILD_FIXED_VISIBLE_COPY = (
     "Send My Request",
     "Get My Estimate",
     "Schedule My Service",
-    "Call us",
     "Hours",
     "Service Area",
     "Read All on Google",
@@ -554,7 +560,13 @@ def expected_build_visible_copy(
 
     phone = prospect.get("phone")
     if isinstance(phone, str) and phone.strip():
-        allowed.extend((f"Call {phone.strip()}", f"Call {phone.strip()} →"))
+        phone_value = phone.strip()
+        allowed.extend(BUILD_PHONE_ACTION_LABELS)
+        allowed.extend(f"{label} {phone_value}" for label in BUILD_PHONE_ACTION_LABELS)
+        allowed.append(f"Call {phone_value} →")
+    owner_email = prospect.get("owner_email")
+    if isinstance(owner_email, str) and owner_email.strip():
+        allowed.extend(BUILD_EMAIL_ACTION_LABELS)
     hero_badge = None
     if prospect.get("has_24_7") is True:
         hero_badge = "Available 24/7"
@@ -1762,6 +1774,10 @@ def generate_build_html(prospect, generation_config=None, client=None):
         prospect,
         review_contract,
     )
+    action_url_instruction = action_url_contract_instruction(
+        action_url_contract,
+        visible_copy=visible_copy_contract,
+    )
     required_class_counts = required_build_class_counts(prospect)
     required_child_class_sequences = required_build_child_class_sequences(prospect)
     services_response_scaffold = build_services_response_scaffold(
@@ -1794,7 +1810,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
         f"{tenure_contract_instruction(tenure_contract)}\n"
         f"{location_contract_instruction(location_contract)}\n"
         f"{image_contract_instruction(image_contract)}\n"
-        f"{action_url_contract_instruction(action_url_contract)}\n"
+        f"{action_url_instruction}\n"
         f"{review_contract_instruction(review_contract)}\n"
         f"{phone_instruction}\n"
         f"{email_instruction}\n"

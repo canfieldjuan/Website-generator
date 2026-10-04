@@ -49,6 +49,7 @@ from lib.generation import (
     PromptPart,
     ReviewAdmissionContract,
     ServiceLocationAdmissionContract,
+    action_url_contract_instruction,
     assemble_generated_html,
     atomic_write_text,
     body_generation_config,
@@ -4870,6 +4871,234 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     FakeLocalClient(local_chat_payload(supported)),
                 )
                 self.assertIn(badge, html)
+
+    def test_build_generator_admits_split_phone_channel_labels(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+
+        def nav_phone(label):
+            return COMPLETE_BUILD_BODY.replace(
+                '<a href="tel:2175550100">217-555-0100</a>',
+                '<a href="tel:2175550100" class="nav-phone"><div>'
+                f'<div class="nav-phone-label">{label}</div>'
+                '<div class="nav-phone-number">217-555-0100</div>'
+                "</div></a>",
+            )
+
+        for label in build.BUILD_PHONE_ACTION_LABELS:
+            with self.subTest(label=label):
+                html = build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(nav_phone(label))),
+                )
+                self.assertIn(f'<div class="nav-phone-label">{label}</div>', html)
+
+        for label in ("Call Now", "CALL", "Text us"):
+            with self.subTest(label=label), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(nav_phone(label))),
+                )
+
+        composed = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            "<p><span>Call</span> <span>Effingham</span></p></nav>",
+        )
+        with self.assertRaisesRegex(
+            GeneratedBodyError,
+            "visible copy outside the source-owned catalog",
+        ):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(composed)),
+            )
+
+    def test_build_channel_copy_requires_its_supplied_channel(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        phoneless = COMPLETE_BUILD_BODY.replace(
+            '<a href="tel:2175550100">217-555-0100</a>',
+            "",
+        ).replace(
+            '<div class="coverage-band"></div>',
+            "",
+        ).replace(
+            '<section class="dual-cta-hero"></section>',
+            '<section class="dual-cta-hero"><a class="cta-planned" '
+            'href="#contact">Request Service</a></section>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(phoneless)),
+        )
+        self.assertIn("Request Service", html)
+
+        for copy in (*build.BUILD_PHONE_ACTION_LABELS, *build.BUILD_EMAIL_ACTION_LABELS):
+            body = phoneless.replace("</nav>", f"<p>{copy}</p></nav>")
+            with self.subTest(copy=copy), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+
+    def test_build_generator_admits_email_channel_labels_with_owner_email(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "owner_email": "owner@realbusiness.test",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        email_link = (
+            '<a href="mailto:owner@realbusiness.test">owner@realbusiness.test</a>'
+        )
+        for label in build.BUILD_EMAIL_ACTION_LABELS:
+            body = COMPLETE_BUILD_BODY.replace(
+                "</nav>",
+                f'{email_link}<a href="mailto:owner@realbusiness.test">{label}</a>'
+                "</nav>",
+            )
+            with self.subTest(label=label):
+                html = build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+                self.assertIn(f">{label}</a>", html)
+
+        combined_label = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            f'{email_link}<a href="mailto:owner@realbusiness.test">'
+            "Email us owner@realbusiness.test</a></nav>",
+        )
+        with self.assertRaisesRegex(GeneratedBodyError, "non-neutral action label"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(combined_label)),
+            )
+
+    def test_build_channel_labels_stay_bound_to_their_channel_scheme(self):
+        phone = "217-555-0100"
+        email = "owner@realbusiness.test"
+        contract = ActionUrlAdmissionContract(phones=(phone,), emails=(email,))
+        channel_cases = (
+            (build.BUILD_PHONE_ACTION_LABELS, "tel:2175550100", f"mailto:{email}"),
+            (build.BUILD_EMAIL_ACTION_LABELS, f"mailto:{email}", "tel:2175550100"),
+        )
+        for labels, matching, mismatched in channel_cases:
+            for label in labels:
+                admitted = f'<body><a href="{matching}">{label}</a></body>'
+                with self.subTest(label=label, destination=matching):
+                    self.assertEqual(
+                        validate_generated_body(
+                            body_result(admitted),
+                            expected_action_urls=contract,
+                        ),
+                        admitted,
+                    )
+                for destination in ("#contact", mismatched):
+                    with self.subTest(label=label, destination=destination), self.assertRaisesRegex(
+                        GeneratedBodyError,
+                        "channel-specific action label",
+                    ):
+                        validate_generated_body(
+                            body_result(
+                                f'<body><a href="{destination}">{label}</a></body>'
+                            ),
+                            expected_action_urls=contract,
+                        )
+
+        build_contract = build.expected_build_action_url_contract(
+            {"phone": phone, "owner_email": email},
+            ReviewAdmissionContract(mode="omit"),
+        )
+        for label in (*build.BUILD_PHONE_ACTION_LABELS, *build.BUILD_EMAIL_ACTION_LABELS):
+            self.assertNotIn(label, build_contract.allowed_labels)
+
+    def test_build_prompt_offers_only_renderable_neutral_action_labels(self):
+        base = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        review_contract = ReviewAdmissionContract(mode="omit")
+        cases = (
+            ({"phone": "217-555-0100"}, ["Call", "Call us", "Contact"]),
+            ({}, ["Contact"]),
+            (
+                {"phone": "217-555-0100", "owner_email": "owner@realbusiness.test"},
+                ["Call", "Call us", "Contact", "Email", "Email us"],
+            ),
+        )
+        for contacts, expected in cases:
+            prospect = {**base, **contacts}
+            visible_copy = build.expected_build_visible_copy(
+                prospect,
+                review_contract,
+                layout_composition_classes=(),
+                text_transforming_selectors=(),
+            )
+            instruction = action_url_contract_instruction(
+                build.expected_build_action_url_contract(prospect, review_contract),
+                visible_copy=visible_copy,
+            )
+            offered = json.loads(
+                instruction.split("label from this bounded list: ", 1)[1].split(
+                    ". A source-owned", 1
+                )[0]
+            )
+            with self.subTest(contacts=contacts):
+                self.assertEqual(offered, expected)
+                for label in offered:
+                    self.assertIn(label, visible_copy.allowed_fragments)
+
+        client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
+        build.generate_build_html(
+            {**base, "phone": "217-555-0100"},
+            config(),
+            client,
+        )
+        request = next(call for call in client.calls if call[0] == "POST")
+        prompt = "\n".join(
+            message["content"] for message in request[2]["json"]["messages"]
+        )
+        self.assertIn(
+            'label from this bounded list: ["Call", "Call us", "Contact"].',
+            prompt,
+        )
+
+        redesign_instruction = action_url_contract_instruction(
+            ActionUrlAdmissionContract()
+        )
+        self.assertIn('"learn more"', redesign_instruction)
+        self.assertIn('"text us"', redesign_instruction)
 
     def test_build_generator_rejects_uncontracted_ordered_list_markers(self):
         prospect = {
