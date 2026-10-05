@@ -398,12 +398,12 @@ change passed all 219 current tests.
 | Issue #52 | Each trust signal must be scored as its own complete phrase without letting layout recombine admitted fragments (preserves `PRRT_kwDOTDYaKM6fwRBN`). | Model-written `div` or `span` chips holding `Licensed`, `Insured`, and `Established in 2016` are rejected as one joined phrase. | fixed | `test_build_generator_scores_list_trust_strip_items_separately` admits the `ul.trust-strip-inner > li.trust-item` strip and rejects two `div` entries, two badges, or `Licensed and insured` inside one item, plus `dual-cta-row` Roof/Repair with and without `trust-item`; `test_build_prompt_requires_one_catalog_entry_per_trust_list_item` pins the prompt structure under the unverified-claim filter. |
 | Issue #51 (amendment) | A verified badge composed with an admitted call label and the verified phone must remain admissible in meaning-preserving orders. | The drees fixture's tel: CTA `Call (217) 857-6642 Available 24/7` is rejected under the production model. | fixed | `test_build_generator_admits_call_labels_with_verified_badge` admits `L <phone> <badge>` and `<badge> L <phone>` for both call labels under 24/7 and same-day evidence, and rejects `L <badge> <phone>` and an unverified 24/7 badge. |
 | Issue #53 (amendment) | Either source-owned business name may label the one brand home link, and only that link. | Althoff's model links the brand as `Althoff Plumbing, Inc.`, which is rejected as a non-neutral label. | fixed | `test_build_action_contract_binds_display_identity_to_page_top` admits the display identity and the legal name on `#top`, rejects both names on `#contact`, `#main`, `/`, `tel:`, and an external URL, rejects near-miss and composed brand labels, and proves equal names produce one pair. |
-| `PRRT_kwDOTDYaKM6fxENd` | Required services and pinned copy must render, not merely exist in the DOM. | `hidden` on the services grid, one card, a name, the `form-trust` line, the footer tagline or the benefits grid passes. | open (contract) | Planned tests: each hidden variant rejects; visible pages and non-required hidden elements still pass. |
-| `PRRT_kwDOTDYaKM6fxENf` | Source-owned bracketed text is not a prompt placeholder. | A correct page for service `Repair [Commercial]` fails with `unresolved prompt placeholders: [Commercial]`. | open (contract) | Planned tests: the bracketed service builds; a bracket token the source does not own still fails. |
-| `PRRT_kwDOTDYaKM6o14Ek` | Review-implying copy requires review evidence. | `Read All Reviews on Google`, `Read All on Google` and `Customer Reviews` pass as plain text with review mode `omit`. | open (contract) | Planned tests: all three reject without evidence; cards and aggregate modes still admit their own label; the action contract and catalog share one label source. |
-| `PRRT_kwDOTDYaKM6o14Eq` | Trade display forms the prompt prescribes must be admissible. | `Plumber`, `HVAC Contractor`, `Electrician` and `Cleaning Service` are rejected; only raw `plumber` passes. | open (contract) | Planned tests: each prescribed form admits for its trade; another trade's form and composed phrases still reject. |
-| `PRRT_kwDOTDYaKM6o14Ew` | Rendered copy cannot be visually reversed. | `<bdo dir="rtl">Service 1</bdo>` passes. | open (contract) | Planned tests: `bdo` rejects in services and other copy; plain `dir` stays allowed. |
-| `PRRT_kwDOTDYaKM6o2PID` | Image replacement text cannot split one rendered phrase. | `Roof<img alt="Repair">` with services Roof and Repair passes. | open (contract) | Planned tests: the composed phrase rejects; a decorative `alt=""` image and an image whose `alt` is its own whole entry still pass. |
+| `PRRT_kwDOTDYaKM6fxENd` | Required services and pinned copy must render, not merely exist in the DOM. | `hidden` on the services grid, one card, a name, the `form-trust` line, the footer tagline or the benefits grid passes. | fixed (`a8bb61f`) | `test_build_generator_rejects_hidden_required_content` rejects `hidden` on the services grid, a card, a name, a description, the `form-trust` line, the footer tagline and the benefits grid, and admits an optional hidden element. |
+| `PRRT_kwDOTDYaKM6fxENf` | Source-owned bracketed text is not a prompt placeholder. | A correct page for service `Repair [Commercial]` fails with `unresolved prompt placeholders: [Commercial]`. | fixed (`76019a3`) | `test_build_generator_admits_bracketed_source_service_names` builds `Repair [Commercial]` and still rejects a leaked `[TRADE_DISPLAY]`. |
+| `PRRT_kwDOTDYaKM6o14Ek` | Review-implying copy requires review evidence. | `Read All Reviews on Google`, `Read All on Google` and `Customer Reviews` pass as plain text with review mode `omit`. | fixed (`142f56d`) | `test_build_generator_gates_review_copy_on_review_evidence` rejects all three strings without evidence and pins `build_review_action_label()` against the action contract for omit, cards and aggregate, with and without a URL; existing review-card and aggregate tests still admit their labels. |
+| `PRRT_kwDOTDYaKM6o14Eq` | Trade display forms the prompt prescribes must be admissible. | `Plumber`, `HVAC Contractor`, `Electrician` and `Cleaning Service` are rejected; only raw `plumber` passes. | fixed (`8af9f66`) | `test_build_generator_admits_prescribed_trade_display_forms` admits every prescribed form for plumber, hvac, electrician and `cleaning service`, rejects another trade's form and `Your HVAC Contractor`, and checks every code form appears in the prompt. |
+| `PRRT_kwDOTDYaKM6o14Ew` | Rendered copy cannot be visually reversed. | `<bdo dir="rtl">Service 1</bdo>` passes. | fixed (`4fcdf8f`) | `test_build_generator_rejects_bdo_reversed_copy` rejects `bdo` on a service name and on other copy, and admits `dir="rtl"`. |
+| `PRRT_kwDOTDYaKM6o2PID` | Image replacement text cannot split one rendered phrase. | `Roof<img alt="Repair">` with services Roof and Repair passes. | fixed (`7ef211c`) | `test_build_generator_composes_image_text_with_adjacent_copy` rejects `Roof<img alt="Repair">` directly and inside a `span`, and admits `alt=""` and a whole-entry `alt`; the nested-owner change also covers `label`/`output`/`svg`. |
 
 ## Intentional
 
@@ -465,6 +465,44 @@ change passed all 219 current tests.
   separate `main` slice.
 
 ## Verification
+
+### Open review threads evidence (2026-10-05)
+
+This evidence is based on implementation commit `7ef211c`. Each of the six fixes
+was written test-first, and each new test failed against the pre-fix code.
+
+```bash
+python3 -B -m unittest discover -s tests
+# Ran 453 tests, OK (skipped=34); 447 before the six fixes plus the six new tests
+
+python3 -m compileall -q build.py pipeline.py connect_provider.py lib tests
+# Exit 0
+
+bash scripts/local_pr_review.sh
+# local PR review passed
+
+PYTHONUNBUFFERED=1 GENERATION_TIMEOUT_SECONDS=1800 \
+  python3 build.py examples/prospect-plumber-template.json \
+  --skip-image-gen --skip-email-draft --skip-deploy
+# Exit 0 on a clean git archive of 7ef211c; local:qwen3-30b-a3b:latest.
+# The first attempt failed the existing one-form rule; the one correction passed.
+```
+
+The fixture wrote a fresh `outputs/builds/drees-plumbing-inc/index.html`:
+- 71,887 bytes, SHA-256
+  `375e93f5275d5bd3619d72048cc2bcf6e84b9703cc6ac76c92b48aa1cbbd1b67`
+- log SHA-256 `d92d21a40cda93947d34678061d4e9a369d475783995945a6cf8491bce675a96`
+
+Both `AGENTS.md` guard greps returned 0.
+
+**Production-model matrix.** The five prospects were built with local Qwen3.5-9B
+(greedy) at `df180f2` (code identical to `e0f045a`) and at `7ef211c`. Olney and
+Niebrugge built on the first attempt both times. Althoff, the plumber fixture
+and Pruemers were rejected both times on model-invented classes (`theme-civic`,
+`broadcast`, `nav-cta-btn`; issue #56). Before the fixes, Althoff's rejection
+was invented copy.
+
+No rejection in either run came from the six new rules.
 
 ### Issues #51-#53 evidence (2026-10-04)
 
