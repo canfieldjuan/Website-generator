@@ -5516,6 +5516,41 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             for form in forms:
                 self.assertIn(f"`{form}`", prompt)
 
+    def test_build_generator_rejects_bdo_reversed_copy(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        reversed_bodies = {
+            "service name": COMPLETE_BUILD_BODY.replace(
+                '<div class="service-card-name">Service 1</div>',
+                '<div class="service-card-name"><bdo dir="rtl">Service 1</bdo></div>',
+            ),
+            "other copy": COMPLETE_BUILD_BODY.replace(
+                "</nav>", '<p><bdo dir="rtl">Request Service</bdo></p></nav>'
+            ),
+        }
+        for name, body in reversed_bodies.items():
+            with self.subTest(name=name), self.assertRaisesRegex(GeneratedBodyError, "bdo"):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+
+        # `dir` does not reverse letters within a word, so it stays allowed.
+        with_dir = COMPLETE_BUILD_BODY.replace("</nav>", '<p dir="rtl">Request Service</p></nav>')
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(with_dir)),
+        )
+        self.assertIn('<p dir="rtl">Request Service</p>', html)
+
     def test_build_prompt_requires_one_catalog_entry_per_trust_list_item(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         build.generate_build_html(

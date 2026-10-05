@@ -3647,6 +3647,13 @@ def _validate_visible_copy(
             if isinstance(candidate, Tag)
         )
 
+    # A bidirectional override reverses the displayed characters while the text nodes still match
+    # the catalog; `dir` alone does not reverse letters within a word and stays allowed.
+    if any(is_visually_exposed(element) for element in body_root.find_all("bdo")):
+        raise GeneratedBodyError(
+            "Generated body reverses rendered copy with a bdo bidirectional override."
+        )
+
     accessible_text, resolve_references, _, replacement_text = (
         _build_accessibility_text_resolver(
             body_root,
