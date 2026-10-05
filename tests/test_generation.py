@@ -5397,6 +5397,33 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn("<div hidden>", html)
 
+    def test_build_generator_admits_bracketed_source_service_names(self):
+        services = ("Repair [Commercial]", "Drain Cleaning")
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(services),
+        }
+        body = COMPLETE_BUILD_BODY.replace(COMPLETE_SERVICES_GRID, services_grid(services))
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(body)),
+        )
+        self.assertIn('<div class="service-card-name">Repair [Commercial]</div>', html)
+
+        # A bracket token the source does not own is still a leaked prompt placeholder.
+        leaked = body.replace("</nav>", "<p>[TRADE_DISPLAY]</p></nav>")
+        with self.assertRaisesRegex(GeneratedBodyError, "unresolved prompt placeholders"):
+            build.generate_build_html(
+                prospect,
+                config(),
+                FakeLocalClient(local_chat_payload(leaked)),
+            )
+
     def test_build_prompt_requires_one_catalog_entry_per_trust_list_item(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         build.generate_build_html(

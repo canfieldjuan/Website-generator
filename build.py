@@ -1845,6 +1845,18 @@ def generate_build_html(prospect, generation_config=None, client=None):
         PromptPart(prospect_block),
         PromptPart(response_boundary),
     )
+    # The response boundary carries the exact service scaffold, so a source service's own
+    # bracketed text (e.g. "Repair [Commercial]") is source-owned, not a leaked prompt placeholder.
+    source_service_tokens = set(extract_square_placeholder_tokens(*prospect["services"]))
+    forbidden_square_placeholders = tuple(
+        token
+        for token in extract_square_placeholder_tokens(
+            system_prompt,
+            static_block,
+            response_boundary,
+        )
+        if token not in source_service_tokens
+    )
 
     def admit(candidate):
         return assemble_generated_html(
@@ -1856,11 +1868,7 @@ def generate_build_html(prospect, generation_config=None, client=None):
             title=prospect.get("display_name") or prospect["business_name"],
             body_theme="theme-light",
             trusted_head_comment=build_deployment_comment(prospect),
-            forbidden_square_placeholders=extract_square_placeholder_tokens(
-                system_prompt,
-                static_block,
-                response_boundary,
-            ),
+            forbidden_square_placeholders=forbidden_square_placeholders,
             forbidden_visible_phrases=unverified_service_claim_phrases(prospect),
             forbidden_comment_markers=BUILD_DEPLOYMENT_COMMENT_MARKERS,
             forbidden_class_names=interior_only_classes,
