@@ -1,5 +1,5 @@
 {
-  "_comment": "Verified data: business_name, address, phone, FB-only status, owner_first_name='Clint' (confirmed 2026-05-17 by salesperson). years_in_business=10 / established_year=2016 per salesperson report -- treat as authoritative even though BBB filing date is 12/14/2015 (BBB filing != founding). family_owned left null pending confirmation; named-after-owner pattern strongly suggests yes but not yet verified.",
+  "_comment": "Verified data: business_name, address, phone, FB-only status, owner_first_name='Clint' (confirmed 2026-05-17 by salesperson). years_in_business=10 / established_year=2016 per salesperson report -- treat as authoritative even though BBB filing date is 12/14/2015 (BBB filing != founding). family_owned left null pending confirmation; named-after-owner pattern strongly suggests yes but not yet verified. The included customer review directly supports sanitary lift pump replacement as a service.",
   "business_name": "Althoff Plumbing, Inc.",
   "trade": "plumber",
   "city": "Effingham",
@@ -14,7 +14,7 @@
   "has_24_7": null,
   "service_radius": "Effingham, Teutopolis, Altamont, Dieterich, and surrounding communities within 25 miles",
   "hours": null,
-  "services": [],
+  "services": ["Sanitary lift pump replacement"],
   "address": "612 E North Ave, Effingham, IL 62401",
   "google_business_url": null,
   "google_review_score": 4.0,

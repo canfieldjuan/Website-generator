@@ -20,12 +20,27 @@ describe("prospect projection", () => {
     expect(fields.state).toBe("");
   });
 
-  it("rejects unsupported known values instead of silently rewriting them", () => {
-    expect(() => fieldsFromProspect({ trade: "roofer" })).toThrow("trade");
+  it("accepts an arbitrary business type without silently rewriting it", () => {
+    expect(fieldsFromProspect({ trade: "  cleaning service  " }).trade).toBe(
+      "cleaning service",
+    );
     expect(() => fieldsFromProspect({ phone: 2175550100 })).toThrow("phone");
+    expect(() => fieldsFromProspect({ trade: 42 })).toThrow("trade");
+    expect(() => fieldsFromProspect({ trade: "   " })).toThrow("trade");
     expect(() => fieldsFromProspect({ services: ["Repair", 42] })).toThrow(
       "services",
     );
+  });
+
+  it("round trips an arbitrary business type through the existing trade key", () => {
+    const imported = { trade: "cleaning service" };
+    const fields = fieldsFromProspect(imported);
+    fields.trade = "commercial cleaning";
+
+    expect(
+      mergeProspectFields(imported, fields, new Set(["trade"])).trade,
+    ).toBe("commercial cleaning");
+    expect(imported.trade).toBe("cleaning service");
   });
 
   it("preserves unknown imported fields while updating human fields", () => {
