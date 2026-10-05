@@ -5352,6 +5352,51 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(root_link)),
             )
 
+    def test_build_generator_rejects_hidden_required_content(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        hidden_variants = {
+            "services grid": ('<div class="services-grid">', '<div class="services-grid" hidden>'),
+            "one service card": ('<div class="service-card">', '<div class="service-card" hidden>'),
+            "service name": ('<div class="service-card-name">Service 1</div>',
+                             '<div class="service-card-name" hidden>Service 1</div>'),
+            "service description": ('<p class="service-card-desc">Ask us about Service 1</p>',
+                                    '<p class="service-card-desc" hidden>Ask us about Service 1</p>'),
+            "form-trust line": ('<p class="form-trust">', '<p class="form-trust" hidden>'),
+            "footer tagline": ('<div class="ft-tagline">', '<div class="ft-tagline" hidden>'),
+            "benefits grid": ('<div class="benefits-grid">', '<div class="benefits-grid" hidden>'),
+        }
+        for name, (visible, hidden) in hidden_variants.items():
+            body = COMPLETE_BUILD_BODY.replace(visible, hidden, 1)
+            self.assertNotEqual(body, COMPLETE_BUILD_BODY, name)
+            with self.subTest(name=name), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "hides required",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+
+        # Hiding content the contract does not require stays allowed.
+        optional_hidden = COMPLETE_BUILD_BODY.replace(
+            "</nav>",
+            '<div hidden><p>Request Service</p></div></nav>',
+        )
+        html = build.generate_build_html(
+            prospect,
+            config(),
+            FakeLocalClient(local_chat_payload(optional_hidden)),
+        )
+        self.assertIn("<div hidden>", html)
+
     def test_build_prompt_requires_one_catalog_entry_per_trust_list_item(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         build.generate_build_html(

@@ -2740,12 +2740,24 @@ def _required_child_sequence_mismatches(
     return mismatches
 
 
+def _require_rendered(element: Tag, body_root: Tag, label: str) -> None:
+    """Required content must be visible: reject it when it or an ancestor is render-suppressed."""
+    for candidate in (element, *element.parents):
+        if not isinstance(candidate, Tag):
+            continue
+        if is_render_suppressed_element(candidate):
+            raise GeneratedBodyError(f"Generated body hides required {label}.")
+        if candidate is body_root:
+            break
+
+
 def _validate_service_cards(body_root: Tag, expected_services: object) -> None:
     services = _contract_text_values(expected_services, "Expected service")
     cards = _elements_with_class(body_root, "service-card")
     actual_names: list[str] = []
     actual_descriptions: list[str] = []
     for card in cards:
+        _require_rendered(card, body_root, "service card")
         names = [
             child
             for child in card.find_all(True, recursive=False)
@@ -2755,6 +2767,7 @@ def _validate_service_cards(body_root: Tag, expected_services: object) -> None:
             raise GeneratedBodyError(
                 "Generated body service card names do not have one direct owner per card."
             )
+        _require_rendered(names[0], body_root, "service card name")
         value = names[0].get_text(" ", strip=True)
         if not value:
             raise GeneratedBodyError("Generated body service card names cannot be empty.")
@@ -2769,6 +2782,7 @@ def _validate_service_cards(body_root: Tag, expected_services: object) -> None:
             raise GeneratedBodyError(
                 "Generated body service card descriptions do not have one direct owner per card."
             )
+        _require_rendered(descriptions[0], body_root, "service card description")
         value = descriptions[0].get_text(" ", strip=True)
         if not value:
             raise GeneratedBodyError(
@@ -3613,9 +3627,12 @@ def _validate_visible_copy(
                 f"Visible-copy {class_name}",
             )
         )
+        owners = _elements_with_class(body_root, class_name)
+        for owner in owners:
+            _require_rendered(owner, body_root, f"{class_name} copy")
         actual = tuple(
-            _normalize_source_owned_text(element.get_text(" ", strip=True))
-            for element in _elements_with_class(body_root, class_name)
+            _normalize_source_owned_text(owner.get_text(" ", strip=True))
+            for owner in owners
         )
         if actual != normalized_expected:
             raise GeneratedBodyError(
