@@ -486,6 +486,26 @@ def build_services_response_scaffold(services):
     )
 
 
+# The trade display forms the build prompt prescribes ([TRADE_DISPLAY], references/06-build-prompt.md):
+# the heading form, then the mid-sentence form.
+BUILD_TRADE_DISPLAY_FORMS = {
+    "plumber": ("Plumber", "plumber"),
+    "hvac": ("HVAC Contractor", "HVAC contractor"),
+    "electrician": ("Electrician", "electrician"),
+}
+
+
+def expected_build_trade_display_forms(prospect):
+    """The exact trade display strings the prompt prescribes for this prospect."""
+    trade = prospect["trade"].strip()
+    known = BUILD_TRADE_DISPLAY_FORMS.get(trade.casefold())
+    if known:
+        return known
+    # An unmapped trade: the title-case form of the exact source value, then the value itself.
+    title = " ".join(word[:1].upper() + word[1:] for word in trade.split())
+    return tuple(dict.fromkeys((title, trade)))
+
+
 def expected_build_display_name(prospect):
     """Return the exact source-owned display identity used in generated copy."""
     display_name = prospect.get("display_name")
@@ -539,6 +559,7 @@ def expected_build_visible_copy(
         if isinstance(value, str) and value.strip():
             allowed.append(value.strip())
     allowed.append(display_name)
+    allowed.extend(expected_build_trade_display_forms(prospect))
     allowed.extend(
         (
             f"Serving {prospect['city']}, {prospect['state']}.",

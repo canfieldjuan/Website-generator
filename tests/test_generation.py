@@ -5471,6 +5471,51 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                     else:
                         self.assertNotIn(label, labels)
 
+    def test_build_generator_admits_prescribed_trade_display_forms(self):
+        base = {
+            "business_name": "Test Business",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        cases = (
+            ("plumber", ("Plumber", "plumber")),
+            ("hvac", ("HVAC Contractor", "HVAC contractor")),
+            ("electrician", ("Electrician", "electrician")),
+            ("cleaning service", ("Cleaning Service", "cleaning service")),
+        )
+        for trade, forms in cases:
+            self.assertEqual(build.expected_build_trade_display_forms({"trade": trade}), forms)
+            for form in forms:
+                body = COMPLETE_BUILD_BODY.replace("</nav>", f"<p>{form}</p></nav>")
+                with self.subTest(trade=trade, form=form):
+                    html = build.generate_build_html(
+                        {**base, "trade": trade},
+                        config(),
+                        FakeLocalClient(local_chat_payload(body)),
+                    )
+                    self.assertIn(f"<p>{form}</p>", html)
+
+        # Another trade's form and composed phrases stay outside the catalog.
+        for copy in ("Plumber", "Your HVAC Contractor"):
+            body = COMPLETE_BUILD_BODY.replace("</nav>", f"<p>{copy}</p></nav>")
+            with self.subTest(copy=copy), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    {**base, "trade": "hvac"},
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+
+        # The prompt prescribes exactly the code-owned forms.
+        prompt = Path("references/06-build-prompt.md").read_text(encoding="utf-8")
+        for forms in build.BUILD_TRADE_DISPLAY_FORMS.values():
+            for form in forms:
+                self.assertIn(f"`{form}`", prompt)
+
     def test_build_prompt_requires_one_catalog_entry_per_trust_list_item(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         build.generate_build_html(
