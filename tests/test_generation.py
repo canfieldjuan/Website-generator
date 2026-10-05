@@ -5551,6 +5551,42 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         )
         self.assertIn('<p dir="rtl">Request Service</p>', html)
 
+    def test_build_generator_composes_image_text_with_adjacent_copy(self):
+        services = ("Roof", "Repair")
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(services),
+        }
+        base = COMPLETE_BUILD_BODY.replace(COMPLETE_SERVICES_GRID, services_grid(services))
+        for composed in (
+            '<p>Roof<img alt="Repair"></p>',
+            '<p>Roof<span><img alt="Repair"></span></p>',
+        ):
+            body = base.replace("</nav>", f"{composed}</nav>")
+            with self.subTest(composed=composed), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+
+        for separate in ('<p><img alt=""> Roof</p>', '<p><img alt="Repair"></p>'):
+            body = base.replace("</nav>", f"{separate}</nav>")
+            with self.subTest(separate=separate):
+                html = build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+                self.assertIn(separate.split(">", 1)[0], html)
+
     def test_build_prompt_requires_one_catalog_entry_per_trust_list_item(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         build.generate_build_html(

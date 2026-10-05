@@ -360,7 +360,7 @@ ACCESSIBLE_TEXT_OWNER_TAGS = frozenset(
 )
 INDEPENDENT_LAYOUT_ITEM_TAGS = ACCESSIBLE_TEXT_OWNER_TAGS | frozenset(("li",))
 NATIVE_LAYOUT_COMPOSITION_TAGS = frozenset(("tr",))
-NATIVE_INLINE_COMPOSITION_TAGS = frozenset(("label", "output", "svg"))
+NATIVE_INLINE_COMPOSITION_TAGS = frozenset(("img", "label", "output", "svg"))
 AMBIENT_REVIEW_STAR_CLASSES = frozenset(("cta-trust-stars", "trust-stars"))
 REQUIRED_FOOTER_CLASS_COUNTS = (
     ("site-footer", 1),
@@ -3669,6 +3669,10 @@ def _validate_visible_copy(
         if not isinstance(node, Tag) or not is_visually_exposed(node):
             return ""
         if node.name.casefold() in VISIBLE_TEXT_OWNER_BOUNDARY_TAGS:
+            # Inline-composing owners (img, label, output, svg) render inside the surrounding run even
+            # when nested in a phrasing wrapper, so their text joins it; other boundaries end it.
+            if node.name.casefold() in NATIVE_INLINE_COMPOSITION_TAGS:
+                return complete_visible_text(node)
             return ""
         replacement = replacement_text(node)
         if replacement:
