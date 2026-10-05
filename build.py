@@ -126,7 +126,6 @@ BUILD_FIXED_VISIBLE_COPY = (
     "Not sure if we cover your area?",
     "Services",
     "Why Choose Us",
-    "Customer Reviews",
     "Your name",
     "Phone number",
     "Email (optional)",
@@ -136,8 +135,6 @@ BUILD_FIXED_VISIBLE_COPY = (
     "Schedule My Service",
     "Hours",
     "Service Area",
-    "Read All on Google",
-    "Read All Reviews on Google",
     "out of 5",
     "or",
 )
@@ -421,6 +418,13 @@ def expected_build_form_action(prospect):
     return "#"
 
 
+def build_review_action_label(review_contract):
+    """The one review link label, owned only by a review contract with a source reviews URL."""
+    if not review_contract.reviews_url:
+        return None
+    return "Read All on Google" if review_contract.mode == "cards" else "Read All Reviews on Google"
+
+
 def expected_build_action_url_contract(prospect, review_contract):
     form_action = expected_build_form_action(prospect)
     allowed_urls = []
@@ -433,13 +437,9 @@ def expected_build_action_url_contract(prospect, review_contract):
         for label in BUILD_FORM_SUBMIT_LABELS
     ]
     allowed_pairs.extend(BUILD_CODE_OWNED_ACTION_PAIRS)
-    if review_contract.reviews_url:
+    review_label = build_review_action_label(review_contract)
+    if review_label:
         allowed_urls.append(review_contract.reviews_url)
-        review_label = (
-            "Read All on Google"
-            if review_contract.mode == "cards"
-            else "Read All Reviews on Google"
-        )
         allowed_labels.append(review_label)
         allowed_pairs.append((review_label, review_contract.reviews_url))
     business_name = prospect.get("business_name")
@@ -637,6 +637,13 @@ def expected_build_visible_copy(
     if isinstance(years_in_business, int) and not isinstance(years_in_business, bool):
         allowed.append(f"{years_in_business} years in business")
 
+    # Review-implying copy needs review evidence: the heading with any review mode, the link
+    # label only when the review contract owns a reviews URL (the same rule the action contract uses).
+    if review_contract.mode != "omit":
+        allowed.append("Customer Reviews")
+    review_label = build_review_action_label(review_contract)
+    if review_label:
+        allowed.append(review_label)
     if review_contract.mode == "cards":
         for review in review_contract.source_reviews:
             allowed.extend(

@@ -5424,6 +5424,53 @@ class AtomicWriteAndCliTests(unittest.TestCase):
                 FakeLocalClient(local_chat_payload(leaked)),
             )
 
+    def test_build_generator_gates_review_copy_on_review_evidence(self):
+        prospect = {
+            "business_name": "Test Business",
+            "trade": "plumber",
+            "city": "Effingham",
+            "state": "IL",
+            "phone": "217-555-0100",
+            "services": list(DEFAULT_BUILD_SERVICES),
+        }
+        for copy in (
+            "<h2>Customer Reviews</h2>",
+            "<p>Read All on Google</p>",
+            "<p>Read All Reviews on Google</p>",
+        ):
+            body = COMPLETE_BUILD_BODY.replace("</nav>", f"{copy}</nav>")
+            with self.subTest(copy=copy), self.assertRaisesRegex(
+                GeneratedBodyError,
+                "visible copy outside the source-owned catalog",
+            ):
+                build.generate_build_html(
+                    prospect,
+                    config(),
+                    FakeLocalClient(local_chat_payload(body)),
+                )
+
+        # One owner for the review link label: the catalog and the action contract agree.
+        url = "https://www.google.com/maps/place/test-business"
+        cases = (
+            (ReviewAdmissionContract(mode="omit"), None),
+            (ReviewAdmissionContract(mode="cards", reviews_url=url), "Read All on Google"),
+            (ReviewAdmissionContract(mode="aggregate", aggregate_score=4.5, aggregate_count=10,
+                                     reviews_url=url), "Read All Reviews on Google"),
+            (ReviewAdmissionContract(mode="aggregate", aggregate_score=4.5, aggregate_count=10), None),
+        )
+        for review_contract, expected in cases:
+            with self.subTest(mode=review_contract.mode, url=review_contract.reviews_url):
+                self.assertEqual(build.build_review_action_label(review_contract), expected)
+                labels = build.expected_build_action_url_contract(
+                    {"formspree_endpoint": "https://source.test/form"},
+                    review_contract,
+                ).allowed_labels
+                for label in ("Read All on Google", "Read All Reviews on Google"):
+                    if label == expected:
+                        self.assertIn(label, labels)
+                    else:
+                        self.assertNotIn(label, labels)
+
     def test_build_prompt_requires_one_catalog_entry_per_trust_list_item(self):
         client = FakeLocalClient(local_chat_payload(COMPLETE_BUILD_BODY))
         build.generate_build_html(
@@ -5456,9 +5503,9 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             "services": list(DEFAULT_BUILD_SERVICES),
         }
         unsupported_lists = (
-            '<ol><li>Customer Reviews</li></ol>',
-            '<ol start="500"><li>Customer Reviews</li></ol>',
-            '<ul><li value="500">Customer Reviews</li></ul>',
+            '<ol><li>Service Area</li></ol>',
+            '<ol start="500"><li>Service Area</li></ol>',
+            '<ul><li value="500">Service Area</li></ul>',
         )
         for rendered_list in unsupported_lists:
             unsupported = COMPLETE_BUILD_BODY.replace(
@@ -5478,7 +5525,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
         supported = COMPLETE_BUILD_BODY.replace(
             '<section class="dual-cta-hero"></section>',
             '<section class="dual-cta-hero">'
-            '<ul><li>Customer Reviews</li></ul>'
+            '<ul><li>Service Area</li></ul>'
             '</section>',
         )
         html = build.generate_build_html(
@@ -5486,7 +5533,7 @@ class AtomicWriteAndCliTests(unittest.TestCase):
             config(),
             FakeLocalClient(local_chat_payload(supported)),
         )
-        self.assertIn('<ul><li>Customer Reviews</li></ul>', html)
+        self.assertIn('<ul><li>Service Area</li></ul>', html)
 
     def test_arbitrary_business_hero_fallback_is_business_neutral(self):
         prompt = build.build_hero_prompt(
