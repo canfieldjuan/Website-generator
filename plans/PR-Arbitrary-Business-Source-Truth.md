@@ -57,6 +57,9 @@ mandatory `services` field; unrelated cleanup remains excluded.
 11. Let the nav brand link to the top of the page under a source-owned
     business name (issue #53): the code-owned display identity or the legal
     name. The link is bound to one same-document destination.
+12. Close the six open review threads of 2026-09-07 and 2026-10-04. Each was
+    reproduced on `e0f045a` before this contract; three proved broader than
+    reported.
 
 ### Files touched
 
@@ -300,6 +303,83 @@ exactly one pair to `#top`. They are deduplicated when the two are equal.
 Every other destination, near-miss name, and composed brand label still
 fails. This supersedes the "display identity only" binding above.
 
+### Open review threads (2026-10-05)
+
+Each finding below was reproduced through `build.generate_build_html` on
+`e0f045a` before this contract was written.
+
+**Required content must render (`PRRT_kwDOTDYaKM6fxENd`, P1).**
+`_validate_service_cards` (`lib/generation.py:2743`) reads names and
+descriptions with `get_text()`. `_validate_visible_copy` skips everything
+under a render-suppressed ancestor. So a `hidden` attribute on the services
+grid, on one card, or on a name passes every check, while visitors see no
+services.
+
+The same hole is broader than the thread says. The pinned `required_class_text`
+owners are read with `get_text()` too, and a hidden `form-trust` line, footer
+tagline, or benefits grid also passes.
+
+Fix: one helper, using the existing `is_render_suppressed_element`, rejects
+any of these when it or an ancestor is render-suppressed:
+- a service card, or its name or description owner;
+- a required-class text owner.
+
+**Source brackets are not prompt placeholders (`PRRT_kwDOTDYaKM6fxENf`, P2).**
+The response boundary carries the exact service scaffold, so
+`extract_square_placeholder_tokens` (`build.py:1859`) collects a source
+service's own `[Commercial]` as a forbidden placeholder. Every correct page
+for `Repair [Commercial]` is rejected.
+
+Fix: subtract the bracket tokens that occur in the prospect's source service
+names from the forbidden set. Bracketed tokens that the source does not own
+still fail.
+
+**Review copy needs review evidence (`PRRT_kwDOTDYaKM6o14Ek`, P1).**
+`BUILD_FIXED_VISIBLE_COPY` admits `Read All on Google`,
+`Read All Reviews on Google` and `Customer Reviews` on every page, review
+evidence or not. Plain text such as `<p>Read All Reviews on Google</p>` passes
+with no reviews. (`Customer Reviews` is broader than the thread; `out of 5` is
+already caught by the ambient-score gate.)
+
+Fix:
+- Move all three into the catalog's review branch.
+- `Customer Reviews` is admitted only when the review mode is not `omit`.
+- The link label is admitted only when the review contract has a
+  `reviews_url`. It comes from one helper that the action contract also uses
+  (`build.py:439-441`), so the two cannot drift.
+
+**Trade display forms are code-owned (`PRRT_kwDOTDYaKM6o14Eq`, P2).**
+The prompt maps trades to display forms (`references/06-build-prompt.md:68-83`):
+- `plumber` to `Plumber`/`plumber`;
+- `hvac` to `HVAC Contractor`/`HVAC contractor`;
+- `electrician` to `Electrician`/`electrician`;
+- otherwise, the title case of the source value.
+
+The catalog admits only the raw `trade` value (`build.py:529`). So `Plumber`,
+`HVAC Contractor`, `Electrician` and `Cleaning Service` are all rejected. This
+is broader than the thread, which named only new trades.
+
+Fix: one code-owned function returns the admitted display forms, and the
+catalog admits exactly those. The prompt rule is unchanged, because it already
+names those forms.
+
+**No character-order overrides on rendered copy (`PRRT_kwDOTDYaKM6o14Ew`, P2).**
+`<bdo dir="rtl">Service 1</bdo>` passes, while the browser shows the name
+reversed. The template has no `direction` or `unicode-bidi` CSS, and the
+inline-style allowlist cannot set either.
+
+Fix: the build's visible-copy gate rejects any exposed `bdo` element.
+`dir` stays allowed, because it does not reverse letters within a word.
+
+**Image replacement text joins its inline run (`PRRT_kwDOTDYaKM6o2PID`, P1).**
+`img` is a boundary tag (`lib/generation.py:346`). So in `Roof<img alt="Repair">`
+the text and the `alt` are admitted separately, while a browser without the
+image, or a screen reader, presents "Roof Repair". This is the same class as
+`PRRT_kwDOTDYaKM6fwkA1`, which already joins `label`, `output` and `svg`.
+
+Fix: add `img` to `NATIVE_INLINE_COMPOSITION_TAGS`. A simulation of that one
+change passed all 219 current tests.
+
 ## Latest review finding ledger
 
 | Finding/thread | Affected invariant | Current reproduction | Disposition | Proof |
@@ -318,8 +398,21 @@ fails. This supersedes the "display identity only" binding above.
 | Issue #52 | Each trust signal must be scored as its own complete phrase without letting layout recombine admitted fragments (preserves `PRRT_kwDOTDYaKM6fwRBN`). | Model-written `div` or `span` chips holding `Licensed`, `Insured`, and `Established in 2016` are rejected as one joined phrase. | fixed | `test_build_generator_scores_list_trust_strip_items_separately` admits the `ul.trust-strip-inner > li.trust-item` strip and rejects two `div` entries, two badges, or `Licensed and insured` inside one item, plus `dual-cta-row` Roof/Repair with and without `trust-item`; `test_build_prompt_requires_one_catalog_entry_per_trust_list_item` pins the prompt structure under the unverified-claim filter. |
 | Issue #51 (amendment) | A verified badge composed with an admitted call label and the verified phone must remain admissible in meaning-preserving orders. | The drees fixture's tel: CTA `Call (217) 857-6642 Available 24/7` is rejected under the production model. | fixed | `test_build_generator_admits_call_labels_with_verified_badge` admits `L <phone> <badge>` and `<badge> L <phone>` for both call labels under 24/7 and same-day evidence, and rejects `L <badge> <phone>` and an unverified 24/7 badge. |
 | Issue #53 (amendment) | Either source-owned business name may label the one brand home link, and only that link. | Althoff's model links the brand as `Althoff Plumbing, Inc.`, which is rejected as a non-neutral label. | fixed | `test_build_action_contract_binds_display_identity_to_page_top` admits the display identity and the legal name on `#top`, rejects both names on `#contact`, `#main`, `/`, `tel:`, and an external URL, rejects near-miss and composed brand labels, and proves equal names produce one pair. |
+| `PRRT_kwDOTDYaKM6fxENd` | Required services and pinned copy must render, not merely exist in the DOM. | `hidden` on the services grid, one card, a name, the `form-trust` line, the footer tagline or the benefits grid passes. | open (contract) | Planned tests: each hidden variant rejects; visible pages and non-required hidden elements still pass. |
+| `PRRT_kwDOTDYaKM6fxENf` | Source-owned bracketed text is not a prompt placeholder. | A correct page for service `Repair [Commercial]` fails with `unresolved prompt placeholders: [Commercial]`. | open (contract) | Planned tests: the bracketed service builds; a bracket token the source does not own still fails. |
+| `PRRT_kwDOTDYaKM6o14Ek` | Review-implying copy requires review evidence. | `Read All Reviews on Google`, `Read All on Google` and `Customer Reviews` pass as plain text with review mode `omit`. | open (contract) | Planned tests: all three reject without evidence; cards and aggregate modes still admit their own label; the action contract and catalog share one label source. |
+| `PRRT_kwDOTDYaKM6o14Eq` | Trade display forms the prompt prescribes must be admissible. | `Plumber`, `HVAC Contractor`, `Electrician` and `Cleaning Service` are rejected; only raw `plumber` passes. | open (contract) | Planned tests: each prescribed form admits for its trade; another trade's form and composed phrases still reject. |
+| `PRRT_kwDOTDYaKM6o14Ew` | Rendered copy cannot be visually reversed. | `<bdo dir="rtl">Service 1</bdo>` passes. | open (contract) | Planned tests: `bdo` rejects in services and other copy; plain `dir` stays allowed. |
+| `PRRT_kwDOTDYaKM6o2PID` | Image replacement text cannot split one rendered phrase. | `Roof<img alt="Repair">` with services Roof and Repair passes. | open (contract) | Planned tests: the composed phrase rejects; a decorative `alt=""` image and an image whose `alt` is its own whole entry still pass. |
 
 ## Intentional
+
+- Render-suppression is enforced only for content the contract requires (services, pinned class owners); other
+  hidden elements stay allowed, as their copy is already outside visible-copy admission.
+- `bdo` is rejected; `dir` is not, since it does not reverse a word's letters, and the shared redesign flow may
+  legitimately carry right-to-left source sites.
+- Trade display forms are code-owned exact strings, not a casing rule in the gate; composed phrases such as
+  `Licensed Plumber` stay rejected (issue #55).
 
 - Keep the JSON field named `trade` for compatibility with existing files and
   integrations.
@@ -365,6 +458,7 @@ fails. This supersedes the "display identity only" binding above.
 - Build-prompt example copy that the catalog rejects remains issue #55. The
   examples are the `<br>`-split footer address, `Licensed and insured.`, the
   industry trust-signal phrasings, and the stale BASE_TEMPLATE input line.
+- An image inside a layout item still makes that item independent of the layout join; that remains issue #54.
 - `main` keeps rejecting brand links until this PR merges. Its build flow has
   no deterministic display identity to bind, because the model derives that
   identity from a prose rule. So issue #53 is fixed here rather than in a
